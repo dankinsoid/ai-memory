@@ -12,3 +12,4 @@ resources/public/js/
 .lsp/
 .idea/
 .cache/
+.calva/
