@@ -23,9 +23,42 @@ services:
     environment:
       - DATOMIC_URI=datomic:dev://datomic:4334/ai-memory
       - PORT=8080
+      - EMBEDDING_URL=http://embedding:80
+      - QDRANT_URL=http://qdrant:6333
     depends_on:
       datomic:
         condition: service_healthy
+      embedding:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
+    ports:
+      - "8090:80"
+    volumes:
+      - embedding-models:/data
+    environment:
+      - MODEL_ID=sentence-transformers/all-MiniLM-L6-v2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   prometheus:
     image: prom/prometheus:latest
@@ -48,5 +81,7 @@ services:
 
 volumes:
   datomic-data:
+  embedding-models:
+  qdrant-data:
   prometheus-data:
   grafana-data:
