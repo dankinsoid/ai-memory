@@ -12,7 +12,7 @@ ai-memory — graph-based long-term memory system for AI agents. Memory is a wei
 - **Database:** Datomic (free, Apache 2.0) — primary candidate. Alternatives under consideration: XTDB, Postgres+pgvector
 - **Infrastructure:** Docker Compose (app, DB, metrics, auth, logs)
 - **Agent interface:** MCP server (compact top-k recall, server-side traversal)
-- **Visualization:** Web-based graph visualization (D3.js / sigma.js — TBD)
+- **Visualization:** Web-based graph visualization (D3.js / sigma.js — TBD), ClojureScript frontend
 
 ## Architecture
 
@@ -22,6 +22,48 @@ ai-memory — graph-based long-term memory system for AI agents. Memory is a wei
 - **Retrieval:** two-phase — vector search for entry points, then spreading activation with adaptive depth. Depth is a query parameter, not a constant.
 - **Decay:** lazy, computed on access: `effective_weight = base_weight * decay_factor ^ (current_cycle - last_access_cycle)`. Time = work cycles, not wall-clock.
 - **Token efficiency:** all heavy logic (traversal, vector search, decay) server-side. Agents receive only compact top-k results.
+
+## Development
+
+```bash
+# REPL (with nREPL + CIDER middleware)
+clj -M:dev
+
+# Run app directly
+clj -M:run
+
+# Run tests (kaocha)
+clj -M:test
+
+# Run a single test namespace
+clj -M:test --focus ai-memory.decay.core-test
+
+# ClojureScript dev build (shadow-cljs)
+npx shadow-cljs watch app
+
+# Build uberjar
+clj -T:build uber
+
+# Docker
+docker compose up
+```
+
+In REPL, use `(start)`, `(stop)`, `(restart)` from `dev/user.clj` to manage the system.
+
+## Project Structure
+
+- `src/ai_memory/` — backend (Clojure)
+  - `core.clj` — entry point, system startup
+  - `config.clj` — configuration from env vars
+  - `db/` — Datomic connection and schema
+  - `graph/` — node CRUD, edge CRUD, spreading activation traversal
+  - `decay/` — weight decay computation
+  - `mcp/` — MCP server for agent memory access
+  - `web/` — Ring HTTP handler, REST API for visualization
+- `src-ui/ai_memory/ui/` — frontend (ClojureScript + Reagent)
+- `resources/schema.edn` — Datomic schema (nodes, edges, enums)
+- `dev/user.clj` — REPL helpers
+- `test/` — tests (kaocha)
 
 ## Architecture Decision Records
 

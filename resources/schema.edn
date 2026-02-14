@@ -1,0 +1,76 @@
+[;; --- Node ---
+ {:db/ident       :node/id
+  :db/valueType   :db.type/uuid
+  :db/cardinality :db.cardinality/one
+  :db/unique      :db.unique/identity
+  :db/doc         "Unique node identifier"}
+
+ {:db/ident       :node/content
+  :db/valueType   :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/fulltext    true
+  :db/doc         "Node content — one thought, 1-3 sentences"}
+
+ {:db/ident       :node/type
+  :db/valueType   :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Node type: fact, decision, preference, pattern, project, domain"}
+
+ {:db/ident       :node/scope
+  :db/valueType   :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Scope: global or project-scoped"}
+
+ {:db/ident       :node/tags
+  :db/valueType   :db.type/string
+  :db/cardinality :db.cardinality/many
+  :db/doc         "Free-form tags for filtering"}
+
+ {:db/ident       :node/weight
+  :db/valueType   :db.type/double
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Base weight (before decay)"}
+
+ {:db/ident       :node/cycle
+  :db/valueType   :db.type/long
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Last access/reinforcement cycle"}
+
+ ;; --- Edge ---
+ {:db/ident       :edge/id
+  :db/valueType   :db.type/uuid
+  :db/cardinality :db.cardinality/one
+  :db/unique      :db.unique/identity
+  :db/doc         "Unique edge identifier"}
+
+ {:db/ident       :edge/from
+  :db/valueType   :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Source node"}
+
+ {:db/ident       :edge/to
+  :db/valueType   :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Target node"}
+
+ {:db/ident       :edge/weight
+  :db/valueType   :db.type/double
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Edge weight (association strength)"}
+
+ {:db/ident       :edge/cycle
+  :db/valueType   :db.type/long
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Last reinforcement cycle"}
+
+ ;; --- Enums: Node Types ---
+ {:db/ident :node.type/fact}
+ {:db/ident :node.type/decision}
+ {:db/ident :node.type/preference}
+ {:db/ident :node.type/pattern}
+ {:db/ident :node.type/project}
+ {:db/ident :node.type/domain}
+
+ ;; --- Enums: Scopes ---
+ {:db/ident :node.scope/global}
+ {:db/ident :node.scope/project}]
