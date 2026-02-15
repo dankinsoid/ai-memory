@@ -1,4 +1,4 @@
-{:deps   true
+{:deps   {:aliases [:cljs]}
  :builds {:app {:target   :browser
                 :output-dir "resources/public/js"
                 :asset-path "/js"

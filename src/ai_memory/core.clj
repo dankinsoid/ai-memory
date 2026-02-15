@@ -9,7 +9,8 @@
   (let [conn (db/connect (:datomic-uri config))]
     (db/ensure-schema conn)
     (let [server (web/start {:port (:port config)
-                             :conn conn})]
+                             :conn conn
+                             :cfg  config})]
       (log/info "ai-memory started on port" (:port config))
       {:conn conn :server server})))
 

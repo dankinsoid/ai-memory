@@ -1,10 +1,13 @@
 (ns ai-memory.ui.core
-  (:require [reagent.dom :as rdom]))
+  (:require [reagent.dom.client :as rdc]
+            [ai-memory.ui.graph :as graph]))
+
+(defonce root (atom nil))
 
 (defn app []
-  [:div {:style {:padding "2rem"}}
-   [:h1 "ai-memory"]
-   [:p "Graph visualization will be here."]])
+  [:div [graph/graph-view]])
 
 (defn ^:export init []
-  (rdom/render [app] (.getElementById js/document "app")))
+  (when-not @root
+    (reset! root (rdc/create-root (.getElementById js/document "app"))))
+  (rdc/render @root [app]))

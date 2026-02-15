@@ -20,6 +20,13 @@
          [?from :node/id ?from-id]]
        db node-id))
 
+(defn find-all [db]
+  (d/q '[:find [(pull ?e [:edge/id :edge/weight :edge/cycle
+                          {:edge/from [:node/id]}
+                          {:edge/to   [:node/id]}]) ...]
+         :where [?e :edge/id]]
+       db))
+
 (defn strengthen [conn edge-id amount current-cycle]
   @(d/transact conn
      [{:edge/id     edge-id
