@@ -63,6 +63,12 @@
   :db/cardinality :db.cardinality/one
   :db/doc         "Last reinforcement cycle"}
 
+ ;; --- Global tick ---
+ {:db/ident       :tick/value
+  :db/valueType   :db.type/long
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Global monotonic tick counter"}
+
  ;; --- Enums: Node Types ---
  {:db/ident :node.type/fact}
  {:db/ident :node.type/decision}

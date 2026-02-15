@@ -13,7 +13,21 @@
       edn/read-string))
 
 (defn ensure-schema [conn]
-  @(d/transact conn (load-schema)))
+  @(d/transact conn (load-schema))
+  ;; Tick singleton (must be separate tx — attribute must exist first)
+  (when-not (d/entid (d/db conn) :tick/singleton)
+    @(d/transact conn [{:db/ident :tick/singleton :tick/value 0}])))
 
 (defn db [conn]
   (d/db conn))
+
+(defn current-tick [db]
+  (or (:tick/value (d/pull db [:tick/value] :tick/singleton)) 0))
+
+(defn increment-tick!
+  "Atomically increments global tick. Returns new tick value."
+  [conn]
+  (let [db   (d/db conn)
+        tick (inc (current-tick db))]
+    @(d/transact conn [{:db/id :tick/singleton :tick/value tick}])
+    tick))

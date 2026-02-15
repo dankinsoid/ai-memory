@@ -13,6 +13,7 @@
         ["/graph" {:get (fn [req] (api/get-graph conn req))}]
         ["/nodes" {:get  (fn [req] (api/list-nodes conn req))
                    :post (fn [req] (api/create-node conn cfg req))}]
+        ["/remember" {:post (fn [req] (api/remember conn cfg req))}]
         ["/recall" {:post (fn [req] (api/recall conn cfg req))}]]]
       {:data {:muuntaja   m/instance
               :middleware [muuntaja/format-middleware]}})

@@ -1,8 +1,8 @@
 (ns ai-memory.mcp.server
   "MCP server for agent memory access.
    Tools: recall, remember, reinforce."
-  (:require [ai-memory.graph.node :as node]
-            [ai-memory.graph.traverse :as traverse]
+  (:require [ai-memory.graph.traverse :as traverse]
+            [ai-memory.graph.write :as write]
             [ai-memory.db.core :as db]))
 
 ;; TODO: implement MCP protocol (JSON-RPC over stdio/SSE)
@@ -14,16 +14,15 @@
   (let [db            (db/db conn)
         ;; TODO: vector search to find entry nodes
         entry-nodes   []
-        current-cycle 0] ;; TODO: track cycles
+        current-tick  (db/current-tick db)]
     (traverse/recall db {:entry-nodes   entry-nodes
                          :k             (or k 10)
-                         :current-cycle current-cycle})))
+                         :current-cycle current-tick})))
 
 (defn handle-remember
-  "Stores a new memory node with associations."
-  [conn {:keys [content node-type scope associations]}]
-  (node/create-node conn {:content   content
-                          :node-type (or node-type :fact)
-                          :scope     (or scope :node.scope/global)})
-  ;; TODO: create edges to associated nodes
-  )
+  "Stores memory nodes with automatic associations and deduplication.
+   `params`:
+     :nodes      — vec of {:content, :node-type, :scope, :tags}
+     :context-id — optional session/conversation ID"
+  [conn cfg params]
+  (write/remember conn cfg params))

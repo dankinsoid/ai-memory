@@ -2,6 +2,7 @@
   (:require [ai-memory.db.core :as db]
             [ai-memory.graph.node :as node]
             [ai-memory.graph.edge :as edge]
+            [ai-memory.graph.write :as write]
             [datomic.api :as d]))
 
 (defn- node->d3 [n]
@@ -41,6 +42,12 @@
     (node/create-node conn cfg body)
     {:status 201
      :body   {:status "created"}}))
+
+(defn remember [conn cfg req]
+  (let [body (:body-params req)
+        result (write/remember conn cfg body)]
+    {:status 201
+     :body   result}))
 
 (defn recall [conn cfg req]
   ;; TODO: integrate with traverse/recall
