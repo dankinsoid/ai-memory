@@ -4,24 +4,81 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-ai-memory — graph-based long-term memory system for AI agents. Memory is a weighted graph where nodes are units of knowledge (facts, decisions, preferences, patterns) and edges are associations that strengthen or decay over work cycles. Designed for years of use across many projects.
+ai-memory — long-term memory system for AI agents. Designed for years of use across many projects, making agents more personalized and capable of learning.
 
 ## Tech Stack
 
 - **Language:** Clojure
-- **Database:** Datomic (free, Apache 2.0) — primary candidate. Alternatives under consideration: XTDB, Postgres+pgvector
+- **Database:** Datomic (free, Apache 2.0)
 - **Infrastructure:** Docker Compose (app, DB, metrics, auth, logs)
-- **Agent interface:** MCP server (compact top-k recall, server-side traversal)
-- **Visualization:** Web-based graph visualization (D3.js / sigma.js — TBD), ClojureScript frontend
+- **Agent interface:** MCP server (local, reads ~/.claude directly)
+- **Visualization:** TBD (ClojureScript frontend)
 
 ## Architecture
 
-- **Graph model:** flat graph with typed nodes and hub nodes (project, domain hubs as natural aggregation points). No nested subgraphs.
-- **Node granularity:** one thought per node (1-3 sentences). Atomic but meaningful.
-- **Node types:** fact, decision, preference, pattern, project (hub), domain (hub). May evolve into tags.
-- **Retrieval:** two-phase — vector search for entry points, then spreading activation with adaptive depth. Depth is a query parameter, not a constant.
-- **Decay:** lazy, computed on access: `effective_weight = base_weight * decay_factor ^ (current_cycle - last_access_cycle)`. Time = work cycles, not wall-clock.
-- **Token efficiency:** all heavy logic (traversal, vector search, decay) server-side. Agents receive only compact top-k results.
+### Data Model — Two Layers
+
+| Layer | Storage | Content | Size |
+|-------|---------|---------|------|
+| **Facts** | Datomic | title + content (1-3 sentences) + tags | ~200 bytes |
+| **Blobs** | Files | Conversations, code, docs — anything too large for a fact | 1-500 KB |
+
+Facts reference blobs via `:memory/source`. Agent reads fact first, drills into blob on demand.
+
+### Tag Taxonomy — Primary Retrieval
+
+Facts carry tags. Tags are organized in a navigable tree (taxonomy):
+
+```
+tags/
+  languages/ (clojure, python, typescript, ...)
+  patterns/ (error-handling, state-management, ...)
+  projects/ (ai-memory, client-x, ...)
+  preferences/ (coding-style, tooling, ...)
+```
+
+One fact → many tags from different branches. No duplication.
+
+Three retrieval channels (all return the same facts):
+1. **Taxonomy navigation** — browse tag tree → select branch → get facts
+2. **Tag intersection** — query facts by tag combination
+3. **Vector search** — semantic search → facts with tags → expand via taxonomy
+
+### Graph Edges — Write-Only (Experimental)
+
+The edge pipeline (`graph/write.clj`) continues creating edges between facts (batch, context, global). Data accumulates passively.
+
+- **Write path:** tags + edges (both active)
+- **Read path:** tags only (edges ignored for now)
+- **Later:** experiment with edge-based retrieval on accumulated graph data
+
+`graph/traverse.clj` and `decay/` are paused — not used in retrieval.
+
+### Blob Storage — Lazy Access
+
+```
+data/blobs/{blob-id}/
+  meta.edn          ← summary + chunk index (agent reads first)
+  chunk-000.jsonl    ← part 1
+  chunk-001.jsonl    ← part 2
+```
+
+For Claude Code sessions: MCP server reads `~/.claude/projects/.../*.jsonl` directly, extracts user/assistant messages, stores cleaned chunks.
+
+### Memory Ingestion via MCP
+
+Agent calls `memory_remember` after meaningful exchanges:
+```
+memory_remember({
+  session_id: "...",
+  turn_summary: "Discussed error handling approach",
+  facts: [{title: "...", tags: [...]}]
+})
+```
+
+- Agent provides summary + facts (~50-100 extra tokens)
+- MCP server reads full message text from ~/.claude JSONL (0 token cost)
+- Server stores facts in Datomic, chunks in blob storage
 
 ## Development
 
@@ -56,15 +113,20 @@ In REPL, use `(start)`, `(stop)`, `(restart)` from `dev/user.clj` to manage the 
   - `core.clj` — entry point, system startup
   - `config.clj` — configuration from env vars
   - `db/` — Datomic connection and schema
-  - `graph/` — node CRUD, edge CRUD, spreading activation traversal
-  - `decay/` — weight decay computation
+  - `graph/` — write pipeline (active), traversal (⚠ paused)
+  - `decay/` — ⚠ paused (weight decay computation)
   - `mcp/` — MCP server for agent memory access
-  - `web/` — Ring HTTP handler, REST API for visualization
+  - `web/` — Ring HTTP handler, REST API
 - `src-ui/ai_memory/ui/` — frontend (ClojureScript + Reagent)
-- `resources/schema.edn` — Datomic schema (nodes, edges, enums)
+- `resources/schema.edn` — Datomic schema
+- `data/blobs/` — blob storage (conversations, docs, code)
 - `dev/user.clj` — REPL helpers
 - `test/` — tests (kaocha)
 
 ## Architecture Decision Records
 
 Design decisions and rationale are documented in `doc/adr/`. Read these before making architectural changes.
+
+Key ADRs:
+- **ADR-009** — Tag taxonomy as primary retrieval (supersedes graph retrieval)
+- **ADR-010** — Blob storage for large content

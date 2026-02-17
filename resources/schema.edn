@@ -1,4 +1,8 @@
-[;; --- Node ---
+[;; Schema: nodes (facts) + edges (associations).
+ ;; Nodes are active (facts with tags). Edges accumulate write-only.
+ ;; Retrieval via tag taxonomy (ADR-009). Tag schema TBD.
+
+ ;; --- Node ---
  {:db/ident       :node/id
   :db/valueType   :db.type/uuid
   :db/cardinality :db.cardinality/one
@@ -16,14 +20,11 @@
   :db/cardinality :db.cardinality/one
   :db/doc         "Node type: fact, decision, preference, pattern, project, domain"}
 
- {:db/ident       :node/scope
-  :db/valueType   :db.type/ref
-  :db/cardinality :db.cardinality/one
-  :db/doc         "Scope: global or project-scoped"}
 
  {:db/ident       :node/tags
   :db/valueType   :db.type/string
   :db/cardinality :db.cardinality/many
+  :db/index       true
   :db/doc         "Free-form tags for filtering"}
 
  {:db/ident       :node/weight
@@ -76,7 +77,6 @@
  {:db/ident :node.type/pattern}
  {:db/ident :node.type/project}
  {:db/ident :node.type/domain}
+ {:db/ident :node.type/entity}
 
- ;; --- Enums: Scopes ---
- {:db/ident :node.scope/global}
- {:db/ident :node.scope/project}]
+]

@@ -1,3 +1,6 @@
+;; ⚠ EXPERIMENTAL — part of graph-based memory approach, paused.
+;; See CLAUDE.md for context.
+
 (ns ai-memory.decay.core)
 
 (defn effective-weight

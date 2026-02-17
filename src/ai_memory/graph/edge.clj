@@ -1,3 +1,7 @@
+;; Edge CRUD — ACTIVE (used by write pipeline).
+;; Edges accumulate for future graph retrieval experiments.
+;; Current read path uses tag taxonomy only (see ADR-009).
+
 (ns ai-memory.graph.edge
   (:require [datomic.api :as d]))
 

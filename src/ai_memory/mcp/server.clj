@@ -22,7 +22,7 @@
 (defn handle-remember
   "Stores memory nodes with automatic associations and deduplication.
    `params`:
-     :nodes      — vec of {:content, :node-type, :scope, :tags}
+     :nodes      — vec of {:content, :node-type, :tags}
      :context-id — optional session/conversation ID"
   [conn cfg params]
   (write/remember conn cfg params))

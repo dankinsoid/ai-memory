@@ -1,3 +1,7 @@
+;; ⚠ PAUSED — spreading activation retrieval.
+;; Not used in current read path (tag taxonomy, see ADR-009).
+;; Kept for future experiments once enough edge data accumulates.
+
 (ns ai-memory.graph.traverse
   (:require [ai-memory.graph.edge :as edge]
             [ai-memory.decay.core :as decay]))

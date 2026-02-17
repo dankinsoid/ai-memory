@@ -1,3 +1,8 @@
+;; Write pipeline — ACTIVE.
+;; Creates edges between facts (batch, context, global).
+;; Edge data accumulates for future graph-based retrieval experiments.
+;; Current read path uses tag taxonomy only (see ADR-009).
+
 (ns ai-memory.graph.write
   "Orchestrates memory write pipeline: dedup, batch edges, context edges.
    Context state lives in RAM with TTL — no DB pollution."
@@ -69,21 +74,30 @@
   [factor min-weight]
   (long (Math/floor (/ (Math/log min-weight) (Math/log factor)))))
 
+(defn- entity-node? [node-data]
+  (= (keyword (name (:node-type node-data))) :entity))
+
+(defn- find-duplicate-node
+  "Entity nodes: exact content match. Other nodes: vector search."
+  [db cfg content node-data opts]
+  (if (entity-node? node-data)
+    (node/find-entity-by-content db content)
+    (try
+      (node/find-duplicate db cfg content (:dedup-threshold opts))
+      (catch Exception e
+        (log/warn e "Dedup search failed, creating new node")
+        nil))))
+
 (defn- process-node
   "Dedup check + create or reinforce. Returns {:id uuid :status :created/:reinforced}."
   [conn cfg node-data tick opts]
-  (let [{:keys [dedup-threshold reinforcement-delta]} opts
-        db         (db/db conn)
-        duplicate  (try
-                     (node/find-duplicate db cfg (:content node-data) dedup-threshold)
-                     (catch Exception e
-                       (log/warn e "Dedup search failed, creating new node")
-                       nil))]
+  (let [db         (db/db conn)
+        duplicate  (find-duplicate-node db cfg (:content node-data) node-data opts)]
     (if duplicate
       (let [node-uuid (:node/id duplicate)]
         (node/reinforce-node conn cfg node-uuid
                              (:content node-data)
-                             reinforcement-delta
+                             (:reinforcement-delta opts)
                              tick)
         {:id node-uuid :status :reinforced})
       (let [result (node/create-node conn cfg (assoc node-data :tick tick))]
@@ -144,7 +158,7 @@
   "Writes memory nodes with automatic associations.
    Increments global tick on each call.
    `params`:
-     :nodes      — vec of {:content, :node-type, :scope, :tags}
+     :nodes      — vec of {:content, :node-type, :tags}
      :context-id — string: session-scoped linking (RAM cache)
                    :global: link to all recent nodes (DB query by tick)
                    nil: no context edges, only batch"

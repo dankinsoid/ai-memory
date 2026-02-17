@@ -1,34 +1,39 @@
+;; Node CRUD — ACTIVE (used by write pipeline).
+;; See ADR-009 for retrieval architecture.
+
 (ns ai-memory.graph.node
   (:require [datomic.api :as d]
             [ai-memory.embedding.core :as embedding]
             [ai-memory.embedding.vector-store :as vs]
             [clojure.tools.logging :as log]))
 
+(defn- entity-type? [node-type-kw]
+  (= node-type-kw :node.type/entity))
+
 (defn create-node
-  "Creates a memory node in Datomic, embeds content, stores vector in Qdrant.
+  "Creates a memory node in Datomic. Embeds content in Qdrant unless entity type.
    `cfg` — {:embedding-url, :qdrant-url}."
-  [conn cfg {:keys [content node-type scope tags tick]}]
+  [conn cfg {:keys [content node-type tags tick]}]
   (let [node-uuid (d/squuid)
         node-type-kw (keyword "node.type" (name node-type))
-        scope-kw (or scope :node.scope/global)
         tags (or tags [])
         tx-result @(d/transact conn
                      [{:db/id        (d/tempid :db.part/user)
                        :node/id      node-uuid
                        :node/content content
                        :node/type    node-type-kw
-                       :node/scope   scope-kw
                        :node/tags    tags
                        :node/weight  1.0
                        :node/cycle   (or tick 0)}])]
-    (try
-      (let [vector (embedding/embed (:embedding-url cfg) content)]
-        (vs/upsert-point! (:qdrant-url cfg)
-                          (str node-uuid)
-                          vector
-                          {}))
-      (catch Exception e
-        (log/warn e "Failed to vectorize node" node-uuid)))
+    (when-not (entity-type? node-type-kw)
+      (try
+        (let [vector (embedding/embed (:embedding-url cfg) content)]
+          (vs/upsert-point! (:qdrant-url cfg)
+                            (str node-uuid)
+                            vector
+                            {}))
+        (catch Exception e
+          (log/warn e "Failed to vectorize node" node-uuid))))
     {:tx-result tx-result
      :node-uuid node-uuid}))
 
@@ -59,25 +64,40 @@
                (>= (:search/score (first results)) threshold))
       (first results))))
 
+(defn find-entity-by-content
+  "Finds an entity node by exact content match. Returns entity map or nil."
+  [db content]
+  (let [eid (d/q '[:find ?e .
+                   :in $ ?content
+                   :where
+                   [?e :node/type :node.type/entity]
+                   [?e :node/content ?content]]
+                 db content)]
+    (when eid
+      (d/pull db '[*] eid))))
+
 (defn reinforce-node
-  "Reinforces existing node: updates content, re-embeds, bumps weight."
+  "Reinforces existing node: bumps weight and cycle. Re-embeds unless entity."
   [conn cfg node-uuid new-content delta current-cycle]
   (let [db (d/db conn)
-        current-weight (or (:node/weight (d/pull db [:node/weight] [:node/id node-uuid])) 1.0)
-        new-weight (+ current-weight delta)]
+        node (d/pull db [:node/weight :node/type] [:node/id node-uuid])
+        current-weight (or (:node/weight node) 1.0)
+        new-weight (+ current-weight delta)
+        is-entity (= (get-in node [:node/type :db/ident]) :node.type/entity)]
     @(d/transact conn
        [{:node/id      node-uuid
          :node/content new-content
          :node/weight  new-weight
          :node/cycle   current-cycle}])
-    (try
-      (let [vector (embedding/embed (:embedding-url cfg) new-content)]
-        (vs/upsert-point! (:qdrant-url cfg)
-                          (str node-uuid)
-                          vector
-                          {}))
-      (catch Exception e
-        (log/warn e "Failed to re-vectorize node" node-uuid)))))
+    (when-not is-entity
+      (try
+        (let [vector (embedding/embed (:embedding-url cfg) new-content)]
+          (vs/upsert-point! (:qdrant-url cfg)
+                            (str node-uuid)
+                            vector
+                            {}))
+        (catch Exception e
+          (log/warn e "Failed to re-vectorize node" node-uuid))))))
 
 (defn find-recent
   "Returns node IDs with cycle >= min-tick."
