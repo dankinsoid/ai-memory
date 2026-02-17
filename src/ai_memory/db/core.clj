@@ -23,7 +23,17 @@
   (when-not (d/entid (d/db conn) :tick/singleton)
     @(d/transact conn [{:db/ident :tick/singleton :tick/value 0}]))
   ;; Seed root tag categories (idempotent via :tag/path identity)
-  @(d/transact conn (load-seed-tags)))
+  @(d/transact conn (load-seed-tags))
+  ;; Tx function: atomic tag count increment (runs on transactor)
+  @(d/transact conn
+    [{:db/ident :fn/inc-tag-count
+      :db/fn (d/function
+               {:lang   "clojure"
+                :params '[db tag-path delta]
+                :code   '(let [e       (datomic.api/entity db [:tag/path tag-path])
+                               current (or (:tag/node-count e) 0)]
+                           [[:db/add [:tag/path tag-path]
+                             :tag/node-count (+ current delta)]])})}]))
 
 (defn db [conn]
   (d/db conn))

@@ -53,16 +53,33 @@
      :body   result}))
 
 (defn browse-tags [conn _cfg req]
-  (let [db   (db/db conn)
-        path (get-in req [:query-params "path"])]
+  (let [db    (db/db conn)
+        path  (get-in req [:query-params "path"])
+        depth (some-> (get-in req [:query-params "depth"]) parse-long)]
     {:status 200
-     :body   (tag-query/browse db path)}))
+     :body   (if depth
+               (tag-query/taxonomy db path depth)
+               (tag-query/browse db path))}))
 
 (defn create-tag [conn _cfg req]
   (let [{:keys [name parent-path]} (:body-params req)
         path (tag/create-tag! conn {:name name :parent-path parent-path})]
     {:status 201
      :body   {:tag/path path}}))
+
+(defn count-facts [conn cfg req]
+  (let [db       (db/db conn)
+        tag-sets (get-in req [:body-params :tag-sets])]
+    {:status 200
+     :body   {:counts (tag-query/count-by-tag-sets db (:metrics cfg) tag-sets)}}))
+
+(defn get-facts [conn cfg req]
+  (let [db       (db/db conn)
+        body     (:body-params req)
+        tag-sets (:tag-sets body)
+        limit    (:limit body 50)]
+    {:status 200
+     :body   {:results (tag-query/fetch-by-tag-sets db (:metrics cfg) tag-sets {:limit limit})}}))
 
 (defn recall [conn _cfg req]
   (let [db   (db/db conn)

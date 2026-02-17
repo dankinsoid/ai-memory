@@ -19,6 +19,11 @@
   :db/unique      :db.unique/identity
   :db/doc         "Materialized path, e.g. 'languages/clojure'. This is the tag identity."}
 
+ {:db/ident       :tag/node-count
+  :db/valueType   :db.type/long
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Materialized count of nodes with this tag. Maintained by write pipeline."}
+
  ;; --- Node ---
  {:db/ident       :node/id
   :db/valueType   :db.type/uuid

@@ -123,6 +123,10 @@ In REPL, use `(start)`, `(stop)`, `(restart)` from `dev/user.clj` to manage the 
 - `dev/user.clj` — REPL helpers
 - `test/` — tests (kaocha)
 
+## TODO Tracking
+
+`TODO.md` — актуальный чеклист реализации проекта. При любых изменениях (новая фича, завершение задачи, смена статуса) — обновлять `TODO.md` в том же коммите.
+
 ## Architecture Decision Records
 
 Design decisions and rationale are documented in `doc/adr/`. Read these before making architectural changes.

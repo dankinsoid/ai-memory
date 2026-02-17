@@ -1,6 +1,6 @@
 (ns ai-memory.mcp.server
   "MCP server for agent memory access.
-   Tools: recall (tag-based), remember, create-tag."
+   Tools: browse-tags, count-facts, get-facts, remember, create-tag."
   (:require [ai-memory.graph.write :as write]
             [ai-memory.tag.core :as tag]
             [ai-memory.tag.query :as tag-query]
@@ -9,22 +9,28 @@
 ;; TODO: implement MCP protocol (JSON-RPC over stdio/SSE)
 ;; For now, define the tool schemas and handlers.
 
-(defn handle-recall
-  "Recalls memories via tags.
-   Modes:
-     :browse — taxonomy navigation (returns tag tree with counts)
-     :tags   — tag intersection (returns nodes matching ALL tags)
-     :search — vector search (TODO: integrate with embeddings)"
-  [conn _cfg {:keys [mode tags path]}]
+(defn handle-browse-tags
+  "Navigates tag taxonomy with depth-limited tree.
+   `path`  — root of subtree (nil = full tree from roots)
+   `depth` — max levels to return (default 2)"
+  [conn _cfg {:keys [path depth] :or {depth 2}}]
   (let [db (db/db conn)]
-    (case mode
-      :browse  (tag-query/browse db path)
-      :tags    (tag-query/by-tags db {:tags tags})
-      :subtree (tag-query/by-subtree db (first tags))
-      ;; default: tag intersection if tags provided
-      (if (seq tags)
-        (tag-query/by-tags db {:tags tags})
-        (tag-query/browse db nil)))))
+    (tag-query/taxonomy db path depth)))
+
+(defn handle-count-facts
+  "Counts facts for each tag set (intersection). No entity pulls.
+   `tag-sets` — [[\"lang/clj\" \"pat/err\"] [\"lang/py\"]]"
+  [conn cfg {:keys [tag-sets]}]
+  (let [db (db/db conn)]
+    (tag-query/count-by-tag-sets db (:metrics cfg) tag-sets)))
+
+(defn handle-get-facts
+  "Fetches facts for each tag set (intersection) with per-set limit.
+   `tag-sets` — [[\"lang/clj\" \"pat/err\"] [\"lang/py\"]]
+   `limit`   — max facts per tag set (default 50)"
+  [conn cfg {:keys [tag-sets limit] :or {limit 50}}]
+  (let [db (db/db conn)]
+    (tag-query/fetch-by-tag-sets db (:metrics cfg) tag-sets {:limit limit})))
 
 (defn handle-create-tag
   "Creates a new tag in the taxonomy."
@@ -33,9 +39,6 @@
     {:tag/path path}))
 
 (defn handle-remember
-  "Stores memory nodes with automatic associations and deduplication.
-   `params`:
-     :nodes      — vec of {:content, :node-type, :tags}
-     :context-id — optional session/conversation ID"
+  "Stores memory nodes with automatic associations and deduplication."
   [conn cfg params]
   (write/remember conn cfg params))

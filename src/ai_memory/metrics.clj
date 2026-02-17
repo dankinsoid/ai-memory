@@ -48,6 +48,13 @@
     :memory/context-cache-size
     {:description "Active contexts in RAM cache"}))
 
+(def read-duration
+  (prometheus/histogram
+    :memory/read-duration-seconds
+    {:description "Read query duration"
+     :labels      [:operation]
+     :buckets     [0.001 0.005 0.01 0.05 0.1 0.25 0.5 1.0 5.0]}))
+
 ;; --- Registry ---
 
 (defn create-registry []
@@ -59,21 +66,23 @@
         write-edges-total
         write-nodes-total
         write-db-ops-total
-        context-cache-size)
+        context-cache-size
+        read-duration)
       (ring-collector/initialize)))
 
 ;; --- Nil-safe helpers ---
 
 (defmacro timed
-  "Measures body execution time in seconds, observes to write-duration histogram.
-   No-op when registry is nil — just evaluates body."
-  [registry phase & body]
+  "Measures body execution time. Observes to `histogram` with `labels`.
+   No-op when registry is nil — just evaluates body.
+   Usage: (timed registry write-duration {:phase \"nodes\"} (do-work))"
+  [registry histogram labels & body]
   `(let [reg# ~registry]
      (if reg#
        (let [start#   (System/nanoTime)
              result#  (do ~@body)
              elapsed# (/ (double (- (System/nanoTime) start#)) 1e9)]
-         (prometheus/observe reg# write-duration {:phase ~phase} elapsed#)
+         (prometheus/observe reg# ~histogram ~labels elapsed#)
          result#)
        (do ~@body))))
 

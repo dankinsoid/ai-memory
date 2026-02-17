@@ -2,6 +2,7 @@
   (:require [ai-memory.config :as config]
             [ai-memory.db.core :as db]
             [ai-memory.metrics :as metrics]
+            [ai-memory.scheduler :as scheduler]
             [ai-memory.web.handler :as web]
             [clojure.tools.logging :as log])
   (:gen-class))
@@ -13,9 +14,10 @@
     (db/ensure-schema conn)
     (let [server (web/start {:port (:port cfg)
                              :conn conn
-                             :cfg  cfg})]
+                             :cfg  cfg})
+          sched  (scheduler/start conn)]
       (log/info "ai-memory started on port" (:port cfg))
-      {:conn conn :server server :metrics registry})))
+      {:conn conn :server server :metrics registry :scheduler sched})))
 
 (defn -main [& _args]
   (let [config (config/load-config)]

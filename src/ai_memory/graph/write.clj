@@ -203,21 +203,21 @@
 
         ;; Phase: nodes
         results
-        (metrics/timed registry "nodes"
+        (metrics/timed registry metrics/write-duration {:phase "nodes"}
           (mapv #(process-node conn cfg % tick opts) (:nodes params)))
 
         node-ids (mapv :id results)
 
         ;; Phase: batch edges
         batch-stats
-        (metrics/timed registry "batch_edges"
+        (metrics/timed registry metrics/write-duration {:phase "batch_edges"}
           (if (> (count node-ids) 1)
             (create-batch-edges conn node-ids tick)
             empty-edge-stats))
 
         ;; Phase: context edges
         context-stats
-        (metrics/timed registry "context_edges"
+        (metrics/timed registry metrics/write-duration {:phase "context_edges"}
           (cond
             (= :global context-id)
             (create-global-edges conn tick node-ids opts)

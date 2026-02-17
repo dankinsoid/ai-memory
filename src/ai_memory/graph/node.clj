@@ -26,7 +26,8 @@
         tx-data (if (seq tag-refs)
                   (assoc base-tx :node/tag-refs tag-refs)
                   base-tx)
-        tx-result @(d/transact conn [tx-data])]
+        count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
+        tx-result @(d/transact conn (into [tx-data] count-txs))]
     (when-not (entity-type? node-type-kw)
       (try
         (let [vector (embedding/embed (:embedding-url cfg) content)]
@@ -113,12 +114,24 @@
        db min-tick))
 
 (defn update-tag-refs
-  "Adds tag refs to an existing node (additive — cardinality/many)."
+  "Adds tag refs to an existing node (additive — cardinality/many).
+   Increments tag counts only for tags not already on the node."
   [conn node-uuid tag-refs]
   (when (seq tag-refs)
-    @(d/transact conn
-       [{:node/id       node-uuid
-         :node/tag-refs tag-refs}])))
+    (let [db       (d/db conn)
+          existing (set (d/q '[:find [?path ...]
+                               :in $ ?nid
+                               :where
+                               [?n :node/id ?nid]
+                               [?n :node/tag-refs ?t]
+                               [?t :tag/path ?path]]
+                             db node-uuid))
+          new-refs (remove #(existing (second %)) tag-refs)
+          count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) new-refs)]
+      @(d/transact conn
+         (into [{:node/id       node-uuid
+                 :node/tag-refs tag-refs}]
+               count-txs)))))
 
 (defn find-by-type [db node-type]
   (d/q '[:find [(pull ?e [*]) ...]
