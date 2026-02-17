@@ -55,23 +55,32 @@
 ## MCP Server (agent interface)
 - [x] Handler functions: browse-tags, count-facts, get-facts, remember, create-tag (`mcp/server.clj`)
 - [x] MCP wire protocol: JSON-RPC 2.0 over stdio (`mcp/transport.clj`, `mcp/protocol.clj`, `mcp/main.clj`)
-- [x] Tool registry: 5 tools with JSON Schema input specs
+- [x] Tool registry: 9 tools with JSON Schema input specs
 - [x] Entry point: `clj -M:mcp` (stderr-only logging via `logback-mcp.xml`)
 - [x] Protocol tests (12 tests)
 - [ ] Register as MCP server in `~/.claude/settings`
 - [ ] End-to-end test: agent → MCP → remember → recall
 
 ## Blob Storage (ADR-010)
-- [ ] Blob directory structure (`data/blobs/{id}/meta.edn` + `chunk-*.jsonl`)
-- [ ] Write: chunk large content, write meta + chunks
-- [ ] Read: meta first, lazy chunk loading
-- [ ] Link facts → blobs via `:memory/source`
+- [x] Blob = Node model: `:node.type/conversation`, `:node.type/document` with `:node/blob-dir`
+- [x] Schema: `:node/created-at`, `:node/updated-at` (indexed), `:node/blob-dir`, `:node/sources` (many)
+- [x] Auto-timestamps: `create-node` sets both, `reinforce-node`/`update-tag-refs` bump `updated-at`
+- [x] Directory structure: `data/blobs/{YYYY-MM-DD}_{slug}/meta.edn` + section files
+- [x] Filesystem ops: write/read meta.edn and sections (`blob/store.clj`)
+- [x] Lazy access: meta first, section by index
+- [x] Fact → blob linking via `:node/sources` (set of `"dir/file"` strings)
+- [x] MCP tools: `memory_list_blobs`, `memory_read_blob`, `memory_store_conversation`, `memory_store_file`
+- [x] Compact text renderers for blob list and meta
+- [x] Source indicator in fact rendering (`[src: ...]`)
+- [x] Tests (12 tests, 25 assertions)
 
 ## Session Ingestion
-- [ ] Read `~/.claude/projects/.../*.jsonl`
-- [ ] Parse and clean user/assistant messages
-- [ ] Store as blob chunks
-- [ ] Extract facts from session context
+- [x] Read `~/.claude/projects/.../*.jsonl` (`blob/ingest.clj`)
+- [x] Parse and clean user/assistant text messages
+- [x] Strip system-reminder, ide, and hook tags
+- [x] Split by agent-guided boundaries or auto-split
+- [x] Format as clean markdown sections
+- [ ] End-to-end test: store-conversation with real session JSONL
 
 ## Frontend
 - [x] D3 force-directed graph visualization (`ui/graph.cljs`)

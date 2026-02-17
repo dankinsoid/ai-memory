@@ -60,10 +60,10 @@
       (is (some? (get-in resp [:result :capabilities :tools]))))))
 
 (deftest tools-list-test
-  (testing "returns all 5 tools with schemas"
+  (testing "returns all 9 tools with schemas"
     (let [resp  (call "tools/list")
           tools (get-in resp [:result :tools])]
-      (is (= 5 (count tools)))
+      (is (= 9 (count tools)))
       (is (every? :name tools))
       (is (every? :description tools))
       (is (every? :inputSchema tools)))))
@@ -73,7 +73,9 @@
     (let [resp  (call "tools/list")
           names (set (map :name (get-in resp [:result :tools])))]
       (is (= #{"memory_browse_tags" "memory_count_facts" "memory_get_facts"
-               "memory_create_tag" "memory_remember"}
+               "memory_create_tag" "memory_remember"
+               "memory_list_blobs" "memory_read_blob"
+               "memory_store_conversation" "memory_store_file"}
              names)))))
 
 (deftest ping-test

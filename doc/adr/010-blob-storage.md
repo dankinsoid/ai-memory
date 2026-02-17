@@ -1,6 +1,6 @@
 # ADR-010: Blob Storage for Large Content
 
-**Status:** Accepted
+**Status:** Accepted → Implemented
 **Date:** 2026-02-17
 
 ## Context
@@ -9,70 +9,104 @@ Facts in Datomic are compact (1-3 sentences). But some knowledge is too detailed
 
 ## Decision
 
+### Core Model: Blob = Node
+
+No separate blob entity. A blob is a regular node with special type (`:node.type/conversation`, `:node.type/document`) and a pointer to files on disk (`:node/blob-dir`). This reuses all existing infrastructure: tags, queries, write pipeline, MCP tools.
+
 ### Two-Layer Storage
 
 | Layer | Storage | Content | Record size |
 |-------|---------|---------|-------------|
-| **Facts** | Datomic | title + content (1-3 sentences) + tags | ~200 bytes |
-| **Blobs** | Files | Conversations, code, docs, configs — anything too large for a fact | ~1 KB - 500 KB |
+| **Blob node** | Datomic | summary + type + date + blob-dir + tags | ~200 bytes |
+| **meta.edn** | Files | Rich metadata: full summary, status, section index | ~500 bytes |
+| **Sections** | Files | Actual content: conversation sections, code, docs, images | 1 KB - 500 KB |
 
-### File Format
+### Schema Additions
 
-Each blob is a directory with `meta.edn` (summary + chunk index) and chunk files:
-
-```
-data/blobs/{blob-id}/
-  meta.edn          ← summary + chunk index (agent reads first)
-  chunk-000.jsonl    ← part 1
-  chunk-001.jsonl    ← part 2
-  ...
-```
-
-**meta.edn:**
-```clojure
-{:id        "b7676aa0-..."
- :type      :conversation          ;; :conversation, :code, :document, ...
- :project   "ai-memory"
- :date      #inst "2026-02-17"
- :summary   "Discussion: graph vs tree memory"
- :chunks
- [{:file "chunk-000.jsonl" :summary "Comparing graph vs tree"}
-  {:file "chunk-001.jsonl" :summary "Tag taxonomy design"}]}
-```
-
-Lazy access: agent reads `meta.edn` (~100 bytes), selects a chunk, reads only that chunk.
-
-### Source References from Facts
+Three attributes on the node entity + two type enums:
 
 ```clojure
-{:memory/source
- {:blob-id "b7676aa0-..."
-  :chunk   1}}
+:node/created-at  instant, indexed  — creation timestamp (auto-set)
+:node/updated-at  instant, indexed  — last modification timestamp (auto-set)
+:node/blob-dir    string            — directory name under data/blobs/
+:node/sources     string, many      — blob source refs on regular facts
+:node.type/conversation             — conversation blob
+:node.type/document                 — generic file blob
 ```
+
+Timestamps are set automatically by `create-node` (both) and updated by `reinforce-node` / `update-tag-refs` (`updated-at` only). All nodes get timestamps, not just blobs.
+
+### File Layout
+
+```
+data/blobs/
+  {YYYY-MM-DD}_{slug}/
+    meta.edn                      ← summary, status, section index
+    {NN}-{section-slug}.md        ← cleaned markdown sections
+```
+
+**Directory naming**: date prefix for filesystem sort, slug for readability.
+**Section files**: numbered for order, slugified summary for readability.
+
+**meta.edn (conversation):**
+```clojure
+{:id         #uuid "b7676aa0-..."
+ :type       :conversation
+ :title      "Blob storage design"
+ :project    "ai-memory"
+ :created-at #inst "2026-02-17T14:30:00Z"
+ :summary    "Designed blob storage architecture."
+ :status     "Completed. Next: implement write pipeline."
+ :session-id "321eaf1b-..."
+ :continues  nil
+ :tags       ["projects/ai-memory" "architecture"]
+ :sections
+ [{:file "01-requirements.md" :summary "Requirements discussion" :lines 42}
+  {:file "02-design.md"       :summary "Directory structure"     :lines 67}]}
+```
+
+### Fact → Blob Linking
+
+Regular facts reference blob sources via `:node/sources` (cardinality many):
+
+```clojure
+{:node/sources #{"2026-02-17_blob-storage-design/02-design.md"}}
+```
+
+Format: `{blob-dir}/{section-file}`. Multiple sources allowed per fact.
 
 ### Conversation Ingestion
 
-For Claude Code sessions specifically:
+- Raw sessions: `~/.claude/projects/{path}/{session-id}.jsonl`
+- MCP server reads JSONL, extracts user/assistant text messages
+- Strips system tags, thinking blocks, tool_use/tool_result
+- Splits by logical sections (agent-guided boundaries or auto-split)
+- Formats as clean markdown: `**User**: ... **Assistant**: ...`
 
-- Raw sessions live in `~/.claude/projects/{path}/{session-id}.jsonl`
-- MCP server runs locally — reads JSONL files directly from filesystem
-- Extracts user/assistant messages, discards noise (progress, snapshots)
-- Stores cleaned chunks in blob storage
+### MCP Tools
 
-Agent calls `memory_remember` with summary + facts (~50-100 tokens). MCP server reads full message text from `~/.claude` JSONL — zero token cost for the full text.
+| Tool | Purpose |
+|------|---------|
+| `memory_list_blobs` | List blobs sorted by date, filter by type |
+| `memory_read_blob` | Read meta or specific section content |
+| `memory_store_conversation` | Store conversation from session JSONL |
+| `memory_store_file` | Store generic file as blob |
 
-### Other Blob Types
+Lazy access: list → read meta → read section.
 
-Same storage model works for any large content:
-- Code snippets with explanation
-- Architecture documents
-- Configuration examples
-- Error logs with analysis
+### Agent Access Flow
+
+```
+Path A — tags:  get_facts → see blob summary → read_blob(section)
+Path B — list:  list_blobs(type=conversation) → read_blob → read_blob(section)
+Path C — drill: get_facts → fact with [src: ...] → read_blob(section)
+```
 
 ## Consequences
 
-- Datomic stays lean — only compact facts with tags
-- Large content accessible on demand via blob references
-- Lazy access: summary → chunk selection → chunk read
-- No extra LLM calls — the calling agent provides summaries
-- Extensible to any content type, not just conversations
+- Datomic stays lean — blob nodes are regular nodes with extra attributes
+- Blob summaries appear in tag queries alongside regular facts
+- Lazy access: browse → metadata → specific section
+- No extra LLM calls — agent provides summaries
+- Extensible to any content type
+- Date-sorted directories for human browsing

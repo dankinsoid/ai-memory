@@ -57,6 +57,28 @@
   :db/cardinality :db.cardinality/one
   :db/doc         "Last access/reinforcement cycle"}
 
+ {:db/ident       :node/created-at
+  :db/valueType   :db.type/instant
+  :db/cardinality :db.cardinality/one
+  :db/index       true
+  :db/doc         "Creation timestamp (ms). Set once, never changes. Indexed for sorting."}
+
+ {:db/ident       :node/updated-at
+  :db/valueType   :db.type/instant
+  :db/cardinality :db.cardinality/one
+  :db/index       true
+  :db/doc         "Last modification timestamp (ms). Updated on every write."}
+
+ {:db/ident       :node/blob-dir
+  :db/valueType   :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Blob directory name under data/blobs/, e.g. '2026-02-17_blob-storage-design'"}
+
+ {:db/ident       :node/sources
+  :db/valueType   :db.type/string
+  :db/cardinality :db.cardinality/many
+  :db/doc         "Blob source refs. Format: 'dir-name/section-file'. Multiple sources allowed."}
+
  ;; --- Edge ---
  {:db/ident       :edge/id
   :db/valueType   :db.type/uuid
@@ -98,5 +120,7 @@
  {:db/ident :node.type/project}
  {:db/ident :node.type/domain}
  {:db/ident :node.type/entity}
+ {:db/ident :node.type/conversation}
+ {:db/ident :node.type/document}
 
 ]
