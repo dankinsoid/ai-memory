@@ -1,15 +1,12 @@
 services:
   datomic:
-    image: eclipse-temurin:21-jre
+    build: docker/datomic
     volumes:
       - datomic-data:/data
-      - ./datomic:/opt/datomic
     ports:
       - "4334:4334"
       - "4335:4335"
       - "4336:4336"
-    command: >
-      sh -c "cd /opt/datomic && bin/transactor config/dev-transactor.properties"
     healthcheck:
       test: ["CMD", "sh", "-c", "echo > /dev/tcp/localhost/4334"]
       interval: 10s
