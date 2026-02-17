@@ -75,7 +75,9 @@
 
 ## Frontend
 - [x] D3 force-directed graph visualization (`ui/graph.cljs`)
-- [ ] Tag taxonomy browser UI
+- [x] Tab navigation: Graph / Tags (`ui/core.cljs`)
+- [x] HTTP fetch utility (`ui/http.cljs`)
+- [x] Tag taxonomy browser — D3 collapsible tree, multi-select, facts panel (`ui/tags.cljs`)
 - [ ] Search / filter interface
 - [ ] Node detail view
 
