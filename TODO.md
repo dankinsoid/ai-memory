@@ -54,7 +54,10 @@
 
 ## MCP Server (agent interface)
 - [x] Handler functions: browse-tags, count-facts, get-facts, remember, create-tag (`mcp/server.clj`)
-- [ ] MCP wire protocol (JSON-RPC over stdio/SSE)
+- [x] MCP wire protocol: JSON-RPC 2.0 over stdio (`mcp/transport.clj`, `mcp/protocol.clj`, `mcp/main.clj`)
+- [x] Tool registry: 5 tools with JSON Schema input specs
+- [x] Entry point: `clj -M:mcp` (stderr-only logging via `logback-mcp.xml`)
+- [x] Protocol tests (12 tests)
 - [ ] Register as MCP server in `~/.claude/settings`
 - [ ] End-to-end test: agent → MCP → remember → recall
 

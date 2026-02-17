@@ -42,4 +42,8 @@
    :ns-default build}
 
   :run
-  {:main-opts ["-m" "ai-memory.core"]}}}
+  {:main-opts ["-m" "ai-memory.core"]}
+
+  :mcp
+  {:jvm-opts  ["-Dlogback.configurationFile=resources/logback-mcp.xml"]
+   :main-opts ["-m" "ai-memory.mcp.main"]}}}
