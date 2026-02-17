@@ -3,6 +3,8 @@
             [ai-memory.graph.node :as node]
             [ai-memory.graph.edge :as edge]
             [ai-memory.graph.write :as write]
+            [ai-memory.tag.core :as tag]
+            [ai-memory.tag.query :as tag-query]
             [datomic.api :as d]))
 
 (defn- node->d3 [n]
@@ -10,7 +12,7 @@
    :content (:node/content n)
    :type    (some-> (:node/type n) :db/ident name)
    :weight  (:node/weight n)
-   :tags    (:node/tags n)})
+   :tags    (mapv :tag/path (:node/tag-refs n))})
 
 (defn- edge->d3 [e]
   {:source (str (get-in e [:edge/from :node/id]))
@@ -21,7 +23,8 @@
   "Returns full graph for D3 visualization."
   [conn _req]
   (let [db    (db/db conn)
-        nodes (d/q '[:find [(pull ?e [* {:node/type [:db/ident]}]) ...]
+        nodes (d/q '[:find [(pull ?e [* {:node/type [:db/ident]}
+                                          {:node/tag-refs [:tag/path]}]) ...]
                       :where [?e :node/id]]
                     db)
         edges (edge/find-all db)]
@@ -49,7 +52,23 @@
     {:status 201
      :body   result}))
 
-(defn recall [conn cfg req]
-  ;; TODO: integrate with traverse/recall
-  {:status 200
-   :body   {:results []}})
+(defn browse-tags [conn _cfg req]
+  (let [db   (db/db conn)
+        path (get-in req [:query-params "path"])]
+    {:status 200
+     :body   (tag-query/browse db path)}))
+
+(defn create-tag [conn _cfg req]
+  (let [{:keys [name parent-path]} (:body-params req)
+        path (tag/create-tag! conn {:name name :parent-path parent-path})]
+    {:status 201
+     :body   {:tag/path path}}))
+
+(defn recall [conn _cfg req]
+  (let [db   (db/db conn)
+        body (:body-params req)
+        tags (:tags body)]
+    {:status 200
+     :body   {:results (if (seq tags)
+                         (tag-query/by-tags db {:tags tags})
+                         [])}}))

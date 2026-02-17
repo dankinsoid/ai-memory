@@ -1,6 +1,23 @@
-[;; Schema: nodes (facts) + edges (associations).
- ;; Nodes are active (facts with tags). Edges accumulate write-only.
- ;; Retrieval via tag taxonomy (ADR-009). Tag schema TBD.
+[;; Schema: nodes (facts) + edges (associations) + tags (taxonomy).
+ ;; Retrieval via tag taxonomy (ADR-009).
+
+ ;; --- Tag Taxonomy ---
+ {:db/ident       :tag/name
+  :db/valueType   :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/index       true
+  :db/doc         "Tag leaf name, e.g. 'clojure'"}
+
+ {:db/ident       :tag/parent
+  :db/valueType   :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Parent tag (nil = root category)"}
+
+ {:db/ident       :tag/path
+  :db/valueType   :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/unique      :db.unique/identity
+  :db/doc         "Materialized path, e.g. 'languages/clojure'. This is the tag identity."}
 
  ;; --- Node ---
  {:db/ident       :node/id
@@ -20,12 +37,10 @@
   :db/cardinality :db.cardinality/one
   :db/doc         "Node type: fact, decision, preference, pattern, project, domain"}
 
-
- {:db/ident       :node/tags
-  :db/valueType   :db.type/string
+ {:db/ident       :node/tag-refs
+  :db/valueType   :db.type/ref
   :db/cardinality :db.cardinality/many
-  :db/index       true
-  :db/doc         "Free-form tags for filtering"}
+  :db/doc         "References to tag entities (taxonomy-aware)"}
 
  {:db/ident       :node/weight
   :db/valueType   :db.type/double

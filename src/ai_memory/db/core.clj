@@ -12,11 +12,18 @@
       slurp
       edn/read-string))
 
+(defn- load-seed-tags []
+  (-> (io/resource "seed-tags.edn")
+      slurp
+      edn/read-string))
+
 (defn ensure-schema [conn]
   @(d/transact conn (load-schema))
   ;; Tick singleton (must be separate tx — attribute must exist first)
   (when-not (d/entid (d/db conn) :tick/singleton)
-    @(d/transact conn [{:db/ident :tick/singleton :tick/value 0}])))
+    @(d/transact conn [{:db/ident :tick/singleton :tick/value 0}]))
+  ;; Seed root tag categories (idempotent via :tag/path identity)
+  @(d/transact conn (load-seed-tags)))
 
 (defn db [conn]
   (d/db conn))

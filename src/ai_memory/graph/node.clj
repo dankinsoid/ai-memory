@@ -12,19 +12,21 @@
 
 (defn create-node
   "Creates a memory node in Datomic. Embeds content in Qdrant unless entity type.
-   `cfg` — {:embedding-url, :qdrant-url}."
-  [conn cfg {:keys [content node-type tags tick]}]
+   `cfg` — {:embedding-url, :qdrant-url}.
+   `tag-refs` — vec of lookup refs like [[:tag/path \"languages/clojure\"]]."
+  [conn cfg {:keys [content node-type tag-refs tick]}]
   (let [node-uuid (d/squuid)
         node-type-kw (keyword "node.type" (name node-type))
-        tags (or tags [])
-        tx-result @(d/transact conn
-                     [{:db/id        (d/tempid :db.part/user)
-                       :node/id      node-uuid
-                       :node/content content
-                       :node/type    node-type-kw
-                       :node/tags    tags
-                       :node/weight  1.0
-                       :node/cycle   (or tick 0)}])]
+        base-tx {:db/id        (d/tempid :db.part/user)
+                 :node/id      node-uuid
+                 :node/content content
+                 :node/type    node-type-kw
+                 :node/weight  1.0
+                 :node/cycle   (or tick 0)}
+        tx-data (if (seq tag-refs)
+                  (assoc base-tx :node/tag-refs tag-refs)
+                  base-tx)
+        tx-result @(d/transact conn [tx-data])]
     (when-not (entity-type? node-type-kw)
       (try
         (let [vector (embedding/embed (:embedding-url cfg) content)]
@@ -109,6 +111,14 @@
          [(>= ?c ?min-tick)]
          [?e :node/id ?nid]]
        db min-tick))
+
+(defn update-tag-refs
+  "Adds tag refs to an existing node (additive — cardinality/many)."
+  [conn node-uuid tag-refs]
+  (when (seq tag-refs)
+    @(d/transact conn
+       [{:node/id       node-uuid
+         :node/tag-refs tag-refs}])))
 
 (defn find-by-type [db node-type]
   (d/q '[:find [(pull ?e [*]) ...]

@@ -15,7 +15,9 @@
                       ["/nodes" {:get  (fn [req] (api/list-nodes conn req))
                                  :post (fn [req] (api/create-node conn cfg req))}]
                       ["/remember" {:post (fn [req] (api/remember conn cfg req))}]
-                      ["/recall" {:post (fn [req] (api/recall conn cfg req))}]]]
+                      ["/recall" {:post (fn [req] (api/recall conn cfg req))}]
+                      ["/tags" {:get  (fn [req] (api/browse-tags conn cfg req))
+                                :post (fn [req] (api/create-tag conn cfg req))}]]]
                     {:data {:muuntaja   m/instance
                             :middleware [muuntaja/format-middleware]}})
                   (ring/routes
