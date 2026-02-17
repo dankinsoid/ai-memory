@@ -22,6 +22,7 @@
   (start))
 
 (defn conn [] (:conn @system))
+(defn registry [] (:metrics @system))
 
 (comment
   (start)

@@ -80,7 +80,7 @@
           entries [[a] [b]]
           opts {:association-factor 0.7 :min-association-weight 0.05}
           cnt (#'write/create-context-edges *conn* entries 2 [c] 3 opts)]
-      (is (= 2 cnt))
+      (is (= 2 (:edges cnt)))
       (is (some? (edges-between *conn* c b)))
       (is (some? (edges-between *conn* c a)))
       (is (nil? (edges-between *conn* a c)))
@@ -136,7 +136,7 @@
             entries   (:entries ctx)
             opts      {:association-factor 0.7 :min-association-weight 0.05}
             cnt       (#'write/create-context-edges *conn* entries 1 [b] 2 opts)]
-        (is (= 1 cnt))
+        (is (= 1 (:edges cnt)))
         (is (some? (edges-between *conn* b a)))
         (is (nil? (edges-between *conn* a b)))))))
 
@@ -162,7 +162,7 @@
           opts {:association-factor 0.7 :min-association-weight 0.05}
           cnt  (#'write/create-global-edges *conn* tick [c] opts)]
       ;; c→a (Δ=2, w=0.49) and c→b (Δ=1, w=0.7)
-      (is (= 2 cnt))
+      (is (= 2 (:edges cnt)))
       (is (some? (edges-between *conn* c a)))
       (is (some? (edges-between *conn* c b)))
       ;; unidirectional — no reverse edges
@@ -196,7 +196,7 @@
           opts {:association-factor 0.7 :min-association-weight 0.05}
           cnt  (#'write/create-global-edges *conn* tick [c] opts)]
       ;; Δ=10, 0.7^10 ≈ 0.028 < 0.05 → no edge
-      (is (= 0 cnt))
+      (is (= 0 (:edges cnt)))
       (is (nil? (edges-between *conn* c old))))))
 
 (deftest global-edges-exclude-self-test
