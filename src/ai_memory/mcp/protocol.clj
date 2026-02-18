@@ -107,7 +107,16 @@
                                :type    {:type "string"  :description "file, code, image, document"}
                                :content {:type ["string" "null"] :description "File content as text"}
                                :path    {:type ["string" "null"] :description "Absolute file path (server reads from disk)"}}
-                  :required   ["title" "project" "summary" "tags"]}}])
+                  :required   ["title" "project" "summary" "tags"]}}
+
+   {:name        "memory_session_compact"
+    :description "Store a detailed session summary before clearing context. The agent generates a comprehensive summary of the current session and sends it here. The summary is saved in the session blob and becomes searchable. Use this with the /compact skill."
+    :inputSchema {:type       "object"
+                  :properties {:session_id      {:type "string" :description "Current session ID (context_id)"}
+                               :compact_summary {:type "string" :description "Detailed multi-paragraph session summary"}}
+                  :required   ["session_id" "compact_summary"]}}
+
+])
 
 ;; --- Compact text rendering ---
 
@@ -182,18 +191,20 @@
   [meta]
   (if (:error meta)
     (:error meta)
-    (str (:title meta) "\n"
+    (str (or (:title meta) (:session-id meta) "Blob") "\n"
          (name (or (:type meta) :unknown)) " | " (:project meta) " | " (format-date (:created-at meta)) "\n"
-         "\n"
-         (:summary meta)
+         (when-let [ss (:session-summary meta)]
+           (str "\nSession summary: " ss "\n"))
+         (when-let [cs (:compact-summary meta)]
+           (str "\n--- Compact summary ---\n" cs "\n-----------------------\n"))
+         (when (and (not (:compact-summary meta)) (:summary meta) (seq (:summary meta)))
+           (str "\n" (:summary meta)))
          (when (:status meta)
-           (str "\n\nStatus: " (:status meta)))
-         "\n\nSections:"
-         (str/join ""
-           (map-indexed
-             (fn [i s]
-               (str "\n  " i ": " (:summary s) " (" (or (:lines s) "?") " lines)"))
-             (:sections meta))))))
+           (str "\nStatus: " (:status meta)))
+         (when-let [n (:section-count meta)]
+           (str "\n\nSections: " n " (use section param 0.." (dec n) " to read)")))))
+
+
 
 ;; --- Parameter conversion (snake_case JSON → kebab-case Clojure) ---
 
@@ -220,13 +231,15 @@
     :list-blobs  {:limit (or (:limit params) 20)}
     :read-blob   {:blob-dir (:blob_dir params)
                   :section  (:section params)}
-    :store-file  {:title   (:title params)
-                  :project (:project params)
-                  :summary (:summary params)
-                  :tags    (:tags params)
-                  :type    (:type params)
-                  :content (:content params)
-                  :path    (:path params)}
+    :store-file      {:title   (:title params)
+                      :project (:project params)
+                      :summary (:summary params)
+                      :tags    (:tags params)
+                      :type    (:type params)
+                      :content (:content params)
+                      :path    (:path params)}
+    :session-compact {:session-id      (:session_id params)
+                      :compact-summary (:compact_summary params)}
     params))
 
 ;; --- Handler dispatch ---
@@ -241,7 +254,8 @@
     :remember           (server/handle-remember base-url params)
     :list-blobs         (server/handle-list-blobs base-url params)
     :read-blob          (server/handle-read-blob base-url params)
-    :store-file         (server/handle-store-file base-url params)))
+    :store-file         (server/handle-store-file base-url params)
+    :session-compact    (server/handle-session-compact base-url params)))
 
 ;; --- JSON-RPC method handlers ---
 
@@ -274,7 +288,8 @@
    "memory_remember"             :remember
    "memory_list_blobs"           :list-blobs
    "memory_read_blob"            :read-blob
-   "memory_store_file"           :store-file})
+   "memory_store_file"           :store-file
+   "memory_session_compact"      :session-compact})
 
 (defn- format-result [handler-key result]
   (case handler-key

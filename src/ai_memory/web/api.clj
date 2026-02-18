@@ -190,6 +190,8 @@
                    (when (:path body)
                      (blob-store/write-section-binary! base blob-dir filename (:path body))))
         lines    (when (:content body) (count (str/split-lines (:content body))))
+        _        (blob-store/write-section-meta! base blob-dir filename
+                   {:file filename :summary (:summary body) :lines lines})
         meta-data {:id           (UUID/randomUUID)
                    :type         (keyword (or (:type body) "file"))
                    :title        (:title body)
@@ -198,7 +200,7 @@
                    :summary      (:summary body)
                    :source-path  (:path body)
                    :tags         (:tags body)
-                   :sections     [{:file filename :summary (:summary body) :lines lines}]}]
+                   :section-count 1}]
     (blob-store/write-meta! base blob-dir meta-data)
     (let [tag-refs (when (seq (:tags body))
                      (tag-resolve/resolve-tags conn (:tags body)))
@@ -270,24 +272,29 @@
             blob-dir    (or existing-dir
                             (blob-store/make-blob-dir-name base (str "session-" (subs session-id 0 8))))
 
+            section-offset (blob-store/count-sections base blob-dir)
+
+            sections-written
+            (doall (map-indexed
+                     (fn [i {:keys [messages t-start t-end]}]
+                       (let [summary  (session/match-summary summaries t-start t-end)
+                             idx      (+ section-offset i)
+                             filename (blob-store/make-section-filename
+                                        idx (or summary (str "turn-" idx)))
+                             content  (format-turn-as-markdown messages)
+                             lines    (count (str/split-lines content))]
+                         (blob-store/write-section! base blob-dir filename content)
+                         (blob-store/write-section-meta! base blob-dir filename
+                           {:file filename :summary summary :lines lines
+                            :timestamp (str t-start)})
+                         filename))
+                     turns))
+
+            total-sections (+ section-offset (count sections-written))
+            ;; Pull session_summary from Datomic (the rolling summary from memory_remember)
+            session-summary (when session-eid
+                              (:node/content (d/pull db [:node/content] session-eid)))
             existing-meta (blob-store/read-meta base blob-dir)
-            section-offset (count (:sections existing-meta))
-
-            new-sections
-            (vec (map-indexed
-                   (fn [i {:keys [messages t-start t-end]}]
-                     (let [summary  (session/match-summary summaries t-start t-end)
-                           idx      (+ section-offset i)
-                           filename (blob-store/make-section-filename
-                                      idx (or summary (str "turn-" idx)))
-                           content  (format-turn-as-markdown messages)
-                           lines    (count (str/split-lines content))]
-                       (blob-store/write-section! base blob-dir filename content)
-                       {:file filename :summary summary :lines lines
-                        :timestamp (str t-start)}))
-                   turns))
-
-            all-sections (into (vec (:sections existing-meta)) new-sections)
             meta-data (merge
                         (or existing-meta
                             {:id         (UUID/randomUUID)
@@ -295,10 +302,9 @@
                              :project    project
                              :created-at (Date.)
                              :session-id session-id})
-                        {:sections all-sections
-                         :summary  (->> all-sections
-                                        (keep :summary)
-                                        (str/join "; "))})]
+                        {:section-count total-sections}
+                        (when session-summary
+                          {:session-summary session-summary}))]
         (blob-store/write-meta! base blob-dir meta-data)
 
         (if session-eid
@@ -316,5 +322,33 @@
 
         {:status 200
          :body   {:blob-dir blob-dir
-                  :sections-added (count new-sections)
-                  :total-sections (count all-sections)}}))))
+                  :sections-added (count sections-written)
+                  :total-sections total-sections}}))))
+
+;; --- Session compact (agent stores detailed summary before context clear) ---
+
+(defn session-compact [conn cfg req]
+  (let [body            (:body-params req)
+        session-id      (:session-id body)
+        compact-summary (:compact-summary body)]
+    (if-not (and session-id compact-summary)
+      {:status 400 :body {:error "session_id and compact_summary required"}}
+      (let [db          (db/db conn)
+            base        (:blob-path cfg)
+            session-eid (find-session-fact db session-id)
+            blob-dir    (when session-eid
+                          (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))]
+        (if-not blob-dir
+          {:status 404 :body {:error (str "No blob found for session " session-id)}}
+          (let [;; Write compact.md to blob dir
+                _    (blob-store/write-section! base blob-dir "compact.md" compact-summary)
+                ;; Update meta.edn with compact summary
+                meta (blob-store/read-meta base blob-dir)
+                meta (assoc meta :compact-summary compact-summary)
+                _    (blob-store/write-meta! base blob-dir meta)
+                ;; Update session node content in Datomic (searchable)
+                _    @(d/transact conn [[:db/add session-eid :node/content compact-summary]
+                                        [:db/add session-eid :node/updated-at (Date.)]])]
+            {:status 200
+             :body   {:blob-dir blob-dir
+                      :status   "compacted"}}))))))

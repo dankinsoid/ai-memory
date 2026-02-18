@@ -83,6 +83,32 @@
     (io/copy (io/file source-path) file)
     (.getPath file)))
 
+(def ^:private sidecar-min-lines
+  "Minimum section size (in lines) to warrant a sidecar .meta.edn file."
+  20)
+
+(defn- sidecar-filename
+  "Returns sidecar meta filename: 05-slug.md → 05-slug.meta.edn"
+  [filename]
+  (str/replace filename #"\.[^.]+$" ".meta.edn"))
+
+(defn write-section-meta!
+  "Writes sidecar .meta.edn for a section. Only writes if lines >= threshold."
+  [base-path dir-name filename meta-data]
+  (let [lines (:lines meta-data 0)]
+    (when (>= lines sidecar-min-lines)
+      (let [dir  (io/file base-path dir-name)
+            file (io/file dir (sidecar-filename filename))]
+        (spit file (pr-str meta-data))
+        (.getPath file)))))
+
+(defn read-section-meta
+  "Reads sidecar .meta.edn for a section file. Returns nil if not found."
+  [base-path dir-name filename]
+  (let [file (io/file base-path dir-name (sidecar-filename filename))]
+    (when (.exists file)
+      (edn/read-string (slurp file)))))
+
 (defn read-section
   "Reads a section file as string. Returns nil if not found."
   [base-path dir-name filename]
@@ -90,13 +116,37 @@
     (when (.exists file)
       (slurp file))))
 
-(defn read-section-by-index
-  "Reads a section by its index (0-based). Looks up filename from meta.edn."
+(defn- find-section-file-by-index
+  "Finds a section file by numeric prefix (e.g. index 5 → '05-*.md').
+   Falls back to directory listing when :sections is absent from meta."
   [base-path dir-name index]
-  (when-let [meta (read-meta base-path dir-name)]
-    (when-let [section (get-in meta [:sections index])]
-      {:meta    section
-       :content (read-section base-path dir-name (:file section))})))
+  (let [dir    (io/file base-path dir-name)
+        prefix (format "%02d-" index)]
+    (when (.exists dir)
+      (->> (.listFiles dir)
+           (filter #(str/starts-with? (.getName %) prefix))
+           first))))
+
+(defn read-section-by-index
+  "Reads a section by its index (0-based).
+   Finds file by numeric prefix, reads sidecar .meta.edn if present."
+  [base-path dir-name index]
+  (when-let [file (find-section-file-by-index base-path dir-name index)]
+    (let [filename (.getName file)
+          content  (slurp file)
+          sidecar  (read-section-meta base-path dir-name filename)]
+      {:meta    (or sidecar {:file filename :lines (count (str/split-lines content))})
+       :content content})))
+
+(defn count-sections
+  "Counts section files in a blob directory (files matching NN-*.ext pattern)."
+  [base-path dir-name]
+  (let [dir (io/file base-path dir-name)]
+    (if (.exists dir)
+      (->> (.listFiles dir)
+           (filter #(re-matches #"\d{2,}-.*" (.getName %)))
+           count)
+      0)))
 
 (defn list-blob-dirs
   "Lists all blob directories, sorted newest first (date prefix sort)."

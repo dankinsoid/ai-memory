@@ -61,3 +61,6 @@
             :body            (json/generate-string params)
             :as              :json
             :throw-exceptions false})))
+
+(defn handle-session-compact [base-url params]
+  (api-post base-url "/api/session/compact" params))
