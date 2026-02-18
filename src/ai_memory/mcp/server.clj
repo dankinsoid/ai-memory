@@ -42,6 +42,14 @@
   (let [db (db/db conn)]
     (tag-query/fetch-by-tag-sets db (:metrics cfg) tag-sets {:limit limit})))
 
+(defn handle-search-facts
+  "Semantic search across all facts. Returns top-k matches with scores.
+   `query` — natural language text to search for
+   `top-k` — max results (default 10)"
+  [conn cfg {:keys [query top-k] :or {top-k 10}}]
+  (let [db (db/db conn)]
+    (node/search db cfg query top-k)))
+
 (defn handle-create-tag
   "Creates a new tag in the taxonomy."
   [conn {:keys [name parent-path]}]

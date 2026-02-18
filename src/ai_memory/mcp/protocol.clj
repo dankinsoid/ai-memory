@@ -45,6 +45,16 @@
                                           :default     50}}
                   :required   ["tag_sets"]}}
 
+   {:name        "memory_search"
+    :description "Semantic search across all facts by meaning. Use when you can't find relevant facts via tags, or when you know roughly what you're looking for but not how it's tagged. Returns facts ranked by relevance score."
+    :inputSchema {:type       "object"
+                  :properties {:query {:type        "string"
+                                       :description "Natural language search query"}
+                               :top_k {:type        "integer"
+                                       :description "Max results (default 10)"
+                                       :default     10}}
+                  :required   ["query"]}}
+
    {:name        "memory_create_tag"
     :description "Create a new tag in the taxonomy. Provide parent_path to nest under an existing tag, or omit for a root tag."
     :inputSchema {:type       "object"
@@ -185,6 +195,22 @@
   (when inst
     (subs (str inst) 0 10)))
 
+(defn render-search-results
+  "Renders vector search results as text. Score + content + tags per fact."
+  [results]
+  (if (empty? results)
+    "(no matches)"
+    (str/join "\n"
+      (map (fn [node]
+             (let [score   (:search/score node)
+                   content (:node/content node)
+                   tags    (->> (:node/tag-refs node)
+                                (map :tag/path)
+                                (str/join ", "))]
+               (str (format "%.2f" (double score)) " " content
+                    (when (seq tags) (str " [" tags "]")))))
+           results))))
+
 (defn render-blob-list
   "Renders blob list as compact text. One line per blob."
   [blobs]
@@ -228,6 +254,8 @@
     :count-facts {:tag-sets (:tag_sets params)}
     :get-facts   {:tag-sets (:tag_sets params)
                   :limit    (or (:limit params) 50)}
+    :search      {:query (:query params)
+                  :top-k (or (:top_k params) 10)}
     :create-tag  {:name        (:name params)
                   :parent-path (:parent_path params)}
     :remember    {:nodes           (mapv (fn [n]
@@ -275,6 +303,7 @@
     :browse-tags        (server/handle-browse-tags conn cfg params)
     :count-facts        (server/handle-count-facts conn cfg params)
     :get-facts          (server/handle-get-facts conn cfg params)
+    :search             (server/handle-search-facts conn cfg params)
     :create-tag         (server/handle-create-tag conn params)
     :remember           (server/handle-remember conn cfg params)
     :list-blobs         (server/handle-list-blobs conn cfg params)
@@ -308,6 +337,7 @@
   {"memory_browse_tags"          :browse-tags
    "memory_count_facts"          :count-facts
    "memory_get_facts"            :get-facts
+   "memory_search"               :search
    "memory_create_tag"           :create-tag
    "memory_remember"             :remember
    "memory_list_blobs"           :list-blobs
@@ -320,6 +350,7 @@
     :browse-tags (render-taxonomy result)
     :count-facts (render-counts result)
     :get-facts   (render-facts result)
+    :search      (render-search-results result)
     :list-blobs  (render-blob-list result)
     :read-blob   (if (:content result)
                    (:content result)

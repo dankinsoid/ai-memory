@@ -6,7 +6,7 @@ Source of truth for ai-memory integration prompts. Copy to `~/.claude/CLAUDE.md`
 
 # Memory
 
-Long-term memory across sessions and projects. 9 MCP tools via `ai-memory` server.
+Long-term memory across sessions and projects. 10 MCP tools via `ai-memory` server.
 
 ## Session Start
 
@@ -18,7 +18,9 @@ Before working on the first message:
 
 Multiple tag sets in one call. Use `memory_count_facts` first only when a tag set might return 50+ results.
 
-## After Each Message
+## After Each Message — MANDATORY
+
+**Every response must end with a `memory_remember` call.** No exceptions — even if nothing worth storing as a fact happened, the turn summary alone is essential for session continuity. Skipping this breaks the memory chain.
 
 Call `memory_remember` silently with turn summary and any extracted facts:
 
@@ -67,9 +69,19 @@ When facing a design decision or unfamiliar area:
 1. `memory_count_facts` with candidate tag sets
 2. `memory_get_facts` if counts manageable
 
+## Semantic Search
+
+`memory_search({ query: "error handling in async pipelines", top_k: 10 })`
+
+Use when:
+- You know *what* you're looking for but not *how it's tagged*
+- Tag browsing returned nothing relevant
+- Exploring a broad topic across tag boundaries
+
+Returns facts ranked by relevance score. Complement with tag retrieval — not a replacement.
+
 ## Tags
 
 - Short kebab-case: `lang/clj`, `proj/ai-memory`, `pref/coding-style`, `pattern/error-handling`
 - Browse taxonomy before creating — prefer existing tags
-- Create freely when nothing fits, keep flat (avoid >3 nesting levels)
-- Root prefixes: `lang`, `pattern`, `proj`, `pref`
+- Create freely when nothing fits, keep flat (avoid >4 nesting levels)
