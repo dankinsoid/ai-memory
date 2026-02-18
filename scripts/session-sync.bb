@@ -82,4 +82,4 @@
 
             ;; Save sync state
             (fs/create-dirs state-dir)
-            (spit state-file (pr-str {:last-uuid (:uuid (last messages))})))))))))
+            (spit state-file (pr-str {:last-uuid (:uuid (last messages))}))))))))
