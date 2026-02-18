@@ -58,7 +58,9 @@
 - [x] Tool registry: 9 tools with JSON Schema input specs
 - [x] Entry point: `clj -M:mcp` (stderr-only logging via `logback-mcp.xml`)
 - [x] Protocol tests (12 tests)
-- [ ] Register as MCP server in `~/.claude/settings`
+- [x] Register as MCP server in `~/.claude/settings.json` (in-memory Datomic, `clj -M:mcp`)
+- [x] Memory usage instructions in `CLAUDE.md`
+- [x] `project_path` parameter in `memory_store_conversation` tool
 - [ ] End-to-end test: agent → MCP → remember → recall
 
 ## Blob Storage (ADR-010)

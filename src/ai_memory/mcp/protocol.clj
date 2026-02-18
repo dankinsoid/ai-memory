@@ -55,18 +55,19 @@
                   :required   ["name"]}}
 
    {:name        "memory_remember"
-    :description "Store memory facts. Each node has content (1-3 sentences), optional type, and tags. Automatically creates associations between co-occurring facts and deduplicates."
+    :description "Store memory facts and/or a turn summary. Facts are deduplicated and linked. Turn summary is stored as a conversation record. Call after each message with at least a turn_summary."
     :inputSchema {:type       "object"
-                  :properties {:nodes      {:type        "array"
-                                            :items       {:type       "object"
-                                                          :properties {:content   {:type "string" :description "Fact content (1-3 sentences)"}
-                                                                       :node_type {:type "string" :description "fact, decision, preference, pattern, project, domain, entity"}
-                                                                       :tags      {:type "array" :items {:type "string"} :description "Tag paths"}}
-                                                          :required   ["content" "tags"]}
-                                            :description "Memory nodes to store"}
-                               :context_id {:type        "string"
-                                            :description "Session ID for context-based linking across calls"}}
-                  :required   ["nodes"]}}
+                  :properties {:nodes        {:type        "array"
+                                              :items       {:type       "object"
+                                                            :properties {:content   {:type "string" :description "Fact content (1-3 sentences)"}
+                                                                         :node_type {:type "string" :description "fact, decision, preference, pattern, project, domain, entity"}
+                                                                         :tags      {:type "array" :items {:type "string"} :description "Tag paths"}}
+                                                            :required   ["content" "tags"]}
+                                              :description "Memory nodes to store"}
+                               :turn_summary {:type        "string"
+                                              :description "One-line turn summary: 'User: <request> → <what I did>'"}
+                               :context_id   {:type        "string"
+                                              :description "Session ID for context-based linking across calls"}}}}
 
    {:name        "memory_list_blobs"
     :description "List stored blobs (conversations, documents) sorted by date desc. Returns compact text: one line per blob with date, type, title."
@@ -95,6 +96,7 @@
                                :summary    {:type "string"  :description "1-3 sentence summary"}
                                :status     {:type ["string" "null"] :description "Where you left off, next steps"}
                                :tags       {:type "array" :items {:type "string"} :description "Tag paths"}
+                               :project_path {:type ["string" "null"] :description "Absolute project path for session JSONL lookup (default: server working dir)"}
                                :sections   {:type  ["array" "null"]
                                             :items {:type "object"
                                                     :properties {:start_turn {:type "integer"}
@@ -226,25 +228,27 @@
                   :limit    (or (:limit params) 50)}
     :create-tag  {:name        (:name params)
                   :parent-path (:parent_path params)}
-    :remember    {:nodes      (mapv (fn [n]
-                                      {:content   (:content n)
-                                       :node-type (:node_type n)
-                                       :tags      (:tags n)})
-                                    (:nodes params))
-                  :context-id (:context_id params)}
+    :remember    {:nodes        (mapv (fn [n]
+                                        {:content   (:content n)
+                                         :node-type (:node_type n)
+                                         :tags      (:tags n)})
+                                      (:nodes params))
+                  :turn-summary (:turn_summary params)
+                  :context-id   (:context_id params)}
     :list-blobs  {:type  (:type params)
                   :limit (or (:limit params) 20)}
     :read-blob   {:blob-dir (:blob_dir params)
                   :section  (:section params)}
     :store-conversation
-                 {:session-id (:session_id params)
-                  :project    (:project params)
-                  :title      (:title params)
-                  :summary    (:summary params)
-                  :status     (:status params)
-                  :tags       (:tags params)
-                  :sections   (:sections params)
-                  :continues  (:continues params)
+                 {:session-id   (:session_id params)
+                  :project      (:project params)
+                  :project-path (:project_path params)
+                  :title        (:title params)
+                  :summary      (:summary params)
+                  :status       (:status params)
+                  :tags         (:tags params)
+                  :sections     (:sections params)
+                  :continues    (:continues params)
                   :facts      (when-let [fs (:facts params)]
                                 (mapv (fn [f]
                                         {:content   (:content f)

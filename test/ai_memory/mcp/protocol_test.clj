@@ -232,8 +232,8 @@
   (testing "memory_create_tag creates a new tag"
     (let [resp (call "tools/call"
                  :params {:name "memory_create_tag"
-                          :arguments {:name "rust" :parent_path "languages"}})
+                          :arguments {:name "rust" :parent_path "lang"}})
           text (get-in resp [:result :content 0 :text])
           data (json/parse-string text true)]
       (is (nil? (:error resp)))
-      (is (= "languages/rust" (:tag/path data))))))
+      (is (= "lang/rust" (:tag/path data))))))

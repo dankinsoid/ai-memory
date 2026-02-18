@@ -27,7 +27,7 @@
   (testing "ensure-schema loads seed root categories"
     (let [roots (tag/root-tags (d/db *conn*))]
       (is (= 4 (count roots)))
-      (is (= #{"languages" "patterns" "projects" "preferences"}
+      (is (= #{"lang" "pattern" "proj" "pref"}
              (set (map :tag/path roots)))))))
 
 (deftest create-root-tag-test
@@ -41,12 +41,12 @@
 
 (deftest create-child-tag-test
   (testing "creating a child tag sets parent ref"
-    (tag/create-tag! *conn* {:name "clojure" :parent-path "languages"})
+    (tag/create-tag! *conn* {:name "clojure" :parent-path "lang"})
     (let [db (d/db *conn*)
-          t  (tag/find-by-path db "languages/clojure")]
+          t  (tag/find-by-path db "lang/clojure")]
       (is (some? t))
       (is (= "clojure" (:tag/name t)))
-      (is (= "languages" (get-in t [:tag/parent :tag/path]))))))
+      (is (= "lang" (get-in t [:tag/parent :tag/path]))))))
 
 (deftest ensure-tag-creates-intermediates-test
   (testing "ensure-tag! creates full hierarchy"

@@ -45,10 +45,33 @@
   (let [path (tag/create-tag! conn {:name name :parent-path parent-path})]
     {:tag/path path}))
 
+(defn- extract-project-tag
+  "Finds first proj/* tag from nodes' tags."
+  [nodes]
+  (->> nodes
+       (mapcat :tags)
+       (filter #(str/starts-with? % "proj/"))
+       first))
+
 (defn handle-remember
-  "Stores memory nodes with automatic associations and deduplication."
+  "Stores memory nodes and/or turn summary.
+   Nodes go through write pipeline (dedup, edges).
+   Turn summary stored as a conversation node, auto-tagged with project."
   [conn cfg params]
-  (write/remember conn cfg params))
+  (let [nodes   (:nodes params)
+        summary (:turn-summary params)
+        result  (when (seq nodes)
+                  (write/remember conn cfg params))]
+    (when summary
+      (let [proj-tag  (or (extract-project-tag nodes) "session-log")
+            tag-refs  (tag-resolve/resolve-tags conn [proj-tag])
+            tick      (db/current-tick (db/db conn))]
+        (node/create-node conn cfg
+          {:content   summary
+           :node-type :conversation
+           :tag-refs  tag-refs
+           :tick      tick})))
+    (or result {:nodes [] :edges-created 0})))
 
 (defn handle-read-blob
   "Reads blob metadata or a specific section.
@@ -91,10 +114,11 @@
   "Stores a conversation session as a blob.
    Reads JSONL from ~/.claude, cleans messages, writes sections + meta.edn.
    Creates blob node in Datomic. Optionally stores extracted facts."
-  [conn cfg {:keys [session-id project title summary status tags
+  [conn cfg {:keys [session-id project project-path title summary status tags
                     sections continues facts]}]
   (let [base         (:blob-path cfg)
-        project-path (or (:project-path cfg)
+        project-path (or project-path
+                         (:project-path cfg)
                          (System/getProperty "user.dir"))
         session-path (ingest/resolve-session-path session-id project-path)
         _            (when-not session-path

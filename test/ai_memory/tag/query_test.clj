@@ -126,8 +126,8 @@
     (tag/ensure-tag! *conn* "languages/python/django")
     (create-tagged-node! *conn* "Fact" ["languages/clojure/core"])
     (let [tree (query/taxonomy (d/db *conn*) nil 1)]
-      ;; depth 1: only root categories, no children
-      (is (= 4 (count tree)))
+      ;; depth 1: 4 seeds + auto-created "languages" from ensure-tag!
+      (is (= 5 (count tree)))
       (is (every? #(not (contains? % :children)) tree))
       ;; languages has children => truncated
       (let [langs (first (filter #(= "languages" (:tag/name %)) tree))]

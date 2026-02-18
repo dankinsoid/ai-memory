@@ -9,4 +9,5 @@
    :qdrant-url     (or (System/getenv "QDRANT_URL")
                        "http://localhost:6333")
    :blob-path      (or (System/getenv "BLOB_PATH")
-                       "data/blobs")})
+                       "data/blobs")
+   :project-path   (System/getenv "PROJECT_PATH")})
