@@ -1,6 +1,5 @@
 (ns ai-memory.ui.tags
   (:require ["d3" :as d3]
-            [clojure.string :as str]
             [reagent.core :as r]
             [ai-memory.ui.http :as http]))
 
@@ -17,37 +16,33 @@
 
 ;; --- Colors ---
 
-(def ^:private category-colors
-  {"languages"   "#4fc3f7"
-   "patterns"    "#ffa726"
-   "projects"    "#ef5350"
-   "preferences" "#66bb6a"})
+(def ^:private palette
+  ["#4fc3f7" "#ffa726" "#ef5350" "#66bb6a" "#ab47bc" "#26c6da" "#ff7043" "#8d6e63"])
 
 (defn- node-color [^js d]
-  (let [path (.. d -data -path)
-        root (first (str/split (or path "") #"/"))]
-    (get category-colors root "#ab47bc")))
+  (let [name (.. d -data -name)]
+    (if (= name "memory")
+      "#888"
+      (nth palette (mod (hash name) (count palette))))))
 
 ;; --- Data transform ---
 
-(defn- api->hierarchy [nodes]
+(defn- api->hierarchy
+  "Converts flat tag list [{:tag/name \"x\" :tag/node-count 5} ...] into D3 hierarchy."
+  [tags]
   {:name     "memory"
-   :path     nil
+   :path     "memory"
    :count    0
-   :children (mapv (fn [node]
-                     (letfn [(convert [n]
-                               (cond-> {:name  (:tag/name n)
-                                        :path  (:tag/path n)
-                                        :count (or (:node-count n) 0)}
-                                 (seq (:children n))
-                                 (assoc :children (mapv convert (:children n)))))]
-                       (convert node)))
-                   nodes)})
+   :children (mapv (fn [tag]
+                     {:name  (:tag/name tag)
+                      :path  (:tag/name tag)
+                      :count (or (:tag/node-count tag) 0)})
+                   tags)})
 
 ;; --- Fetch ---
 
 (defn- load-taxonomy! []
-  (http/GET "/api/tags?depth=10"
+  (http/GET "/api/tags?limit=100"
     (fn [data]
       (swap! state assoc :tree-data (api->hierarchy data)))))
 
@@ -307,14 +302,14 @@
      (when (seq tags)
        [:div {:style {:margin-top "8px" :display "flex" :flex-wrap "wrap" :gap "4px"}}
         (for [tag tags]
-          (let [path (or (:tag/path tag) tag)]
-            ^{:key path}
+          (let [tag-name (or (:tag/name tag) (when (string? tag) tag) (str tag))]
+            ^{:key tag-name}
             [:span {:style {:padding       "1px 8px"
                             :background    "rgba(79, 195, 247, 0.1)"
                             :border-radius "10px"
                             :font-size     "11px"
                             :color         "#4fc3f7"}}
-             (str "#" path)]))])
+             (str "#" tag-name)]))])
      (when weight
        [:div {:style {:margin-top "4px" :font-size "11px" :color "#555"}}
         (str "weight: " (.toFixed weight 2))])]))
@@ -356,14 +351,11 @@
                         (or (not= (:tree-data old) (:tree-data new))
                             (not= (:selected old) (:selected new))))
                (when-let [data (:tree-data new)]
-                 (build-tree @svg-ref data (:selected new) (make-on-select))))))
-         (reset! poll-handle
-           (js/setInterval
-             (fn []
-               (load-taxonomy!)
-               (when (seq (:selected @state))
-                 (load-facts! (:selected @state))))
-             5000)))
+                 (try
+                   (build-tree @svg-ref data (:selected new) (make-on-select))
+                   (catch :default e
+                     (js/console.error "build-tree watcher error:" e)))))))
+)
 
        :component-will-unmount
        (fn [_this]
@@ -381,7 +373,10 @@
               [:svg {:ref   (fn [el]
                               (when (and el (not @svg-ref))
                                 (reset! svg-ref el)
-                                (build-tree el (:tree-data @state) (:selected @state) (make-on-select))))
+                                (try
+                                  (build-tree el (:tree-data @state) (:selected @state) (make-on-select))
+                                  (catch :default e
+                                    (js/console.error "build-tree error:" e)))))
                      :style {:width "100%" :height "100%"}}]
               [:div {:style {:color "#555" :text-align "center" :padding "40px"}}
                "Loading taxonomy..."])]))})))

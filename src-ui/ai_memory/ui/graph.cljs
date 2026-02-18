@@ -39,7 +39,12 @@
         svg     (-> (d3/select el)
                     (.attr "width" width)
                     (.attr "height" height))
-        _       (.selectAll svg "*")  ; clear
+        ;; Stop old simulation if exists
+        _       (when-let [old-sim (unchecked-get el "_sim")]
+                  (.stop old-sim))
+        ;; Clear old SVG content and tooltips
+        _       (-> svg (.selectAll "*") (.remove))
+        _       (-> (d3/selectAll ".graph-tooltip") (.remove))
         g       (.append svg "g")
         zoom    (-> (d3/zoom)
                     (.scaleExtent #js [0.1 8])
@@ -58,20 +63,24 @@
                     (.force "center" (d3/forceCenter (/ width 2) (/ height 2)))
                     (.force "collision" (-> (d3/forceCollide)
                                             (.radius 30))))
-        ;; tooltip
-        tooltip (-> (d3/select "body")
-                    (.append "div")
-                    (.attr "class" "graph-tooltip")
-                    (.style "position" "absolute")
-                    (.style "visibility" "hidden")
-                    (.style "background" "rgba(0,0,0,0.85)")
-                    (.style "color" "#eee")
-                    (.style "padding" "8px 12px")
-                    (.style "border-radius" "4px")
-                    (.style "font-size" "13px")
-                    (.style "max-width" "300px")
-                    (.style "pointer-events" "none")
-                    (.style "z-index" "10"))
+        _       (unchecked-set el "_sim" sim)
+        ;; tooltip — reuse or create
+        tooltip (let [existing (d3/select ".graph-tooltip")]
+                  (if (and existing (pos? (.size existing)))
+                    existing
+                    (-> (d3/select "body")
+                        (.append "div")
+                        (.attr "class" "graph-tooltip")
+                        (.style "position" "absolute")
+                        (.style "visibility" "hidden")
+                        (.style "background" "rgba(0,0,0,0.85)")
+                        (.style "color" "#eee")
+                        (.style "padding" "8px 12px")
+                        (.style "border-radius" "4px")
+                        (.style "font-size" "13px")
+                        (.style "max-width" "300px")
+                        (.style "pointer-events" "none")
+                        (.style "z-index" "10"))))
         ;; edges
         link-el (-> (.append g "g")
                     (.selectAll "line")
@@ -144,14 +153,7 @@
            (fn [data]
              (when @svg-ref
                (build-graph @svg-ref data))))
-         (reset! poll-handle
-           (js/setInterval
-             (fn []
-               (fetch-graph
-                 (fn [data]
-                   (when @svg-ref
-                     (build-graph @svg-ref data)))))
-             5000)))
+)
        :component-will-unmount
        (fn [_this]
          (when-let [h @poll-handle] (js/clearInterval h)))
