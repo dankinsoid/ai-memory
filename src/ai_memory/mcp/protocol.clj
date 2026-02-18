@@ -18,20 +18,21 @@
 
 (def tools
   [{:name        "memory_browse_tags"
-    :description "Navigate the tag taxonomy tree. Returns indented text: each line is `name count`, nesting via 2-space indent. `...` as child means deeper levels exist (drill down with path). Reconstruct full paths by joining ancestor names with `/`. Start with path=null to see root categories."
+    :description "List all tags sorted by usage count. Returns one tag per line: `name count`."
     :inputSchema {:type       "object"
-                  :properties {:path  {:type        ["string" "null"]
-                                       :description "Root path to browse from (null = full tree from roots)"}
-                               :depth {:type        "integer"
-                                       :description "Max tree depth to return (default 2)"
-                                       :default     2}}}}
+                  :properties {:limit  {:type        "integer"
+                                        :description "Max tags to return (default 50)"
+                                        :default     50}
+                               :offset {:type        "integer"
+                                        :description "Skip first N tags (default 0)"
+                                        :default     0}}}}
 
    {:name        "memory_count_facts"
     :description "Count facts matching tag set intersections without fetching content. Send multiple tag sets to compare counts and decide which to fetch. Each tag set returns facts that have ALL listed tags."
     :inputSchema {:type       "object"
                   :properties {:tag_sets {:type        "array"
                                           :items       {:type "array" :items {:type "string"}}
-                                          :description "Array of tag sets. Each set is an array of tag paths."}}
+                                          :description "Array of tag sets. Each set is an array of tag names."}}
                   :required   ["tag_sets"]}}
 
    {:name        "memory_get_facts"
@@ -39,7 +40,7 @@
     :inputSchema {:type       "object"
                   :properties {:tag_sets {:type        "array"
                                           :items       {:type "array" :items {:type "string"}}
-                                          :description "Array of tag sets. Each set is an array of tag paths."}
+                                          :description "Array of tag sets. Each set is an array of tag names."}
                                :limit    {:type        "integer"
                                           :description "Max facts per tag set (default 50)"
                                           :default     50}}
@@ -56,12 +57,10 @@
                   :required   ["query"]}}
 
    {:name        "memory_create_tag"
-    :description "Create a new tag in the taxonomy. Provide parent_path to nest under an existing tag, or omit for a root tag."
+    :description "Create a new tag. Tags are atomic strings (no hierarchy)."
     :inputSchema {:type       "object"
-                  :properties {:name        {:type        "string"
-                                             :description "Tag leaf name (e.g. 'clojure')"}
-                               :parent_path {:type        "string"
-                                             :description "Parent tag path (e.g. 'languages'). Omit for root tag."}}
+                  :properties {:name {:type        "string"
+                                      :description "Tag name (e.g. 'clj', 'error-handling')"}}
                   :required   ["name"]}}
 
    {:name        "memory_remember"
@@ -70,7 +69,7 @@
                   :properties {:nodes        {:type        "array"
                                               :items       {:type       "object"
                                                             :properties {:content   {:type "string" :description "Fact content (1-3 sentences)"}
-                                                                         :tags      {:type "array" :items {:type "string"} :description "Tag paths"}}
+                                                                         :tags      {:type "array" :items {:type "string"} :description "Tag names"}}
                                                             :required   ["content" "tags"]}
                                               :description "Memory nodes to store"}
                                :turn_summary     {:type        "string"
@@ -78,7 +77,9 @@
                                :session_summary  {:type        "string"
                                                   :description "Rolling 1-sentence session summary (updated each turn). Stored as searchable fact."}
                                :context_id       {:type        "string"
-                                                  :description "Session ID for context-based linking across calls"}}}}
+                                                  :description "Session ID for context-based linking across calls"}
+                               :project          {:type        "string"
+                                                  :description "Project name. Session summary tagged with this."}}}}
 
    {:name        "memory_list_blobs"
     :description "List stored blobs (conversations, documents) sorted by date desc. Returns compact text: one line per blob with date, dir, summary."
@@ -102,7 +103,7 @@
                   :properties {:title   {:type "string"  :description "Descriptive name"}
                                :project {:type "string"  :description "Project name"}
                                :summary {:type "string"  :description "What this file is, 1-2 sentences"}
-                               :tags    {:type "array" :items {:type "string"} :description "Tag paths"}
+                               :tags    {:type "array" :items {:type "string"} :description "Tag names"}
                                :type    {:type "string"  :description "file, code, image, document"}
                                :content {:type ["string" "null"] :description "File content as text"}
                                :path    {:type ["string" "null"] :description "Absolute file path (server reads from disk)"}}
@@ -110,26 +111,12 @@
 
 ;; --- Compact text rendering ---
 
-(defn- render-taxonomy-node [node depth]
-  (let [indent   (apply str (repeat (* 2 depth) \space))
-        line     (str indent (:tag/name node) " " (:node-count node 0))
-        ellipsis (when (:truncated node)
-                   (str (apply str (repeat (* 2 (inc depth)) \space)) "..."))]
-    (cond
-      (seq (:children node))
-      (str line "\n" (str/join "\n" (map #(render-taxonomy-node % (inc depth)) (:children node))))
-
-      ellipsis
-      (str line "\n" ellipsis)
-
-      :else line)))
-
-(defn render-taxonomy
-  "Renders taxonomy tree as indented text. Agent reconstructs paths from hierarchy.
-   `...` as child means truncated — deeper levels exist. Example:
-   languages 142\\n  clojure 87\\n    ...\\n  python 31"
-  [tree]
-  (str/join "\n" (map #(render-taxonomy-node % 0) tree)))
+(defn render-tag-list
+  "Renders flat tag list as text. One line per tag: `name count`."
+  [tags]
+  (if (empty? tags)
+    "(no tags)"
+    (str/join "\n" (map (fn [t] (str (:tag/name t) " " (or (:tag/node-count t) 0))) tags))))
 
 (defn- tags-header [tags]
   (str/join " + " tags))
@@ -171,7 +158,7 @@
              (let [score   (:search/score node)
                    content (:node/content node)
                    tags    (->> (:node/tag-refs node)
-                                (map :tag/path)
+                                (map :tag/name)
                                 (str/join ", "))]
                (str (format "%.2f" (double score)) " " content
                     (when (seq tags) (str " [" tags "]")))))
@@ -214,22 +201,22 @@
   "Explicit per-tool parameter conversion. Not a generic deep transform."
   [handler-key params]
   (case handler-key
-    :browse-tags {:path  (:path params)
-                  :depth (or (:depth params) 2)}
+    :browse-tags {:limit  (or (:limit params) 50)
+                  :offset (or (:offset params) 0)}
     :count-facts {:tag-sets (:tag_sets params)}
     :get-facts   {:tag-sets (:tag_sets params)
                   :limit    (or (:limit params) 50)}
     :search      {:query (:query params)
                   :top-k (or (:top_k params) 10)}
-    :create-tag  {:name        (:name params)
-                  :parent-path (:parent_path params)}
+    :create-tag  {:name (:name params)}
     :remember    {:nodes           (mapv (fn [n]
                                         {:content (:content n)
                                          :tags    (:tags n)})
                                       (:nodes params))
                   :turn-summary    (:turn_summary params)
                   :session-summary (:session_summary params)
-                  :context-id      (:context_id params)}
+                  :context-id      (:context_id params)
+                  :project         (:project params)}
     :list-blobs  {:limit (or (:limit params) 20)}
     :read-blob   {:blob-dir (:blob_dir params)
                   :section  (:section params)}
@@ -291,7 +278,7 @@
 
 (defn- format-result [handler-key result]
   (case handler-key
-    :browse-tags (render-taxonomy result)
+    :browse-tags (render-tag-list result)
     :count-facts (render-counts result)
     :get-facts   (render-facts result)
     :search      (render-search-results result)

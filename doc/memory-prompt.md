@@ -12,8 +12,8 @@ Long-term memory across sessions and projects. 10 MCP tools via `ai-memory` serv
 
 Before working on the first message:
 
-1. `memory_browse_tags({ path: null, depth: 4 })` — see what knowledge exists
-2. `memory_get_facts({ tag_sets: [["pref"], ["proj/{project}"]] })` — load preferences + project context
+1. `memory_browse_tags({ limit: 50 })` — see all tags sorted by usage
+2. `memory_get_facts({ tag_sets: [["pref"], ["{project}"]] })` — load preferences + project context
 3. Based on the task, load relevant domain facts too
 
 Multiple tag sets in one call. Use `memory_count_facts` first only when a tag set might return 50+ results.
@@ -27,17 +27,20 @@ Call `memory_remember` silently with turn summary and any extracted facts:
 ```
 memory_remember({
   context_id: "<session-id>",
+  project: "<project-name>",
   turn_summary: "User: <request gist> → <what I did/decided>",
   session_summary: "One-sentence rolling summary of entire session so far",
   nodes: [
-    { content: "Prefers X over Y", tags: [...] }
+    { content: "Prefers X over Y", tags: ["pref", "coding-style"] }
   ]
 })
 ```
 
 **turn_summary** — always include. One line: what the user asked, what you did. Server stores it in a RAM buffer and matches to blob sections by timestamp (not a fact).
 
-**session_summary** — always include. Rolling 1-sentence summary of the entire session so far. Stored as a searchable Datomic fact with `proj/*` tag. Updated each turn (upsert).
+**session_summary** — always include. Rolling 1-sentence summary of the entire session so far. Stored as a searchable Datomic fact tagged with `project`. Updated each turn (upsert).
+
+**project** — always include. The project name (e.g. "ai-memory"). Used to tag session summaries.
 
 **nodes** — only when something worth remembering was learned:
 
@@ -51,7 +54,7 @@ Not every turn produces facts. `nodes` can be empty — turn summary alone is va
 
 ### Fact Quality
 
-Good: self-contained, specific, has rationale, 2-4 tags from different branches.
+Good: self-contained, specific, has rationale, 2-4 tags.
 Bad: restates code/docs, too vague, temporary, trivially obvious.
 
 ### Abstraction Levels
@@ -82,6 +85,9 @@ Returns facts ranked by relevance score. Complement with tag retrieval — not a
 
 ## Tags
 
-- Short kebab-case: `lang/clj`, `proj/ai-memory`, `pref/coding-style`, `pattern/error-handling`
-- Browse taxonomy before creating — prefer existing tags
-- Create freely when nothing fits, keep flat (avoid >4 nesting levels)
+- Atomic kebab-case strings: `clojure`, `ai-memory`, `pattern`, `coding-style`, `error-handling`
+- One node → many tags (flat set, no hierarchy)
+- Query by intersection: `["ai-memory", "clojure"]` = facts tagged with BOTH
+- Browse tags before creating — prefer existing
+- It's allowed to use more detailed tags in order to avoid ambiguity (e.g. `project/claude-memory` instead of just `claude-memory`) but always prefer existing tags if they fit.
+  

@@ -11,17 +11,17 @@
 (defn- now [] (Date.))
 
 (defn- has-entity-tag?
-  "Checks tag-refs (lookup refs or pulled maps) for type/entity tag."
+  "Checks tag-refs (lookup refs or pulled maps) for entity tag."
   [tag-refs]
   (some (fn [ref]
           (cond
-            (vector? ref) (= (second ref) "type/entity")
-            (map? ref)    (= (:tag/path ref) "type/entity")
+            (vector? ref) (= (second ref) "entity")
+            (map? ref)    (= (:tag/name ref) "entity")
             :else         false))
         tag-refs))
 
 (defn- skip-embedding?
-  "Blob nodes (have blob-dir) and entity nodes (have type/entity tag) skip vectorization."
+  "Blob nodes (have blob-dir) and entity nodes (have entity tag) skip vectorization."
   [{:keys [blob-dir tag-refs]}]
   (or blob-dir (has-entity-tag? tag-refs)))
 
@@ -38,7 +38,7 @@
   "Creates a memory node in Datomic. Embeds content in Qdrant unless blob/entity.
    Automatically sets :node/created-at and :node/updated-at to now.
    `cfg` — {:embedding-url, :qdrant-url}.
-   `tag-refs` — vec of lookup refs like [[:tag/path \"lang/clj\"]].
+   `tag-refs` — vec of lookup refs like [[:tag/name \"clj\"]].
    Optional keys: :blob-dir (string), :sources (set of strings)."
   [conn cfg {:keys [content tag-refs tick blob-dir sources session-id]}]
   (let [node-uuid    (d/squuid)
@@ -89,14 +89,14 @@
       (first results))))
 
 (defn find-entity-by-content
-  "Finds an entity node (tagged type/entity) by exact content match. Returns entity map or nil."
+  "Finds an entity node (tagged entity) by exact content match. Returns entity map or nil."
   [db content]
   (let [eid (d/q '[:find ?e .
                    :in $ ?content
                    :where
                    [?e :node/content ?content]
                    [?e :node/tag-refs ?tag]
-                   [?tag :tag/path "type/entity"]]
+                   [?tag :tag/name "entity"]]
                  db content)]
     (when eid
       (d/pull db '[*] eid))))
@@ -105,7 +105,7 @@
   "Reinforces existing node: bumps weight, cycle, updated-at. Re-embeds unless blob/entity."
   [conn cfg node-uuid new-content delta current-cycle]
   (let [db   (d/db conn)
-        node (d/pull db [:node/weight :node/blob-dir {:node/tag-refs [:tag/path]}]
+        node (d/pull db [:node/weight :node/blob-dir {:node/tag-refs [:tag/name]}]
                      [:node/id node-uuid])
         current-weight (or (:node/weight node) 1.0)
         new-weight     (+ current-weight delta)]
@@ -136,12 +136,12 @@
   [conn node-uuid tag-refs]
   (when (seq tag-refs)
     (let [db       (d/db conn)
-          existing (set (d/q '[:find [?path ...]
+          existing (set (d/q '[:find [?name ...]
                                :in $ ?nid
                                :where
                                [?n :node/id ?nid]
                                [?n :node/tag-refs ?t]
-                               [?t :tag/path ?path]]
+                               [?t :tag/name ?name]]
                              db node-uuid))
           new-refs (remove #(existing (second %)) tag-refs)
           count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) new-refs)]
@@ -156,7 +156,7 @@
   [db {:keys [limit] :or {limit 20}}]
   (let [pull-expr [:node/id :node/content
                    :node/created-at :node/updated-at :node/blob-dir
-                   {:node/tag-refs [:tag/path]}]
+                   {:node/tag-refs [:tag/name]}]
         results   (d/q '[:find [(pull ?n pull-expr) ...]
                          :in $ pull-expr
                          :where

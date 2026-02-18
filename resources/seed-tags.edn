@@ -1,5 +1,0 @@
-;; Root tag categories. Idempotent via :tag/path identity.
-[{:tag/name "lang"    :tag/path "lang"}
- {:tag/name "pattern" :tag/path "pattern"}
- {:tag/name "proj"    :tag/path "proj"}
- {:tag/name "pref"    :tag/path "pref"}]

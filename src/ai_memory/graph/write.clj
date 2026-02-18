@@ -77,7 +77,7 @@
   (long (Math/floor (/ (Math/log min-weight) (Math/log factor)))))
 
 (defn- entity-node? [node-data]
-  (some #(= % "type/entity") (:tags node-data)))
+  (some #(= % "entity") (:tags node-data)))
 
 (defn- find-duplicate-node
   "Entity nodes: exact content match. Other nodes: vector search."

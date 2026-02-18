@@ -28,7 +28,7 @@
    :content (:node/content n)
    :type    (infer-d3-type n)
    :weight  (:node/weight n)
-   :tags    (mapv :tag/path (:node/tag-refs n))})
+   :tags    (mapv :tag/name (:node/tag-refs n))})
 
 (defn- edge->d3 [e]
   {:source (str (get-in e [:edge/from :node/id]))
@@ -39,7 +39,7 @@
   "Returns full graph for D3 visualization."
   [conn _req]
   (let [db    (db/db conn)
-        nodes (d/q '[:find [(pull ?e [* {:node/tag-refs [:tag/path]}]) ...]
+        nodes (d/q '[:find [(pull ?e [* {:node/tag-refs [:tag/name]}]) ...]
                       :where [?e :node/id]]
                     db)
         edges (edge/find-all db)]
@@ -62,19 +62,18 @@
 ;; --- Tags ---
 
 (defn browse-tags [conn _cfg req]
-  (let [db    (db/db conn)
-        path  (get-in req [:query-params "path"])
-        depth (some-> (get-in req [:query-params "depth"]) parse-long)]
+  (let [db     (db/db conn)
+        limit  (some-> (get-in req [:query-params "limit"]) parse-long)
+        offset (some-> (get-in req [:query-params "offset"]) parse-long)]
     {:status 200
-     :body   (if depth
-               (tag-query/taxonomy db path depth)
-               (tag-query/browse db path))}))
+     :body   (tag-query/browse db {:limit  (or limit 50)
+                                    :offset (or offset 0)})}))
 
 (defn create-tag [conn _cfg req]
-  (let [{:keys [name parent-path]} (:body-params req)
-        path (tag/create-tag! conn {:name name :parent-path parent-path})]
+  (let [{:keys [name]} (:body-params req)]
+    (tag/ensure-tag! conn name)
     {:status 201
-     :body   {:tag/path path}}))
+     :body   {:tag/name name}}))
 
 (defn count-facts [conn cfg req]
   (let [db       (db/db conn)
@@ -111,14 +110,6 @@
 
 ;; --- Remember (full: nodes + turn summary + session summary) ---
 
-(defn- extract-project-tag
-  "Finds first proj/* tag from nodes' tags."
-  [nodes]
-  (->> nodes
-       (mapcat :tags)
-       (filter #(str/starts-with? % "proj/"))
-       first))
-
 (defn- find-session-fact
   "Finds existing session node by session-id."
   [db session-id]
@@ -130,13 +121,14 @@
 
 (defn- upsert-session-fact!
   "Creates or updates the rolling session summary fact."
-  [conn cfg session-id session-summary proj-tag]
+  [conn cfg session-id session-summary project]
   (let [db  (db/db conn)
         eid (find-session-fact db session-id)]
     (if eid
       @(d/transact conn [[:db/add eid :node/content session-summary]
                          [:db/add eid :node/updated-at (Date.)]])
-      (let [tag-refs (tag-resolve/resolve-tags conn [(or proj-tag "session-log")])
+      (let [tag-strs (if project [project] ["session-log"])
+            tag-refs (tag-resolve/resolve-tags conn tag-strs)
             tick     (db/current-tick db)]
         (node/create-node conn cfg
           {:content    session-summary
@@ -150,7 +142,7 @@
         turn-summary    (:turn-summary body)
         session-summary (:session-summary body)
         context-id      (:context-id body)
-        proj-tag        (extract-project-tag nodes)
+        project         (:project body)
         result          (when (seq nodes)
                           (write/remember conn cfg body))]
     ;; Turn summary → RAM buffer (NOT a fact)
@@ -158,7 +150,7 @@
       (session/append-turn-summary! context-id turn-summary))
     ;; Session summary → Datomic session fact (searchable)
     (when (and session-summary context-id)
-      (upsert-session-fact! conn cfg context-id session-summary proj-tag))
+      (upsert-session-fact! conn cfg context-id session-summary project))
     {:status 201
      :body   (or result {:nodes [] :edges-created 0})}))
 
@@ -314,7 +306,7 @@
             @(d/transact conn [[:db/add session-eid :node/blob-dir blob-dir]
                                [:db/add session-eid :node/updated-at (Date.)]]))
           (let [tag-refs (when project
-                           (tag-resolve/resolve-tags conn [(str "proj/" project)]))]
+                           (tag-resolve/resolve-tags conn [project]))]
             (node/create-node conn cfg
               {:content    (or (:summary meta-data) "Session conversation")
                :tag-refs   tag-refs

@@ -31,9 +31,8 @@
 
 ;; --- Tool handlers (each proxies to one HTTP endpoint) ---
 
-(defn handle-browse-tags [base-url {:keys [path depth] :or {depth 2}}]
-  (api-get base-url "/api/tags" (cond-> {:depth depth}
-                                  path (assoc :path path))))
+(defn handle-browse-tags [base-url {:keys [limit offset] :or {limit 50 offset 0}}]
+  (api-get base-url "/api/tags" {:limit limit :offset offset}))
 
 (defn handle-count-facts [base-url {:keys [tag-sets]}]
   (:counts (api-post base-url "/api/tags/count" {:tag-sets tag-sets})))
@@ -44,8 +43,8 @@
 (defn handle-search-facts [base-url {:keys [query top-k] :or {top-k 10}}]
   (:results (api-post base-url "/api/search" {:query query :top-k top-k})))
 
-(defn handle-create-tag [base-url {:keys [name parent-path]}]
-  (api-post base-url "/api/tags" {:name name :parent-path parent-path}))
+(defn handle-create-tag [base-url {:keys [name]}]
+  (api-post base-url "/api/tags" {:name name}))
 
 (defn handle-remember [base-url params]
   (api-post base-url "/api/remember" params))

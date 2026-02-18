@@ -35,11 +35,11 @@
 
 ;; --- Helpers ---
 
-(defn- create-tagged-node! [conn content tag-paths]
+(defn- create-tagged-node! [conn content tag-names]
   (let [uuid (d/squuid)]
-    (doseq [p tag-paths]
-      (tag/ensure-tag! conn p))
-    (let [tag-refs  (mapv #(vector :tag/path %) tag-paths)
+    (doseq [n tag-names]
+      (tag/ensure-tag! conn n))
+    (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
           count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)]
       @(d/transact conn
          (into [{:db/id         (d/tempid :db.part/user)
@@ -106,139 +106,110 @@
     (let [resp (call "tools/call" :params {:name "nonexistent_tool" :arguments {}})]
       (is (= -32602 (get-in resp [:error :code]))))))
 
-;; --- Render taxonomy ---
+;; --- Render tag list ---
 
-(deftest render-taxonomy-test
-  (testing "renders tree as indented text"
-    (let [tree [{:tag/name "lang" :node-count 142
-                 :children [{:tag/name "clj" :node-count 87}
-                            {:tag/name "py" :node-count 31}]}
-                {:tag/name "pat" :node-count 95 :truncated true}]]
-      (is (= "lang 142\n  clj 87\n  py 31\npat 95\n  ..."
-             (protocol/render-taxonomy tree))))))
+(deftest render-tag-list-test
+  (testing "renders flat tag list as name count lines"
+    (let [tags [{:tag/name "clj" :tag/node-count 87}
+                {:tag/name "python" :tag/node-count 31}
+                {:tag/name "pref" :tag/node-count 12}]]
+      (is (= "clj 87\npython 31\npref 12"
+             (protocol/render-tag-list tags))))))
 
-(deftest render-taxonomy-deep-test
-  (testing "renders deep nesting with correct indentation"
-    (let [tree [{:tag/name "lang" :node-count 100
-                 :children [{:tag/name "clj" :node-count 50
-                             :children [{:tag/name "core" :node-count 10
-                                         :children [{:tag/name "async" :node-count 3}]}]}]}]]
-      (is (= "lang 100\n  clj 50\n    core 10\n      async 3"
-             (protocol/render-taxonomy tree))))))
+(deftest render-tag-list-empty-test
+  (testing "renders empty tag list"
+    (is (= "(no tags)" (protocol/render-tag-list [])))))
 
-(deftest render-taxonomy-truncated-leaf-test
-  (testing "truncated leaf shows ... at child indent"
-    (let [tree [{:tag/name "lang" :node-count 100
-                 :children [{:tag/name "clj" :node-count 50 :truncated true}
-                            {:tag/name "py" :node-count 30}]}]]
-      (is (= "lang 100\n  clj 50\n    ...\n  py 30"
-             (protocol/render-taxonomy tree))))))
+(deftest render-tag-list-nil-count-test
+  (testing "renders tags with nil count as 0"
+    (let [tags [{:tag/name "new-tag" :tag/node-count nil}]]
+      (is (= "new-tag 0" (protocol/render-tag-list tags))))))
 
 (deftest render-counts-test
   (testing "renders counts as tag-set: N lines"
-    (is (= "languages/clojure: 87\nlanguages/clojure + patterns/error-handling: 7"
+    (is (= "clj: 87\nclj + error-handling: 7"
            (protocol/render-counts
-             [{:tags ["languages/clojure"] :count 87}
-              {:tags ["languages/clojure" "patterns/error-handling"] :count 7}])))))
+             [{:tags ["clj"] :count 87}
+              {:tags ["clj" "error-handling"] :count 7}])))))
 
 (deftest render-facts-test
   (testing "renders facts as plain text grouped by tag set"
     (let [text (protocol/render-facts
-                 [{:tags ["languages/clojure"]
+                 [{:tags ["clj"]
                    :facts [{:node/content "Use ex-info for errors"}
                            {:node/content "Prefer immutable data"}]}
-                  {:tags ["languages/python"]
+                  {:tags ["python"]
                    :facts [{:node/content "Use dataclasses"}]}])]
-      (is (= (str "= languages/clojure\n"
+      (is (= (str "= clj\n"
                    "- Use ex-info for errors\n"
                    "- Prefer immutable data\n"
                    "\n"
-                   "= languages/python\n"
+                   "= python\n"
                    "- Use dataclasses")
              text)))))
 
 ;; --- Tool dispatch with embedded HTTP server ---
 
 (deftest browse-tags-tool-test
-  (testing "memory_browse_tags returns indented text with 4 root tags"
+  (testing "memory_browse_tags returns flat tag list"
+    (create-tagged-node! *conn* "Fact 1" ["clj"])
+    (create-tagged-node! *conn* "Fact 2" ["clj"])
+    (create-tagged-node! *conn* "Fact 3" ["python"])
     (let [resp (call "tools/call"
                  :params {:name "memory_browse_tags"
-                          :arguments {:depth 1}})
-          text (get-in resp [:result :content 0 :text])
-          lines (str/split-lines text)]
-      (is (nil? (:error resp)))
-      (is (= 4 (count lines)))
-      (is (every? #(re-matches #"\S+ \d+" %) lines)))))
-
-(deftest browse-tags-subtree-test
-  (testing "memory_browse_tags drills into a branch with indentation"
-    (tag/ensure-tag! *conn* "languages/clojure")
-    (tag/ensure-tag! *conn* "languages/python")
-    (let [resp (call "tools/call"
-                 :params {:name "memory_browse_tags"
-                          :arguments {:path "languages" :depth 1}})
-          text (get-in resp [:result :content 0 :text])
-          lines (str/split-lines text)]
-      (is (>= (count lines) 2))
-      (is (some #(str/includes? % "clojure") lines)))))
-
-(deftest browse-tags-nested-test
-  (testing "deeper depth shows indented children"
-    (tag/ensure-tag! *conn* "languages/clojure/core")
-    (create-tagged-node! *conn* "Core fact" ["languages/clojure/core"])
-    (let [resp (call "tools/call"
-                 :params {:name "memory_browse_tags"
-                          :arguments {:depth 3}})
-          text (get-in resp [:result :content 0 :text])
-          lines (str/split-lines text)]
-      (is (some #(re-matches #"  \S+.*" %) lines))
-      (is (some #(re-matches #"    \S+.*" %) lines)))))
-
-(deftest browse-tags-truncated-test
-  (testing "truncated branches show ... at child indent"
-    (tag/ensure-tag! *conn* "languages/clojure/core")
-    (let [resp (call "tools/call"
-                 :params {:name "memory_browse_tags"
-                          :arguments {:depth 2}})
-          text (get-in resp [:result :content 0 :text])]
-      (is (str/includes? text "clojure 0\n    ...")))))
-
-(deftest count-facts-tool-test
-  (testing "memory_count_facts returns text counts"
-    (create-tagged-node! *conn* "A" ["languages/clojure" "patterns/error-handling"])
-    (create-tagged-node! *conn* "B" ["languages/clojure"])
-    (let [resp (call "tools/call"
-                 :params {:name "memory_count_facts"
-                          :arguments {:tag_sets [["languages/clojure"]
-                                                 ["languages/clojure" "patterns/error-handling"]]}})
+                          :arguments {:limit 50}})
           text (get-in resp [:result :content 0 :text])
           lines (str/split-lines text)]
       (is (nil? (:error resp)))
       (is (= 2 (count lines)))
-      (is (= "languages/clojure: 2" (first lines)))
-      (is (= "languages/clojure + patterns/error-handling: 1" (second lines))))))
+      (is (every? #(re-matches #"\S+ \d+" %) lines))
+      ;; Sorted by count desc: clj 2 first
+      (is (str/starts-with? (first lines) "clj")))))
+
+(deftest browse-tags-empty-test
+  (testing "memory_browse_tags with no tags returns (no tags)"
+    (let [resp (call "tools/call"
+                 :params {:name "memory_browse_tags"
+                          :arguments {}})
+          text (get-in resp [:result :content 0 :text])]
+      (is (= "(no tags)" text)))))
+
+(deftest count-facts-tool-test
+  (testing "memory_count_facts returns text counts"
+    (create-tagged-node! *conn* "A" ["clj" "error-handling"])
+    (create-tagged-node! *conn* "B" ["clj"])
+    (let [resp (call "tools/call"
+                 :params {:name "memory_count_facts"
+                          :arguments {:tag_sets [["clj"]
+                                                 ["clj" "error-handling"]]}})
+          text (get-in resp [:result :content 0 :text])
+          lines (str/split-lines text)]
+      (is (nil? (:error resp)))
+      (is (= 2 (count lines)))
+      (is (= "clj: 2" (first lines)))
+      (is (= "clj + error-handling: 1" (second lines))))))
 
 (deftest get-facts-tool-test
   (testing "memory_get_facts returns plain text facts"
     (create-tagged-node! *conn* "Clojure error handling"
-                         ["languages/clojure" "patterns/error-handling"])
-    (create-tagged-node! *conn* "Python basics" ["languages/python"])
+                         ["clj" "error-handling"])
+    (create-tagged-node! *conn* "Python basics" ["python"])
     (let [resp (call "tools/call"
                  :params {:name "memory_get_facts"
-                          :arguments {:tag_sets [["languages/clojure"]]
+                          :arguments {:tag_sets [["clj"]]
                                       :limit 10}})
           text (get-in resp [:result :content 0 :text])]
       (is (nil? (:error resp)))
-      (is (str/includes? text "= languages/clojure"))
+      (is (str/includes? text "= clj"))
       (is (str/includes? text "- Clojure error handling"))
       (is (not (str/includes? text "Python basics"))))))
 
 (deftest create-tag-tool-test
-  (testing "memory_create_tag creates a new tag"
+  (testing "memory_create_tag creates a new atomic tag"
     (let [resp (call "tools/call"
                  :params {:name "memory_create_tag"
-                          :arguments {:name "rust" :parent_path "lang"}})
+                          :arguments {:name "rust"}})
           text (get-in resp [:result :content 0 :text])
           data (json/parse-string text true)]
       (is (nil? (:error resp)))
-      (is (= "lang/rust" (:tag/path data))))))
+      (is (= "rust" (:tag/name data))))))
