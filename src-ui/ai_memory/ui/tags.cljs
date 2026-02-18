@@ -13,6 +13,8 @@
                         :facts          nil
                         :facts-loading? false}))
 
+(defonce poll-handle (atom nil))
+
 ;; --- Colors ---
 
 (def ^:private category-colors
@@ -364,10 +366,18 @@
                         (or (not= (:tree-data old) (:tree-data new))
                             (not= (:selected old) (:selected new))))
                (when-let [data (:tree-data new)]
-                 (build-tree @svg-ref data (:selected new) (make-on-select)))))))
+                 (build-tree @svg-ref data (:selected new) (make-on-select))))))
+         (reset! poll-handle
+           (js/setInterval
+             (fn []
+               (load-taxonomy!)
+               (when (seq (:selected @state))
+                 (load-facts! (:selected @state))))
+             5000)))
 
        :component-will-unmount
        (fn [_this]
+         (when-let [h @poll-handle] (js/clearInterval h))
          (remove-watch state ::tree-watcher))
 
        :reagent-render

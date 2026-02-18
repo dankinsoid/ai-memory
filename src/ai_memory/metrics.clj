@@ -15,7 +15,7 @@
 
 (def write-edges
   (prometheus/histogram
-    :memory/write-edges
+    :memory/write-edges-per-call
     {:description "Edges created per remember call"
      :labels      [:type]
      :buckets     [0 1 5 10 25 50 100 250 500 1000]}))

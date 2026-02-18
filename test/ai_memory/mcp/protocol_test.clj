@@ -5,24 +5,33 @@
             [datomic.api :as d]
             [ai-memory.db.core :as db]
             [ai-memory.tag.core :as tag]
+            [ai-memory.web.handler :as web]
             [ai-memory.mcp.protocol :as protocol]))
 
 (def ^:dynamic *conn* nil)
+(def ^:dynamic *base-url* nil)
+(def ^:dynamic *server* nil)
 
 (defn- test-uri []
   (str "datomic:mem://mcp-protocol-test-" (d/squuid)))
 
-(defn with-datomic [f]
+(defn with-server [f]
   (let [uri  (test-uri)
-        conn (db/connect uri)]
-    (db/ensure-schema conn)
-    (binding [*conn* conn]
+        conn (db/connect uri)
+        _    (db/ensure-schema conn)
+        cfg  {:metrics nil :blob-path "/tmp/ai-memory-test-blobs"}
+        srv  (web/start {:port 0 :conn conn :cfg cfg})
+        port (-> srv .getConnectors first .getLocalPort)]
+    (binding [*conn*     conn
+              *base-url* (str "http://localhost:" port)
+              *server*   srv]
       (try
         (f)
         (finally
+          (.stop srv)
           (d/delete-database uri))))))
 
-(use-fixtures :each with-datomic)
+(use-fixtures :each with-server)
 
 ;; --- Helpers ---
 
@@ -44,7 +53,7 @@
     uuid))
 
 (defn- handler []
-  (protocol/make-handler *conn* {:metrics nil}))
+  (protocol/make-handler *base-url*))
 
 (defn- call [method & {:keys [id params] :or {id 1 params {}}}]
   ((handler) {:jsonrpc "2.0" :id id :method method :params params}))
@@ -60,10 +69,10 @@
       (is (some? (get-in resp [:result :capabilities :tools]))))))
 
 (deftest tools-list-test
-  (testing "returns all 9 tools with schemas"
+  (testing "returns all 10 tools with schemas"
     (let [resp  (call "tools/list")
           tools (get-in resp [:result :tools])]
-      (is (= 9 (count tools)))
+      (is (= 10 (count tools)))
       (is (every? :name tools))
       (is (every? :description tools))
       (is (every? :inputSchema tools)))))
@@ -73,7 +82,7 @@
     (let [resp  (call "tools/list")
           names (set (map :name (get-in resp [:result :tools])))]
       (is (= #{"memory_browse_tags" "memory_count_facts" "memory_get_facts"
-               "memory_create_tag" "memory_remember"
+               "memory_search" "memory_create_tag" "memory_remember"
                "memory_list_blobs" "memory_read_blob"
                "memory_store_conversation" "memory_store_file"}
              names)))))
@@ -149,7 +158,7 @@
                    "- Use dataclasses")
              text)))))
 
-;; --- Tool dispatch with Datomic ---
+;; --- Tool dispatch with embedded HTTP server ---
 
 (deftest browse-tags-tool-test
   (testing "memory_browse_tags returns indented text with 4 root tags"
@@ -172,7 +181,6 @@
           text (get-in resp [:result :content 0 :text])
           lines (str/split-lines text)]
       (is (>= (count lines) 2))
-      ;; leaf names, no indentation (depth 1 from "languages")
       (is (some #(str/includes? % "clojure") lines)))))
 
 (deftest browse-tags-nested-test
@@ -184,7 +192,6 @@
                           :arguments {:depth 3}})
           text (get-in resp [:result :content 0 :text])
           lines (str/split-lines text)]
-      ;; should have indented children
       (is (some #(re-matches #"  \S+.*" %) lines))
       (is (some #(re-matches #"    \S+.*" %) lines)))))
 
@@ -195,7 +202,6 @@
                  :params {:name "memory_browse_tags"
                           :arguments {:depth 2}})
           text (get-in resp [:result :content 0 :text])]
-      ;; clojure has child "core" but depth exhausted → ... under clojure
       (is (str/includes? text "clojure 0\n    ...")))))
 
 (deftest count-facts-tool-test

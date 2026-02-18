@@ -1,4 +1,4 @@
-(ns ai-memory.mcp.session
+(ns ai-memory.session
   "Turn summary buffer in RAM. Accumulates per-session summaries with timestamps.
    Consumed by session sync endpoint when matching summaries to blob sections."
   (:import [java.time Instant Duration]))

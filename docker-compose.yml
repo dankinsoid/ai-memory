@@ -17,11 +17,14 @@ services:
     build: .
     ports:
       - "8080:8080"
+    volumes:
+      - blob-data:/data/blobs
     environment:
       - DATOMIC_URI=datomic:dev://datomic:4334/ai-memory
       - PORT=8080
       - EMBEDDING_URL=http://embedding:80
       - QDRANT_URL=http://qdrant:6333
+      - BLOB_PATH=/data/blobs
     depends_on:
       datomic:
         condition: service_healthy
@@ -80,6 +83,7 @@ services:
 
 volumes:
   datomic-data:
+  blob-data:
   embedding-models:
   qdrant-data:
   prometheus-data:

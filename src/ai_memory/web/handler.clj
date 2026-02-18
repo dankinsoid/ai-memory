@@ -3,6 +3,7 @@
             [reitit.ring :as ring]
             [muuntaja.core :as m]
             [reitit.ring.middleware.muuntaja :as muuntaja]
+            [reitit.ring.middleware.parameters :as parameters]
             [iapetos.collector.ring :as ring-collector]
             [ai-memory.web.api :as api]))
 
@@ -20,9 +21,15 @@
                                 :post (fn [req] (api/create-tag conn cfg req))}]
                       ["/tags/count" {:post (fn [req] (api/count-facts conn cfg req))}]
                       ["/tags/facts" {:post (fn [req] (api/get-facts conn cfg req))}]
+                      ["/search" {:post (fn [req] (api/search conn cfg req))}]
+                      ["/blobs" {:get (fn [req] (api/list-blobs conn cfg req))}]
+                      ["/blobs/read" {:post (fn [req] (api/read-blob conn cfg req))}]
+                      ["/blobs/conversation" {:post (fn [req] (api/store-conversation conn cfg req))}]
+                      ["/blobs/file" {:post (fn [req] (api/store-file conn cfg req))}]
                       ["/session/sync" {:post (fn [req] (api/session-sync conn cfg req))}]]]
                     {:data {:muuntaja   m/instance
-                            :middleware [muuntaja/format-middleware]}})
+                            :middleware [parameters/parameters-middleware
+                                    muuntaja/format-middleware]}})
                   (ring/routes
                     (ring/create-resource-handler {:path "/"})
                     (ring/create-default-handler)))]

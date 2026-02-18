@@ -3,10 +3,18 @@
             [ai-memory.graph.node :as node]
             [ai-memory.graph.edge :as edge]
             [ai-memory.graph.write :as write]
-            [ai-memory.mcp.server :as mcp-server]
             [ai-memory.tag.core :as tag]
             [ai-memory.tag.query :as tag-query]
-            [datomic.api :as d]))
+            [ai-memory.tag.resolve :as tag-resolve]
+            [ai-memory.blob.store :as blob-store]
+            [ai-memory.blob.ingest :as ingest]
+            [ai-memory.session :as session]
+            [datomic.api :as d]
+            [clojure.string :as str])
+  (:import [java.util Date UUID]
+           [java.time Instant]))
+
+;; --- D3 visualization ---
 
 (defn- node->d3 [n]
   {:id      (str (:node/id n))
@@ -25,13 +33,15 @@
   [conn _req]
   (let [db    (db/db conn)
         nodes (d/q '[:find [(pull ?e [* {:node/type [:db/ident]}
-                                          {:node/tag-refs [:tag/path]}]) ...]
+                                         {:node/tag-refs [:tag/path]}]) ...]
                       :where [?e :node/id]]
                     db)
         edges (edge/find-all db)]
     {:status 200
      :body   {:nodes (mapv node->d3 nodes)
               :links (mapv edge->d3 edges)}}))
+
+;; --- Nodes ---
 
 (defn list-nodes [conn req]
   (let [db       (db/db conn)
@@ -47,11 +57,7 @@
     {:status 201
      :body   {:status "created"}}))
 
-(defn remember [conn cfg req]
-  (let [body (:body-params req)
-        result (write/remember conn cfg body)]
-    {:status 201
-     :body   result}))
+;; --- Tags ---
 
 (defn browse-tags [conn _cfg req]
   (let [db    (db/db conn)
@@ -91,13 +97,303 @@
                          (tag-query/by-tags db {:tags tags})
                          [])}}))
 
+;; --- Search ---
+
+(defn search [conn cfg req]
+  (let [db    (db/db conn)
+        body  (:body-params req)
+        query (:query body)
+        top-k (:top-k body 10)]
+    {:status 200
+     :body   {:results (node/search db cfg query top-k)}}))
+
+;; --- Remember (full: nodes + turn summary + session summary) ---
+
+(defn- extract-project-tag
+  "Finds first proj/* tag from nodes' tags."
+  [nodes]
+  (->> nodes
+       (mapcat :tags)
+       (filter #(str/starts-with? % "proj/"))
+       first))
+
+(defn- find-session-fact
+  "Finds existing session fact by session-id."
+  [db session-id]
+  (when session-id
+    (d/q '[:find ?e .
+           :in $ ?sid
+           :where [?e :node/session-id ?sid]
+                  [?e :node/type :node.type/session]]
+         db session-id)))
+
+(defn- upsert-session-fact!
+  "Creates or updates the rolling session summary fact."
+  [conn cfg session-id session-summary proj-tag]
+  (let [db  (db/db conn)
+        eid (find-session-fact db session-id)]
+    (if eid
+      @(d/transact conn [[:db/add eid :node/content session-summary]
+                         [:db/add eid :node/updated-at (Date.)]])
+      (let [tag-refs (tag-resolve/resolve-tags conn [(or proj-tag "session-log")])
+            tick     (db/current-tick db)]
+        (node/create-node conn cfg
+          {:content    session-summary
+           :node-type  :session
+           :tag-refs   tag-refs
+           :tick       tick
+           :session-id session-id})))))
+
+(defn remember [conn cfg req]
+  (let [body            (:body-params req)
+        nodes           (:nodes body)
+        turn-summary    (:turn-summary body)
+        session-summary (:session-summary body)
+        context-id      (:context-id body)
+        proj-tag        (extract-project-tag nodes)
+        result          (when (seq nodes)
+                          (write/remember conn cfg body))]
+    ;; Turn summary → RAM buffer (NOT a fact)
+    (when (and turn-summary context-id)
+      (session/append-turn-summary! context-id turn-summary))
+    ;; Session summary → Datomic session fact (searchable)
+    (when (and session-summary context-id)
+      (upsert-session-fact! conn cfg context-id session-summary proj-tag))
+    {:status 201
+     :body   (or result {:nodes [] :edges-created 0})}))
+
+;; --- Blobs ---
+
+(defn list-blobs [conn _cfg req]
+  (let [db    (db/db conn)
+        type  (get-in req [:query-params "type"])
+        limit (some-> (get-in req [:query-params "limit"]) parse-long)]
+    {:status 200
+     :body   {:blobs (node/find-blobs db {:type type :limit (or limit 20)})}}))
+
+(defn read-blob [_conn cfg req]
+  (let [body     (:body-params req)
+        blob-dir (:blob-dir body)
+        section  (:section body)
+        base     (:blob-path cfg)]
+    (if section
+      (if-let [result (blob-store/read-section-by-index base blob-dir section)]
+        {:status 200 :body result}
+        {:status 404 :body {:error (str "Section " section " not found in " blob-dir)}})
+      (if-let [meta (blob-store/read-meta base blob-dir)]
+        {:status 200 :body meta}
+        {:status 404 :body {:error (str "Blob not found: " blob-dir)}}))))
+
+(defn- store-conversation-sections!
+  "Parses session JSONL and writes section files to blob dir."
+  [base-path blob-dir session-path sections-spec]
+  (let [turns (ingest/parse-session session-path)
+        sections (if (seq sections-spec)
+                   (ingest/split-by-boundaries (vec turns) sections-spec)
+                   (ingest/split-auto turns 10))]
+    (vec (map-indexed
+           (fn [i {:keys [summary turns]}]
+             (let [filename (blob-store/make-section-filename i summary)
+                   content  (ingest/format-section turns)
+                   lines    (count (str/split-lines content))]
+               (blob-store/write-section! base-path blob-dir filename content)
+               {:file filename :summary summary :lines lines}))
+           sections))))
+
+(defn store-conversation [conn cfg req]
+  (let [body         (:body-params req)
+        base         (:blob-path cfg)
+        project-path (or (:project-path body)
+                         (:project-path cfg)
+                         (System/getProperty "user.dir"))
+        session-id   (:session-id body)
+        session-path (ingest/resolve-session-path session-id project-path)
+        _            (when-not session-path
+                       (throw (ex-info "Session JSONL not found"
+                                       {:session-id session-id})))
+        blob-dir     (blob-store/make-blob-dir-name base (:title body))
+        now          (Date.)
+        section-data (store-conversation-sections! base blob-dir session-path (:sections body))
+        meta-data    {:id         (UUID/randomUUID)
+                      :type       :conversation
+                      :title      (:title body)
+                      :project    (:project body)
+                      :created-at now
+                      :summary    (:summary body)
+                      :status     (:status body)
+                      :session-id session-id
+                      :continues  (:continues body)
+                      :tags       (:tags body)
+                      :sections   section-data}]
+    (blob-store/write-meta! base blob-dir meta-data)
+    (let [tag-refs (when (seq (:tags body))
+                     (tag-resolve/resolve-tags conn (:tags body)))
+          blob-node (node/create-node conn cfg
+                      {:content   (:summary body)
+                       :node-type :conversation
+                       :tag-refs  tag-refs
+                       :tick      (db/current-tick (db/db conn))
+                       :blob-dir  blob-dir})
+          fact-results
+          (when (seq (:facts body))
+            (let [nodes (mapv (fn [f]
+                                (cond-> {:content   (:content f)
+                                         :node-type (or (:node-type f) "fact")
+                                         :tags      (:tags f)}
+                                  (:section f)
+                                  (assoc :sources
+                                    #{(str blob-dir "/"
+                                           (:file (nth section-data (:section f))))})))
+                              (:facts body))]
+              (write/remember conn cfg {:nodes nodes})))]
+      {:status 201
+       :body   {:blob-dir  blob-dir
+                :blob-id   (:node-uuid blob-node)
+                :sections  (count section-data)
+                :facts     (count (:nodes fact-results))}})))
+
+(defn store-file [conn cfg req]
+  (let [body     (:body-params req)
+        base     (:blob-path cfg)
+        blob-dir (blob-store/make-blob-dir-name base (:title body))
+        now      (Date.)
+        ext      (cond
+                   (:path body)    (last (str/split (:path body) #"\."))
+                   (:content body) "md"
+                   :else           "txt")
+        filename (blob-store/make-section-filename 0 (:title body) :ext ext)
+        _        (if (:content body)
+                   (blob-store/write-section! base blob-dir filename (:content body))
+                   (when (:path body)
+                     (blob-store/write-section-binary! base blob-dir filename (:path body))))
+        lines    (when (:content body) (count (str/split-lines (:content body))))
+        meta-data {:id           (UUID/randomUUID)
+                   :type         (keyword (or (:type body) "file"))
+                   :title        (:title body)
+                   :project      (:project body)
+                   :created-at   now
+                   :summary      (:summary body)
+                   :source-path  (:path body)
+                   :tags         (:tags body)
+                   :sections     [{:file filename :summary (:summary body) :lines lines}]}]
+    (blob-store/write-meta! base blob-dir meta-data)
+    (let [tag-refs (when (seq (:tags body))
+                     (tag-resolve/resolve-tags conn (:tags body)))
+          blob-node (node/create-node conn cfg
+                      {:content   (:summary body)
+                       :node-type :document
+                       :tag-refs  tag-refs
+                       :tick      (db/current-tick (db/db conn))
+                       :blob-dir  blob-dir})]
+      {:status 201
+       :body   {:blob-dir blob-dir
+                :blob-id  (:node-uuid blob-node)}})))
+
+;; --- Session sync (called by Stop hook) ---
+
+(defn- parse-instant [s]
+  (when s (Instant/parse s)))
+
+(defn- group-into-turns
+  "Groups messages into turns. A turn starts with a user message."
+  [messages]
+  (when (seq messages)
+    (let [groups (reduce (fn [acc msg]
+                           (if (= "user" (:type msg))
+                             (conj acc [msg])
+                             (if (seq acc)
+                               (update acc (dec (count acc)) conj msg)
+                               (conj acc [msg]))))
+                         [] messages)]
+      (mapv (fn [msgs]
+              {:messages msgs
+               :t-start  (parse-instant (:timestamp (first msgs)))
+               :t-end    (parse-instant (:timestamp (last msgs)))})
+            groups))))
+
+(defn- format-turn-as-markdown
+  "Formats a turn's messages as readable markdown."
+  [messages]
+  (str/join "\n\n"
+    (map (fn [{:keys [role content]}]
+           (let [text (if (string? content)
+                        content
+                        (->> content
+                             (filter #(= "text" (:type %)))
+                             (map :text)
+                             (str/join "\n")))]
+             (str "**" (or role "unknown") "**\n" text)))
+         messages)))
+
+(defn- derive-project [cwd]
+  (when cwd
+    (last (str/split cwd #"/"))))
+
 (defn session-sync [conn cfg req]
-  (let [body   (:body-params req)
-        params {:session-id (:session_id body)
-                :cwd        (:cwd body)
-                :messages   (:messages body)}]
-    (if (:session-id params)
-      {:status 200
-       :body   (mcp-server/handle-session-sync conn cfg params)}
-      {:status 400
-       :body   {:error "session_id required"}})))
+  (let [body      (:body-params req)
+        session-id (:session_id body)
+        cwd        (:cwd body)
+        messages   (:messages body)]
+    (if-not session-id
+      {:status 400 :body {:error "session_id required"}}
+      (let [base      (:blob-path cfg)
+            db        (db/db conn)
+            project   (derive-project cwd)
+            turns     (group-into-turns messages)
+            summaries (session/get-turn-summaries session-id)
+
+            session-eid (find-session-fact db session-id)
+            existing-dir (when session-eid
+                           (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
+            blob-dir    (or existing-dir
+                            (blob-store/make-blob-dir-name base (str "session-" (subs session-id 0 8))))
+
+            existing-meta (blob-store/read-meta base blob-dir)
+            section-offset (count (:sections existing-meta))
+
+            new-sections
+            (vec (map-indexed
+                   (fn [i {:keys [messages t-start t-end]}]
+                     (let [summary  (session/match-summary summaries t-start t-end)
+                           idx      (+ section-offset i)
+                           filename (blob-store/make-section-filename
+                                      idx (or summary (str "turn-" idx)))
+                           content  (format-turn-as-markdown messages)
+                           lines    (count (str/split-lines content))]
+                       (blob-store/write-section! base blob-dir filename content)
+                       {:file filename :summary summary :lines lines
+                        :timestamp (str t-start)}))
+                   turns))
+
+            all-sections (into (vec (:sections existing-meta)) new-sections)
+            meta-data (merge
+                        (or existing-meta
+                            {:id         (UUID/randomUUID)
+                             :type       :session
+                             :project    project
+                             :created-at (Date.)
+                             :session-id session-id})
+                        {:sections all-sections
+                         :summary  (->> all-sections
+                                        (keep :summary)
+                                        (str/join "; "))})]
+        (blob-store/write-meta! base blob-dir meta-data)
+
+        (if session-eid
+          (when-not existing-dir
+            @(d/transact conn [[:db/add session-eid :node/blob-dir blob-dir]
+                               [:db/add session-eid :node/updated-at (Date.)]]))
+          (let [tag-refs (when project
+                           (tag-resolve/resolve-tags conn [(str "proj/" project)]))]
+            (node/create-node conn cfg
+              {:content    (or (:summary meta-data) "Session conversation")
+               :node-type  :session
+               :tag-refs   tag-refs
+               :tick       (db/current-tick db)
+               :blob-dir   blob-dir
+               :session-id session-id})))
+
+        {:status 200
+         :body   {:blob-dir blob-dir
+                  :sections-added (count new-sections)
+                  :total-sections (count all-sections)}}))))

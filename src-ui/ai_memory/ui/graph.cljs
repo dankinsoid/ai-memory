@@ -134,7 +134,8 @@
       (.catch (fn [err] (js/console.error "Failed to fetch graph:" err)))))
 
 (defn graph-view []
-  (let [svg-ref (atom nil)]
+  (let [svg-ref     (atom nil)
+        poll-handle (atom nil)]
     (r/create-class
       {:display-name "graph-view"
        :component-did-mount
@@ -142,7 +143,18 @@
          (fetch-graph
            (fn [data]
              (when @svg-ref
-               (build-graph @svg-ref data)))))
+               (build-graph @svg-ref data))))
+         (reset! poll-handle
+           (js/setInterval
+             (fn []
+               (fetch-graph
+                 (fn [data]
+                   (when @svg-ref
+                     (build-graph @svg-ref data)))))
+             5000)))
+       :component-will-unmount
+       (fn [_this]
+         (when-let [h @poll-handle] (js/clearInterval h)))
        :reagent-render
        (fn []
          [:svg {:ref (fn [el] (reset! svg-ref el))

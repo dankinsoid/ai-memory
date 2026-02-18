@@ -298,18 +298,18 @@
 
 ;; --- Handler dispatch ---
 
-(defn- call-tool [conn cfg handler-key params]
+(defn- call-tool [base-url handler-key params]
   (case handler-key
-    :browse-tags        (server/handle-browse-tags conn cfg params)
-    :count-facts        (server/handle-count-facts conn cfg params)
-    :get-facts          (server/handle-get-facts conn cfg params)
-    :search             (server/handle-search-facts conn cfg params)
-    :create-tag         (server/handle-create-tag conn params)
-    :remember           (server/handle-remember conn cfg params)
-    :list-blobs         (server/handle-list-blobs conn cfg params)
-    :read-blob          (server/handle-read-blob conn cfg params)
-    :store-conversation (server/handle-store-conversation conn cfg params)
-    :store-file         (server/handle-store-file conn cfg params)))
+    :browse-tags        (server/handle-browse-tags base-url params)
+    :count-facts        (server/handle-count-facts base-url params)
+    :get-facts          (server/handle-get-facts base-url params)
+    :search             (server/handle-search-facts base-url params)
+    :create-tag         (server/handle-create-tag base-url params)
+    :remember           (server/handle-remember base-url params)
+    :list-blobs         (server/handle-list-blobs base-url params)
+    :read-blob          (server/handle-read-blob base-url params)
+    :store-conversation (server/handle-store-conversation base-url params)
+    :store-file         (server/handle-store-file base-url params)))
 
 ;; --- JSON-RPC method handlers ---
 
@@ -357,12 +357,12 @@
                    (render-blob-meta result))
     (json/generate-string result)))
 
-(defn- handle-tools-call [conn cfg id params]
+(defn- handle-tools-call [base-url id params]
   (let [tool-name (:name params)
         arguments (or (:arguments params) {})]
     (if-let [handler-key (get handler-keys tool-name)]
       (let [converted (convert-params handler-key arguments)
-            result    (call-tool conn cfg handler-key converted)]
+            result    (call-tool base-url handler-key converted)]
         {:jsonrpc "2.0"
          :id      id
          :result  {:content [{:type "text"
@@ -375,15 +375,15 @@
 ;; --- Top-level dispatch ---
 
 (defn make-handler
-  "Returns a request→response fn closed over conn and cfg."
-  [conn cfg]
+  "Returns a request→response fn closed over base-url."
+  [base-url]
   (fn [{:keys [id method params]}]
     (log/debug "MCP request:" method)
     (case method
       "initialize"                (handle-initialize id)
       "notifications/initialized" nil
       "tools/list"                (handle-tools-list id)
-      "tools/call"                (handle-tools-call conn cfg id params)
+      "tools/call"                (handle-tools-call base-url id params)
       "ping"                      (handle-ping id)
       ;; Unknown method
       (if id
