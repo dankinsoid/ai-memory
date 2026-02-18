@@ -64,10 +64,12 @@
                                                                          :tags      {:type "array" :items {:type "string"} :description "Tag paths"}}
                                                             :required   ["content" "tags"]}
                                               :description "Memory nodes to store"}
-                               :turn_summary {:type        "string"
-                                              :description "One-line turn summary: 'User: <request> → <what I did>'"}
-                               :context_id   {:type        "string"
-                                              :description "Session ID for context-based linking across calls"}}}}
+                               :turn_summary     {:type        "string"
+                                                  :description "One-line turn summary: 'User: <request> → <what I did>'"}
+                               :session_summary  {:type        "string"
+                                                  :description "Rolling 1-sentence session summary (updated each turn). Stored as searchable fact."}
+                               :context_id       {:type        "string"
+                                                  :description "Session ID for context-based linking across calls"}}}}
 
    {:name        "memory_list_blobs"
     :description "List stored blobs (conversations, documents) sorted by date desc. Returns compact text: one line per blob with date, type, title."
@@ -228,13 +230,14 @@
                   :limit    (or (:limit params) 50)}
     :create-tag  {:name        (:name params)
                   :parent-path (:parent_path params)}
-    :remember    {:nodes        (mapv (fn [n]
+    :remember    {:nodes           (mapv (fn [n]
                                         {:content   (:content n)
                                          :node-type (:node_type n)
                                          :tags      (:tags n)})
                                       (:nodes params))
-                  :turn-summary (:turn_summary params)
-                  :context-id   (:context_id params)}
+                  :turn-summary    (:turn_summary params)
+                  :session-summary (:session_summary params)
+                  :context-id      (:context_id params)}
     :list-blobs  {:type  (:type params)
                   :limit (or (:limit params) 20)}
     :read-blob   {:blob-dir (:blob_dir params)

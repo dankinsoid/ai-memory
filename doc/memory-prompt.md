@@ -26,13 +26,16 @@ Call `memory_remember` silently with turn summary and any extracted facts:
 memory_remember({
   context_id: "<session-id>",
   turn_summary: "User: <request gist> → <what I did/decided>",
+  session_summary: "One-sentence rolling summary of entire session so far",
   nodes: [
     { content: "Prefers X over Y", tags: ["pref/...", "lang/..."], node_type: "preference" }
   ]
 })
 ```
 
-**turn_summary** — always include. One line: what the user asked, what you did. Server stores it as a conversation record, tagged with the project from your facts.
+**turn_summary** — always include. One line: what the user asked, what you did. Server stores it in a RAM buffer and matches to blob sections by timestamp (not a fact).
+
+**session_summary** — always include. Rolling 1-sentence summary of the entire session so far. Stored as a searchable Datomic fact with `proj/*` tag. Updated each turn (upsert).
 
 **nodes** — only when something worth remembering was learned:
 

@@ -19,7 +19,8 @@
                       ["/tags" {:get  (fn [req] (api/browse-tags conn cfg req))
                                 :post (fn [req] (api/create-tag conn cfg req))}]
                       ["/tags/count" {:post (fn [req] (api/count-facts conn cfg req))}]
-                      ["/tags/facts" {:post (fn [req] (api/get-facts conn cfg req))}]]]
+                      ["/tags/facts" {:post (fn [req] (api/get-facts conn cfg req))}]
+                      ["/session/sync" {:post (fn [req] (api/session-sync conn cfg req))}]]]
                     {:data {:muuntaja   m/instance
                             :middleware [muuntaja/format-middleware]}})
                   (ring/routes

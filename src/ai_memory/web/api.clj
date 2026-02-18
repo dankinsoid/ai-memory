@@ -3,6 +3,7 @@
             [ai-memory.graph.node :as node]
             [ai-memory.graph.edge :as edge]
             [ai-memory.graph.write :as write]
+            [ai-memory.mcp.server :as mcp-server]
             [ai-memory.tag.core :as tag]
             [ai-memory.tag.query :as tag-query]
             [datomic.api :as d]))
@@ -89,3 +90,14 @@
      :body   {:results (if (seq tags)
                          (tag-query/by-tags db {:tags tags})
                          [])}}))
+
+(defn session-sync [conn cfg req]
+  (let [body   (:body-params req)
+        params {:session-id (:session_id body)
+                :cwd        (:cwd body)
+                :messages   (:messages body)}]
+    (if (:session-id params)
+      {:status 200
+       :body   (mcp-server/handle-session-sync conn cfg params)}
+      {:status 400
+       :body   {:error "session_id required"}})))

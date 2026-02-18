@@ -9,9 +9,12 @@
             [ai-memory.tag.resolve :as tag-resolve]
             [ai-memory.blob.store :as blob-store]
             [ai-memory.blob.ingest :as ingest]
+            [ai-memory.mcp.session :as session]
             [ai-memory.db.core :as db]
+            [datomic.api :as d]
             [clojure.string :as str])
-  (:import [java.util Date]))
+  (:import [java.util Date]
+           [java.time Instant]))
 
 ;; TODO: implement MCP protocol (JSON-RPC over stdio/SSE)
 ;; For now, define the tool schemas and handlers.
@@ -53,24 +56,54 @@
        (filter #(str/starts-with? % "proj/"))
        first))
 
-(defn handle-remember
-  "Stores memory nodes and/or turn summary.
-   Nodes go through write pipeline (dedup, edges).
-   Turn summary stored as a conversation node, auto-tagged with project."
-  [conn cfg params]
-  (let [nodes   (:nodes params)
-        summary (:turn-summary params)
-        result  (when (seq nodes)
-                  (write/remember conn cfg params))]
-    (when summary
-      (let [proj-tag  (or (extract-project-tag nodes) "session-log")
-            tag-refs  (tag-resolve/resolve-tags conn [proj-tag])
-            tick      (db/current-tick (db/db conn))]
+(defn- find-session-fact
+  "Finds existing session fact by session-id."
+  [db session-id]
+  (when session-id
+    (d/q '[:find ?e .
+           :in $ ?sid
+           :where [?e :node/session-id ?sid]
+                  [?e :node/type :node.type/session]]
+         db session-id)))
+
+(defn- upsert-session-fact!
+  "Creates or updates the rolling session summary fact."
+  [conn cfg session-id session-summary proj-tag]
+  (let [db  (db/db conn)
+        eid (find-session-fact db session-id)]
+    (if eid
+      ;; Update existing session fact
+      @(d/transact conn [[:db/add eid :node/content session-summary]
+                         [:db/add eid :node/updated-at (Date.)]])
+      ;; Create new session fact
+      (let [tag-refs (tag-resolve/resolve-tags conn [(or proj-tag "session-log")])
+            tick     (db/current-tick db)]
         (node/create-node conn cfg
-          {:content   summary
-           :node-type :conversation
-           :tag-refs  tag-refs
-           :tick      tick})))
+          {:content    session-summary
+           :node-type  :session
+           :tag-refs   tag-refs
+           :tick       tick
+           :session-id session-id})))))
+
+(defn handle-remember
+  "Stores memory nodes, turn summary (to RAM buffer), and session summary (to Datomic).
+   Nodes go through write pipeline (dedup, edges).
+   Turn summary → RAM buffer for later matching with blob sections.
+   Session summary → find-or-create session fact (searchable via tags)."
+  [conn cfg params]
+  (let [nodes           (:nodes params)
+        turn-summary    (:turn-summary params)
+        session-summary (:session-summary params)
+        context-id      (:context-id params)
+        proj-tag        (extract-project-tag nodes)
+        result          (when (seq nodes)
+                          (write/remember conn cfg params))]
+    ;; Turn summary → RAM buffer (NOT a fact)
+    (when (and turn-summary context-id)
+      (session/append-turn-summary! context-id turn-summary))
+    ;; Session summary → Datomic session fact (searchable)
+    (when (and session-summary context-id)
+      (upsert-session-fact! conn cfg context-id session-summary proj-tag))
     (or result {:nodes [] :edges-created 0})))
 
 (defn handle-read-blob
@@ -203,3 +236,116 @@
                        :blob-dir  blob-dir})]
       {:blob-dir blob-dir
        :blob-id  (:node-uuid blob-node)})))
+
+;; --- Session sync (called by Stop hook via HTTP) ---
+
+(defn- parse-instant [s]
+  (when s (Instant/parse s)))
+
+(defn- group-into-turns
+  "Groups messages into turns. A turn starts with a user message and ends
+   with the last assistant message before the next user message."
+  [messages]
+  (when (seq messages)
+    (let [groups (reduce (fn [acc msg]
+                           (if (= "user" (:type msg))
+                             (conj acc [msg])
+                             (if (seq acc)
+                               (update acc (dec (count acc)) conj msg)
+                               (conj acc [msg]))))
+                         [] messages)]
+      (mapv (fn [msgs]
+              {:messages msgs
+               :t-start  (parse-instant (:timestamp (first msgs)))
+               :t-end    (parse-instant (:timestamp (last msgs)))})
+            groups))))
+
+(defn- format-turn-as-markdown
+  "Formats a turn's messages as readable markdown."
+  [messages]
+  (str/join "\n\n"
+    (map (fn [{:keys [role content]}]
+           (let [text (if (string? content)
+                        content
+                        ;; assistant content is often [{:type "text" :text "..."}]
+                        (->> content
+                             (filter #(= "text" (:type %)))
+                             (map :text)
+                             (str/join "\n")))]
+             (str "**" (or role "unknown") "**\n" text)))
+         messages)))
+
+(defn- derive-project [cwd]
+  (when cwd
+    (last (str/split cwd #"/"))))
+
+(defn handle-session-sync
+  "Receives delta messages from Stop hook. Groups into turns, matches summaries
+   from RAM buffer, writes blob sections.
+   Reuses the single :node.type/session node — attaches blob-dir to it."
+  [conn cfg {:keys [session-id cwd messages]}]
+  (let [base      (:blob-path cfg)
+        db        (db/db conn)
+        project   (derive-project cwd)
+        turns     (group-into-turns messages)
+        summaries (session/get-turn-summaries session-id)
+
+        ;; Find existing session node (created by memory_remember)
+        session-eid (find-session-fact db session-id)
+        existing-dir (when session-eid
+                       (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
+        blob-dir    (or existing-dir
+                        (blob-store/make-blob-dir-name base (str "session-" (subs session-id 0 8))))
+
+        ;; Read existing meta or initialize
+        existing-meta (blob-store/read-meta base blob-dir)
+        section-offset (count (:sections existing-meta))
+
+        ;; Write new sections
+        new-sections
+        (vec (map-indexed
+               (fn [i {:keys [messages t-start t-end]}]
+                 (let [summary  (session/match-summary summaries t-start t-end)
+                       idx      (+ section-offset i)
+                       filename (blob-store/make-section-filename
+                                  idx (or summary (str "turn-" idx)))
+                       content  (format-turn-as-markdown messages)
+                       lines    (count (str/split-lines content))]
+                   (blob-store/write-section! base blob-dir filename content)
+                   {:file filename :summary summary :lines lines
+                    :timestamp (str t-start)}))
+               turns))
+
+        ;; Build/update meta.edn
+        all-sections (into (vec (:sections existing-meta)) new-sections)
+        meta-data (merge
+                    (or existing-meta
+                        {:id         (java.util.UUID/randomUUID)
+                         :type       :session
+                         :project    project
+                         :created-at (Date.)
+                         :session-id session-id})
+                    {:sections all-sections
+                     :summary  (->> all-sections
+                                    (keep :summary)
+                                    (str/join "; "))})]
+    (blob-store/write-meta! base blob-dir meta-data)
+
+    ;; Attach blob-dir to existing session node, or create one if agent never called memory_remember
+    (if session-eid
+      (when-not existing-dir
+        @(d/transact conn [[:db/add session-eid :node/blob-dir blob-dir]
+                           [:db/add session-eid :node/updated-at (Date.)]]))
+      (let [tag-refs (when project
+                       (tag-resolve/resolve-tags conn [(str "proj/" project)]))]
+        (node/create-node conn cfg
+          {:content    (or (:summary meta-data) "Session conversation")
+           :node-type  :session
+           :tag-refs   tag-refs
+           :tick       (db/current-tick db)
+           :blob-dir   blob-dir
+           :session-id session-id})))
+
+    {:blob-dir blob-dir
+     :sections-added (count new-sections)
+     :total-sections (count all-sections)}))

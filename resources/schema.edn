@@ -79,6 +79,12 @@
   :db/cardinality :db.cardinality/many
   :db/doc         "Blob source refs. Format: 'dir-name/section-file'. Multiple sources allowed."}
 
+ {:db/ident       :node/session-id
+  :db/valueType   :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/index       true
+  :db/doc         "Claude Code session ID. Links session facts and blobs to sessions."}
+
  ;; --- Edge ---
  {:db/ident       :edge/id
   :db/valueType   :db.type/uuid
@@ -122,5 +128,6 @@
  {:db/ident :node.type/entity}
  {:db/ident :node.type/conversation}
  {:db/ident :node.type/document}
+ {:db/ident :node.type/session}
 
 ]

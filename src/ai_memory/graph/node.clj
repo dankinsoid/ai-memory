@@ -14,9 +14,9 @@
   (= node-type-kw :node.type/entity))
 
 (defn- blob-type?
-  "Returns true for node types that represent blobs (no embedding needed)."
+  "Returns true for node types that represent blobs or session-linked nodes (no embedding needed)."
   [node-type-kw]
-  (#{:node.type/conversation :node.type/document} node-type-kw))
+  (#{:node.type/conversation :node.type/document :node.type/session} node-type-kw))
 
 (defn- skip-embedding? [node-type-kw]
   (or (entity-type? node-type-kw) (blob-type? node-type-kw)))
@@ -36,7 +36,7 @@
    `cfg` — {:embedding-url, :qdrant-url}.
    `tag-refs` — vec of lookup refs like [[:tag/path \"languages/clojure\"]].
    Optional keys: :blob-dir (string), :sources (set of strings)."
-  [conn cfg {:keys [content node-type tag-refs tick blob-dir sources]}]
+  [conn cfg {:keys [content node-type tag-refs tick blob-dir sources session-id]}]
   (let [node-uuid    (d/squuid)
         node-type-kw (keyword "node.type" (name node-type))
         ts           (now)
@@ -50,7 +50,8 @@
                                :node/updated-at ts}
                        (seq tag-refs) (assoc :node/tag-refs tag-refs)
                        blob-dir       (assoc :node/blob-dir blob-dir)
-                       (seq sources)  (assoc :node/sources sources))
+                       (seq sources)  (assoc :node/sources sources)
+                       session-id     (assoc :node/session-id session-id))
         count-txs    (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
         tx-result    @(d/transact conn (into [base-tx] count-txs))]
     (when-not (skip-embedding? node-type-kw)
