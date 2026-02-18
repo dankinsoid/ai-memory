@@ -4,6 +4,8 @@
   (:require [datomic.api :as d]
             [clojure.string :as str]))
 
+(declare ensure-tag!)
+
 (defn find-by-path
   "Returns tag entity map or nil."
   [db path]
@@ -20,16 +22,18 @@
        db name))
 
 (defn create-tag!
-  "Creates a tag. Returns the tag path.
+  "Creates a tag. Auto-creates parent if it doesn't exist. Returns the tag path.
    `parent-path` — path of parent tag, or nil for root."
   [conn {:keys [name parent-path]}]
   (let [path (if parent-path
                (str parent-path "/" name)
-               name)
-        tx-data (cond-> {:tag/name name
-                         :tag/path path}
-                  parent-path (assoc :tag/parent [:tag/path parent-path]))]
-    @(d/transact conn [tx-data])
+               name)]
+    (when parent-path
+      (ensure-tag! conn parent-path))
+    (let [tx-data (cond-> {:tag/name name
+                           :tag/path path}
+                    parent-path (assoc :tag/parent [:tag/path parent-path]))]
+      @(d/transact conn [tx-data]))
     path))
 
 (defn ensure-tag!

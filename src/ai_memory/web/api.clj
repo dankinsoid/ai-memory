@@ -7,7 +7,6 @@
             [ai-memory.tag.query :as tag-query]
             [ai-memory.tag.resolve :as tag-resolve]
             [ai-memory.blob.store :as blob-store]
-            [ai-memory.blob.ingest :as ingest]
             [ai-memory.session :as session]
             [datomic.api :as d]
             [clojure.string :as str])
@@ -16,10 +15,18 @@
 
 ;; --- D3 visualization ---
 
+(defn- infer-d3-type
+  "Infers a display type from node attributes (for D3 visualization)."
+  [n]
+  (cond
+    (:node/blob-dir n)    "blob"
+    (:node/session-id n)  "session"
+    :else                 "fact"))
+
 (defn- node->d3 [n]
   {:id      (str (:node/id n))
    :content (:node/content n)
-   :type    (some-> (:node/type n) :db/ident name)
+   :type    (infer-d3-type n)
    :weight  (:node/weight n)
    :tags    (mapv :tag/path (:node/tag-refs n))})
 
@@ -32,8 +39,7 @@
   "Returns full graph for D3 visualization."
   [conn _req]
   (let [db    (db/db conn)
-        nodes (d/q '[:find [(pull ?e [* {:node/type [:db/ident]}
-                                         {:node/tag-refs [:tag/path]}]) ...]
+        nodes (d/q '[:find [(pull ?e [* {:node/tag-refs [:tag/path]}]) ...]
                       :where [?e :node/id]]
                     db)
         edges (edge/find-all db)]
@@ -43,13 +49,9 @@
 
 ;; --- Nodes ---
 
-(defn list-nodes [conn req]
-  (let [db       (db/db conn)
-        node-type (get-in req [:query-params "type"])]
-    {:status 200
-     :body   (if node-type
-               (node/find-by-type db node-type)
-               [])}))
+(defn list-nodes [_conn _req]
+  {:status 200
+   :body   []})
 
 (defn create-node [conn cfg req]
   (let [body (:body-params req)]
@@ -118,13 +120,12 @@
        first))
 
 (defn- find-session-fact
-  "Finds existing session fact by session-id."
+  "Finds existing session node by session-id."
   [db session-id]
   (when session-id
     (d/q '[:find ?e .
            :in $ ?sid
-           :where [?e :node/session-id ?sid]
-                  [?e :node/type :node.type/session]]
+           :where [?e :node/session-id ?sid]]
          db session-id)))
 
 (defn- upsert-session-fact!
@@ -139,7 +140,6 @@
             tick     (db/current-tick db)]
         (node/create-node conn cfg
           {:content    session-summary
-           :node-type  :session
            :tag-refs   tag-refs
            :tick       tick
            :session-id session-id})))))
@@ -166,10 +166,9 @@
 
 (defn list-blobs [conn _cfg req]
   (let [db    (db/db conn)
-        type  (get-in req [:query-params "type"])
         limit (some-> (get-in req [:query-params "limit"]) parse-long)]
     {:status 200
-     :body   {:blobs (node/find-blobs db {:type type :limit (or limit 20)})}}))
+     :body   {:blobs (node/find-blobs db {:limit (or limit 20)})}}))
 
 (defn read-blob [_conn cfg req]
   (let [body     (:body-params req)
@@ -183,74 +182,6 @@
       (if-let [meta (blob-store/read-meta base blob-dir)]
         {:status 200 :body meta}
         {:status 404 :body {:error (str "Blob not found: " blob-dir)}}))))
-
-(defn- store-conversation-sections!
-  "Parses session JSONL and writes section files to blob dir."
-  [base-path blob-dir session-path sections-spec]
-  (let [turns (ingest/parse-session session-path)
-        sections (if (seq sections-spec)
-                   (ingest/split-by-boundaries (vec turns) sections-spec)
-                   (ingest/split-auto turns 10))]
-    (vec (map-indexed
-           (fn [i {:keys [summary turns]}]
-             (let [filename (blob-store/make-section-filename i summary)
-                   content  (ingest/format-section turns)
-                   lines    (count (str/split-lines content))]
-               (blob-store/write-section! base-path blob-dir filename content)
-               {:file filename :summary summary :lines lines}))
-           sections))))
-
-(defn store-conversation [conn cfg req]
-  (let [body         (:body-params req)
-        base         (:blob-path cfg)
-        project-path (or (:project-path body)
-                         (:project-path cfg)
-                         (System/getProperty "user.dir"))
-        session-id   (:session-id body)
-        session-path (ingest/resolve-session-path session-id project-path)
-        _            (when-not session-path
-                       (throw (ex-info "Session JSONL not found"
-                                       {:session-id session-id})))
-        blob-dir     (blob-store/make-blob-dir-name base (:title body))
-        now          (Date.)
-        section-data (store-conversation-sections! base blob-dir session-path (:sections body))
-        meta-data    {:id         (UUID/randomUUID)
-                      :type       :conversation
-                      :title      (:title body)
-                      :project    (:project body)
-                      :created-at now
-                      :summary    (:summary body)
-                      :status     (:status body)
-                      :session-id session-id
-                      :continues  (:continues body)
-                      :tags       (:tags body)
-                      :sections   section-data}]
-    (blob-store/write-meta! base blob-dir meta-data)
-    (let [tag-refs (when (seq (:tags body))
-                     (tag-resolve/resolve-tags conn (:tags body)))
-          blob-node (node/create-node conn cfg
-                      {:content   (:summary body)
-                       :node-type :conversation
-                       :tag-refs  tag-refs
-                       :tick      (db/current-tick (db/db conn))
-                       :blob-dir  blob-dir})
-          fact-results
-          (when (seq (:facts body))
-            (let [nodes (mapv (fn [f]
-                                (cond-> {:content   (:content f)
-                                         :node-type (or (:node-type f) "fact")
-                                         :tags      (:tags f)}
-                                  (:section f)
-                                  (assoc :sources
-                                    #{(str blob-dir "/"
-                                           (:file (nth section-data (:section f))))})))
-                              (:facts body))]
-              (write/remember conn cfg {:nodes nodes})))]
-      {:status 201
-       :body   {:blob-dir  blob-dir
-                :blob-id   (:node-uuid blob-node)
-                :sections  (count section-data)
-                :facts     (count (:nodes fact-results))}})))
 
 (defn store-file [conn cfg req]
   (let [body     (:body-params req)
@@ -281,7 +212,6 @@
                      (tag-resolve/resolve-tags conn (:tags body)))
           blob-node (node/create-node conn cfg
                       {:content   (:summary body)
-                       :node-type :document
                        :tag-refs  tag-refs
                        :tick      (db/current-tick (db/db conn))
                        :blob-dir  blob-dir})]
@@ -331,7 +261,7 @@
 
 (defn session-sync [conn cfg req]
   (let [body      (:body-params req)
-        session-id (:session_id body)
+        session-id (:session-id body)
         cwd        (:cwd body)
         messages   (:messages body)]
     (if-not session-id
@@ -387,7 +317,6 @@
                            (tag-resolve/resolve-tags conn [(str "proj/" project)]))]
             (node/create-node conn cfg
               {:content    (or (:summary meta-data) "Session conversation")
-               :node-type  :session
                :tag-refs   tag-refs
                :tick       (db/current-tick db)
                :blob-dir   blob-dir

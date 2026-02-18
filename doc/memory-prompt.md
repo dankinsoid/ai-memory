@@ -30,7 +30,7 @@ memory_remember({
   turn_summary: "User: <request gist> → <what I did/decided>",
   session_summary: "One-sentence rolling summary of entire session so far",
   nodes: [
-    { content: "Prefers X over Y", tags: ["pref/...", "lang/..."], node_type: "preference" }
+    { content: "Prefers X over Y", tags: [...] }
   ]
 })
 ```

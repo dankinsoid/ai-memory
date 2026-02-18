@@ -4,7 +4,8 @@
             [ai-memory.db.core :as db]
             [ai-memory.graph.edge :as edge]
             [ai-memory.graph.node :as node]
-            [ai-memory.graph.write :as write]))
+            [ai-memory.graph.write :as write]
+            [ai-memory.tag.core :as tag]))
 
 ;; --- In-memory Datomic fixture (no TEI/Qdrant) ---
 
@@ -38,7 +39,6 @@
         [{:db/id        (d/tempid :db.part/user)
           :node/id      uuid
           :node/content content
-          :node/type    :node.type/fact
           :node/weight  1.0
           :node/cycle   tick}])
      uuid)))
@@ -214,16 +214,17 @@
 ;; --- Entity node tests ---
 
 (defn- create-entity-node!
-  "Creates an entity node directly for test setup."
+  "Creates an entity node (tagged type/entity) directly for test setup."
   [conn content tick]
   (let [uuid (d/squuid)]
+    (tag/ensure-tag! conn "type/entity")
     @(d/transact conn
-       [{:db/id        (d/tempid :db.part/user)
-         :node/id      uuid
-         :node/content content
-         :node/type    :node.type/entity
-         :node/weight  1.0
-         :node/cycle   tick}])
+       [{:db/id          (d/tempid :db.part/user)
+         :node/id        uuid
+         :node/content   content
+         :node/weight    1.0
+         :node/cycle     tick
+         :node/tag-refs  [[:tag/path "type/entity"]]}])
     uuid))
 
 (deftest entity-find-by-content-test
@@ -238,7 +239,7 @@
   (testing "entity nodes dedup via exact content match, not vector search"
     (let [uuid (create-entity-node! *conn* "Clojure" 1)
           db   (d/db *conn*)
-          node-data {:content "Clojure" :node-type :entity}
+          node-data {:content "Clojure" :tags ["type/entity"]}
           opts {:dedup-threshold 0.85 :reinforcement-delta 0.2}
           result (#'write/find-duplicate-node db {} "Clojure" node-data opts)]
       (is (some? result))
@@ -247,7 +248,7 @@
 (deftest entity-not-found-creates-new-test
   (testing "entity with no match creates new node"
     (let [db        (d/db *conn*)
-          node-data {:content "new-entity" :node-type :entity}
+          node-data {:content "new-entity" :tags ["type/entity"]}
           opts      {:dedup-threshold 0.85 :reinforcement-delta 0.2}
           result    (#'write/find-duplicate-node db {} "new-entity" node-data opts)]
       (is (nil? result)))))

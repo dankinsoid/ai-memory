@@ -10,16 +10,20 @@
 
 (defn- now [] (Date.))
 
-(defn- entity-type? [node-type-kw]
-  (= node-type-kw :node.type/entity))
+(defn- has-entity-tag?
+  "Checks tag-refs (lookup refs or pulled maps) for type/entity tag."
+  [tag-refs]
+  (some (fn [ref]
+          (cond
+            (vector? ref) (= (second ref) "type/entity")
+            (map? ref)    (= (:tag/path ref) "type/entity")
+            :else         false))
+        tag-refs))
 
-(defn- blob-type?
-  "Returns true for node types that represent blobs or session-linked nodes (no embedding needed)."
-  [node-type-kw]
-  (#{:node.type/conversation :node.type/document :node.type/session} node-type-kw))
-
-(defn- skip-embedding? [node-type-kw]
-  (or (entity-type? node-type-kw) (blob-type? node-type-kw)))
+(defn- skip-embedding?
+  "Blob nodes (have blob-dir) and entity nodes (have type/entity tag) skip vectorization."
+  [{:keys [blob-dir tag-refs]}]
+  (or blob-dir (has-entity-tag? tag-refs)))
 
 (defn- embed-async!
   "Embeds content in Qdrant. Logs warning on failure, never throws."
@@ -31,19 +35,17 @@
       (log/warn e "Failed to vectorize node" node-uuid))))
 
 (defn create-node
-  "Creates a memory node in Datomic. Embeds content in Qdrant unless entity/blob type.
+  "Creates a memory node in Datomic. Embeds content in Qdrant unless blob/entity.
    Automatically sets :node/created-at and :node/updated-at to now.
    `cfg` — {:embedding-url, :qdrant-url}.
-   `tag-refs` — vec of lookup refs like [[:tag/path \"languages/clojure\"]].
+   `tag-refs` — vec of lookup refs like [[:tag/path \"lang/clj\"]].
    Optional keys: :blob-dir (string), :sources (set of strings)."
-  [conn cfg {:keys [content node-type tag-refs tick blob-dir sources session-id]}]
+  [conn cfg {:keys [content tag-refs tick blob-dir sources session-id]}]
   (let [node-uuid    (d/squuid)
-        node-type-kw (keyword "node.type" (name node-type))
         ts           (now)
         base-tx      (cond-> {:db/id           (d/tempid :db.part/user)
                                :node/id         node-uuid
                                :node/content    content
-                               :node/type       node-type-kw
                                :node/weight     1.0
                                :node/cycle      (or tick 0)
                                :node/created-at ts
@@ -54,7 +56,7 @@
                        session-id     (assoc :node/session-id session-id))
         count-txs    (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
         tx-result    @(d/transact conn (into [base-tx] count-txs))]
-    (when-not (skip-embedding? node-type-kw)
+    (when-not (skip-embedding? {:blob-dir blob-dir :tag-refs tag-refs})
       (embed-async! cfg node-uuid content))
     {:tx-result tx-result
      :node-uuid node-uuid}))
@@ -87,32 +89,34 @@
       (first results))))
 
 (defn find-entity-by-content
-  "Finds an entity node by exact content match. Returns entity map or nil."
+  "Finds an entity node (tagged type/entity) by exact content match. Returns entity map or nil."
   [db content]
   (let [eid (d/q '[:find ?e .
                    :in $ ?content
                    :where
-                   [?e :node/type :node.type/entity]
-                   [?e :node/content ?content]]
+                   [?e :node/content ?content]
+                   [?e :node/tag-refs ?tag]
+                   [?tag :tag/path "type/entity"]]
                  db content)]
     (when eid
       (d/pull db '[*] eid))))
 
 (defn reinforce-node
-  "Reinforces existing node: bumps weight, cycle, updated-at. Re-embeds unless entity."
+  "Reinforces existing node: bumps weight, cycle, updated-at. Re-embeds unless blob/entity."
   [conn cfg node-uuid new-content delta current-cycle]
   (let [db   (d/db conn)
-        node (d/pull db [:node/weight :node/type] [:node/id node-uuid])
+        node (d/pull db [:node/weight :node/blob-dir {:node/tag-refs [:tag/path]}]
+                     [:node/id node-uuid])
         current-weight (or (:node/weight node) 1.0)
-        new-weight     (+ current-weight delta)
-        type-kw        (get-in node [:node/type :db/ident])]
+        new-weight     (+ current-weight delta)]
     @(d/transact conn
        [{:node/id         node-uuid
          :node/content    new-content
          :node/weight     new-weight
          :node/cycle      current-cycle
          :node/updated-at (now)}])
-    (when-not (skip-embedding? type-kw)
+    (when-not (skip-embedding? {:blob-dir  (:node/blob-dir node)
+                                :tag-refs  (:node/tag-refs node)})
       (embed-async! cfg node-uuid new-content))))
 
 (defn find-recent
@@ -147,32 +151,17 @@
                  :node/updated-at (now)}]
                count-txs)))))
 
-(defn find-by-type [db node-type]
-  (d/q '[:find [(pull ?e [*]) ...]
-         :in $ ?type
-         :where [?e :node/type ?type]]
-       db (keyword "node.type" (name node-type))))
-
 (defn find-blobs
-  "Finds blob nodes (conversation/document) sorted by created-at desc.
-   Optional filters: :type (keyword), :limit (int)."
-  [db {:keys [type limit] :or {limit 20}}]
-  (let [type-kw   (when type (keyword "node.type" (name type)))
-        pull-expr [:node/id :node/content :node/type
+  "Finds blob nodes (have :node/blob-dir) sorted by created-at desc."
+  [db {:keys [limit] :or {limit 20}}]
+  (let [pull-expr [:node/id :node/content
                    :node/created-at :node/updated-at :node/blob-dir
                    {:node/tag-refs [:tag/path]}]
-        results   (if type-kw
-                    (d/q '[:find [(pull ?n pull-expr) ...]
-                           :in $ ?type pull-expr
-                           :where
-                           [?n :node/type ?type]
-                           [?n :node/blob-dir _]]
-                         db type-kw pull-expr)
-                    (d/q '[:find [(pull ?n pull-expr) ...]
-                           :in $ pull-expr
-                           :where
-                           [?n :node/blob-dir _]]
-                         db pull-expr))]
+        results   (d/q '[:find [(pull ?n pull-expr) ...]
+                         :in $ pull-expr
+                         :where
+                         [?n :node/blob-dir _]]
+                       db pull-expr)]
     (->> results
          (sort-by :node/created-at #(compare %2 %1))
          (take limit)

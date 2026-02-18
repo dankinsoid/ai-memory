@@ -45,7 +45,6 @@
          (into [{:db/id         (d/tempid :db.part/user)
                  :node/id       uuid
                  :node/content  content
-                 :node/type     :node.type/fact
                  :node/weight   1.0
                  :node/cycle    0
                  :node/tag-refs tag-refs}]
@@ -69,10 +68,10 @@
       (is (some? (get-in resp [:result :capabilities :tools]))))))
 
 (deftest tools-list-test
-  (testing "returns all 10 tools with schemas"
+  (testing "returns all 9 tools with schemas"
     (let [resp  (call "tools/list")
           tools (get-in resp [:result :tools])]
-      (is (= 10 (count tools)))
+      (is (= 9 (count tools)))
       (is (every? :name tools))
       (is (every? :description tools))
       (is (every? :inputSchema tools)))))
@@ -84,7 +83,7 @@
       (is (= #{"memory_browse_tags" "memory_count_facts" "memory_get_facts"
                "memory_search" "memory_create_tag" "memory_remember"
                "memory_list_blobs" "memory_read_blob"
-               "memory_store_conversation" "memory_store_file"}
+               "memory_store_file"}
              names)))))
 
 (deftest ping-test

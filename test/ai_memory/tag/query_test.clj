@@ -36,7 +36,6 @@
          (into [{:db/id         (d/tempid :db.part/user)
                  :node/id       uuid
                  :node/content  content
-                 :node/type     :node.type/fact
                  :node/weight   1.0
                  :node/cycle    0
                  :node/tag-refs tag-refs}]

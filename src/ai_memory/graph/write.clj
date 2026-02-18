@@ -77,7 +77,7 @@
   (long (Math/floor (/ (Math/log min-weight) (Math/log factor)))))
 
 (defn- entity-node? [node-data]
-  (= (keyword (name (:node-type node-data))) :entity))
+  (some #(= % "type/entity") (:tags node-data)))
 
 (defn- find-duplicate-node
   "Entity nodes: exact content match. Other nodes: vector search."
@@ -108,7 +108,7 @@
         {:id node-uuid :status :reinforced})
       (let [result (node/create-node conn cfg
                      (-> node-data
-                         (dissoc :tags)
+                         (dissoc :tags :node-type)
                          (assoc :tick tick :tag-refs tag-refs)))]
         {:id (:node-uuid result) :status :created}))))
 
@@ -190,7 +190,7 @@
   "Writes memory nodes with automatic associations.
    Increments global tick on each call.
    `params`:
-     :nodes      — vec of {:content, :node-type, :tags}
+     :nodes      — vec of {:content, :tags}
      :context-id — string: session-scoped linking (RAM cache)
                    :global: link to all recent nodes (DB query by tick)
                    nil: no context edges, only batch"

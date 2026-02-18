@@ -295,8 +295,6 @@
 
 (defn- fact-card [fact]
   (let [title     (or (:node/content fact) (:content fact) "")
-        node-type (some-> (or (:node/type fact) (:type fact))
-                          (as-> t (if (map? t) (name (:db/ident t)) (name t))))
         tags      (or (:node/tag-refs fact) (:tag-refs fact) [])
         weight    (or (:node/weight fact) (:weight fact))]
     [:div {:style {:background    "#16213e"
@@ -305,15 +303,7 @@
                    :padding       "12px 16px"
                    :margin-bottom "8px"}}
      [:div {:style {:display "flex" :justify-content "space-between" :align-items "center"}}
-      [:span {:style {:color "#e0e0e0" :font-size "14px"}} title]
-      (when node-type
-        [:span {:style {:padding       "1px 8px"
-                        :background    "rgba(171, 71, 188, 0.2)"
-                        :border        "1px solid rgba(171, 71, 188, 0.4)"
-                        :border-radius "10px"
-                        :font-size     "11px"
-                        :color         "#ab47bc"}}
-         node-type])]
+      [:span {:style {:color "#e0e0e0" :font-size "14px"}} title]]
      (when (seq tags)
        [:div {:style {:margin-top "8px" :display "flex" :flex-wrap "wrap" :gap "4px"}}
         (for [tag tags]

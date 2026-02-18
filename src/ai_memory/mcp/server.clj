@@ -50,19 +50,11 @@
 (defn handle-remember [base-url params]
   (api-post base-url "/api/remember" params))
 
-(defn handle-list-blobs [base-url {:keys [type limit] :or {limit 20}}]
-  (:blobs (api-get base-url "/api/blobs" (cond-> {:limit limit}
-                                            type (assoc :type type)))))
+(defn handle-list-blobs [base-url {:keys [limit] :or {limit 20}}]
+  (:blobs (api-get base-url "/api/blobs" {:limit limit})))
 
 (defn handle-read-blob [base-url {:keys [blob-dir section]}]
   (api-post base-url "/api/blobs/read" {:blob-dir blob-dir :section section}))
-
-(defn handle-store-conversation [base-url params]
-  (:body (http/post (str base-url "/api/blobs/conversation")
-           {:content-type    :json
-            :body            (json/generate-string params)
-            :as              :json
-            :throw-exceptions false})))
 
 (defn handle-store-file [base-url params]
   (:body (http/post (str base-url "/api/blobs/file")

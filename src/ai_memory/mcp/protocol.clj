@@ -70,7 +70,6 @@
                   :properties {:nodes        {:type        "array"
                                               :items       {:type       "object"
                                                             :properties {:content   {:type "string" :description "Fact content (1-3 sentences)"}
-                                                                         :node_type {:type "string" :description "fact, decision, preference, pattern, project, domain, entity"}
                                                                          :tags      {:type "array" :items {:type "string"} :description "Tag paths"}}
                                                             :required   ["content" "tags"]}
                                               :description "Memory nodes to store"}
@@ -82,11 +81,9 @@
                                                   :description "Session ID for context-based linking across calls"}}}}
 
    {:name        "memory_list_blobs"
-    :description "List stored blobs (conversations, documents) sorted by date desc. Returns compact text: one line per blob with date, type, title."
+    :description "List stored blobs (conversations, documents) sorted by date desc. Returns compact text: one line per blob with date, dir, summary."
     :inputSchema {:type       "object"
-                  :properties {:type  {:type        ["string" "null"]
-                                       :description "Filter by type: conversation, document (null = all)"}
-                               :limit {:type    "integer"
+                  :properties {:limit {:type    "integer"
                                        :description "Max results (default 20)"
                                        :default 20}}}}
 
@@ -98,32 +95,6 @@
                                :section  {:type ["integer" "null"]
                                           :description "Section index to read (null = metadata only)"}}
                   :required   ["blob_dir"]}}
-
-   {:name        "memory_store_conversation"
-    :description "Store a conversation session as a blob. Server reads JSONL from ~/.claude (zero token cost). Provide title, summary, status (where you left off), tags, and optionally section boundaries and extracted facts."
-    :inputSchema {:type       "object"
-                  :properties {:session_id {:type "string"  :description "Claude session UUID"}
-                               :project    {:type "string"  :description "Project name"}
-                               :title      {:type "string"  :description "Short descriptive title"}
-                               :summary    {:type "string"  :description "1-3 sentence summary"}
-                               :status     {:type ["string" "null"] :description "Where you left off, next steps"}
-                               :tags       {:type "array" :items {:type "string"} :description "Tag paths"}
-                               :project_path {:type ["string" "null"] :description "Absolute project path for session JSONL lookup (default: server working dir)"}
-                               :sections   {:type  ["array" "null"]
-                                            :items {:type "object"
-                                                    :properties {:start_turn {:type "integer"}
-                                                                 :end_turn   {:type "integer"}
-                                                                 :summary    {:type "string"}}}
-                                            :description "Section boundaries (null = auto-split)"}
-                               :continues  {:type ["string" "null"] :description "Blob dir of conversation this continues"}
-                               :facts      {:type  ["array" "null"]
-                                            :items {:type "object"
-                                                    :properties {:content   {:type "string"}
-                                                                 :tags      {:type "array" :items {:type "string"}}
-                                                                 :node_type {:type "string"}
-                                                                 :section   {:type "integer" :description "Which section this fact came from"}}}
-                                            :description "Facts to extract and link to this blob"}}
-                  :required   ["session_id" "project" "title" "summary" "tags"]}}
 
    {:name        "memory_store_file"
     :description "Store a file (code, document, image) as a blob. Provide content directly or a file path."
@@ -186,11 +157,6 @@
                 (str/join "\n" (map render-fact-line facts))))
          results)))
 
-(defn- type-label [node-type]
-  (when node-type
-    (let [ident (if (map? node-type) (:db/ident node-type) node-type)]
-      (when ident (name ident)))))
-
 (defn- format-date [inst]
   (when inst
     (subs (str inst) 0 10)))
@@ -218,11 +184,10 @@
     "(no blobs)"
     (str/join "\n"
       (map (fn [b]
-             (let [date (format-date (:node/created-at b))
-                   typ  (type-label (:node/type b))
-                   dir  (:node/blob-dir b)
+             (let [date    (format-date (:node/created-at b))
+                   dir     (:node/blob-dir b)
                    content (:node/content b)]
-               (str date " " typ " " dir "\n  " content)))
+               (str date " blob " dir "\n  " content)))
            blobs))))
 
 (defn render-blob-meta
@@ -259,34 +224,15 @@
     :create-tag  {:name        (:name params)
                   :parent-path (:parent_path params)}
     :remember    {:nodes           (mapv (fn [n]
-                                        {:content   (:content n)
-                                         :node-type (:node_type n)
-                                         :tags      (:tags n)})
+                                        {:content (:content n)
+                                         :tags    (:tags n)})
                                       (:nodes params))
                   :turn-summary    (:turn_summary params)
                   :session-summary (:session_summary params)
                   :context-id      (:context_id params)}
-    :list-blobs  {:type  (:type params)
-                  :limit (or (:limit params) 20)}
+    :list-blobs  {:limit (or (:limit params) 20)}
     :read-blob   {:blob-dir (:blob_dir params)
                   :section  (:section params)}
-    :store-conversation
-                 {:session-id   (:session_id params)
-                  :project      (:project params)
-                  :project-path (:project_path params)
-                  :title        (:title params)
-                  :summary      (:summary params)
-                  :status       (:status params)
-                  :tags         (:tags params)
-                  :sections     (:sections params)
-                  :continues    (:continues params)
-                  :facts      (when-let [fs (:facts params)]
-                                (mapv (fn [f]
-                                        {:content   (:content f)
-                                         :tags      (:tags f)
-                                         :node-type (:node_type f)
-                                         :section   (:section f)})
-                                      fs))}
     :store-file  {:title   (:title params)
                   :project (:project params)
                   :summary (:summary params)
@@ -308,7 +254,6 @@
     :remember           (server/handle-remember base-url params)
     :list-blobs         (server/handle-list-blobs base-url params)
     :read-blob          (server/handle-read-blob base-url params)
-    :store-conversation (server/handle-store-conversation base-url params)
     :store-file         (server/handle-store-file base-url params)))
 
 ;; --- JSON-RPC method handlers ---
@@ -342,7 +287,6 @@
    "memory_remember"             :remember
    "memory_list_blobs"           :list-blobs
    "memory_read_blob"            :read-blob
-   "memory_store_conversation"   :store-conversation
    "memory_store_file"           :store-file})
 
 (defn- format-result [handler-key result]

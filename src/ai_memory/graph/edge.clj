@@ -19,7 +19,7 @@
        :edge/cycle  (or cycle 0)}]))
 
 (defn find-edges-from [db node-id]
-  (d/q '[:find [(pull ?e [* {:edge/to [:node/id :node/content :node/type]}]) ...]
+  (d/q '[:find [(pull ?e [* {:edge/to [:node/id :node/content]}]) ...]
          :in $ ?from-id
          :where
          [?e :edge/from ?from]
