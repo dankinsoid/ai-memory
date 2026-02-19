@@ -25,22 +25,27 @@
 ;; --- Helpers ---
 
 (defn- create-tagged-node!
-  "Creates a node with tag refs and increments materialized counts."
-  [conn content tag-names]
-  (let [uuid (d/squuid)]
-    (doseq [n tag-names]
-      (tag/ensure-tag! conn n))
-    (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
-          count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)]
-      @(d/transact conn
-         (into [{:db/id         (d/tempid :db.part/user)
-                 :node/id       uuid
-                 :node/content  content
-                 :node/weight   1.0
-                 :node/cycle    0
-                 :node/tag-refs tag-refs}]
-               count-txs)))
-    uuid))
+  "Creates a node with tag refs and increments materialized counts.
+   Optional opts map with :updated-at (java.util.Date)."
+  ([conn content tag-names] (create-tagged-node! conn content tag-names nil))
+  ([conn content tag-names opts]
+   (let [uuid (d/squuid)
+         now  (java.util.Date.)]
+     (doseq [n tag-names]
+       (tag/ensure-tag! conn n))
+     (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
+           count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
+           node-map  (cond-> {:db/id           (d/tempid :db.part/user)
+                              :node/id         uuid
+                              :node/content    content
+                              :node/weight     1.0
+                              :node/cycle      0
+                              :node/tag-refs   tag-refs
+                              :node/created-at now
+                              :node/updated-at (or (:updated-at opts) now)}
+                       (:updated-at opts) identity)]
+       @(d/transact conn (into [node-map] count-txs)))
+     uuid)))
 
 ;; --- Existing tests ---
 
@@ -162,6 +167,71 @@
                     [["clj"]]
                     {:limit 2})]
       (is (= 2 (count (:facts (first results))))))))
+
+;; --- Date-filtered query tests ---
+
+(def ^:private day-ms (* 24 60 60 1000))
+
+(defn- days-ago [n]
+  (java.util.Date. (- (System/currentTimeMillis) (* n day-ms))))
+
+(deftest by-tags-with-since-test
+  (testing "by-tags filters by :since on updated-at"
+    (create-tagged-node! *conn* "Old fact" ["clj"] {:updated-at (days-ago 30)})
+    (create-tagged-node! *conn* "New fact" ["clj"] {:updated-at (days-ago 1)})
+    (let [results (query/by-tags (d/db *conn*) {:tags ["clj"] :since (days-ago 7)})]
+      (is (= 1 (count results)))
+      (is (= "New fact" (:node/content (first results)))))))
+
+(deftest by-tags-with-since-until-test
+  (testing "by-tags filters by date range"
+    (create-tagged-node! *conn* "Old" ["clj"] {:updated-at (days-ago 30)})
+    (create-tagged-node! *conn* "Mid" ["clj"] {:updated-at (days-ago 10)})
+    (create-tagged-node! *conn* "New" ["clj"] {:updated-at (days-ago 1)})
+    (let [results (query/by-tags (d/db *conn*)
+                    {:tags ["clj"] :since (days-ago 15) :until (days-ago 5)})]
+      (is (= 1 (count results)))
+      (is (= "Mid" (:node/content (first results)))))))
+
+(deftest by-date-range-test
+  (testing "by-date-range returns nodes in date range without tag filter"
+    (create-tagged-node! *conn* "Old" ["clj"] {:updated-at (days-ago 30)})
+    (create-tagged-node! *conn* "Recent" ["python"] {:updated-at (days-ago 2)})
+    (let [results (query/by-date-range (d/db *conn*) {:since (days-ago 7)})]
+      (is (= 1 (count results)))
+      (is (= "Recent" (:node/content (first results)))))))
+
+(deftest fetch-by-tag-sets-with-dates-test
+  (testing "fetch-by-tag-sets respects date params"
+    (create-tagged-node! *conn* "Old clj" ["clj"] {:updated-at (days-ago 30)})
+    (create-tagged-node! *conn* "New clj" ["clj"] {:updated-at (days-ago 1)})
+    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+                    [["clj"]]
+                    {:limit 50 :since (days-ago 7)})]
+      (is (= 1 (count (:facts (first results)))))
+      (is (= "New clj" (:node/content (first (:facts (first results)))))))))
+
+(deftest fetch-no-tags-date-only-test
+  (testing "fetch-by-tag-sets with no tags returns date-filtered facts"
+    (create-tagged-node! *conn* "Old" ["clj"] {:updated-at (days-ago 30)})
+    (create-tagged-node! *conn* "Recent" ["python"] {:updated-at (days-ago 2)})
+    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+                    nil
+                    {:limit 50 :since (days-ago 7)})]
+      (is (= 1 (count results)))
+      (is (= [] (:tags (first results))))
+      (is (= 1 (count (:facts (first results))))))))
+
+(deftest fetch-latest-n-test
+  (testing "fetch-by-tag-sets with just limit returns latest N sorted by date desc"
+    (create-tagged-node! *conn* "Oldest" ["clj"] {:updated-at (days-ago 30)})
+    (create-tagged-node! *conn* "Middle" ["python"] {:updated-at (days-ago 10)})
+    (create-tagged-node! *conn* "Newest" ["rust"] {:updated-at (days-ago 1)})
+    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil nil {:limit 2})
+          facts   (:facts (first results))]
+      (is (= 2 (count facts)))
+      (is (= "Newest" (:node/content (first facts))))
+      (is (= "Middle" (:node/content (second facts)))))))
 
 ;; --- Reconciliation tests ---
 

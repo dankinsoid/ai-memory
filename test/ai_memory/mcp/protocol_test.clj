@@ -35,21 +35,25 @@
 
 ;; --- Helpers ---
 
-(defn- create-tagged-node! [conn content tag-names]
-  (let [uuid (d/squuid)]
-    (doseq [n tag-names]
-      (tag/ensure-tag! conn n))
-    (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
-          count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)]
-      @(d/transact conn
-         (into [{:db/id         (d/tempid :db.part/user)
-                 :node/id       uuid
-                 :node/content  content
-                 :node/weight   1.0
-                 :node/cycle    0
-                 :node/tag-refs tag-refs}]
-               count-txs)))
-    uuid))
+(defn- create-tagged-node!
+  ([conn content tag-names] (create-tagged-node! conn content tag-names nil))
+  ([conn content tag-names opts]
+   (let [uuid (d/squuid)
+         now  (java.util.Date.)]
+     (doseq [n tag-names]
+       (tag/ensure-tag! conn n))
+     (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
+           count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
+           node-map  (cond-> {:db/id           (d/tempid :db.part/user)
+                              :node/id         uuid
+                              :node/content    content
+                              :node/weight     1.0
+                              :node/cycle      0
+                              :node/tag-refs   tag-refs
+                              :node/created-at now
+                              :node/updated-at (or (:updated-at opts) now)})]
+       @(d/transact conn (into [node-map] count-txs)))
+     uuid)))
 
 (defn- handler []
   (protocol/make-handler *base-url*))
@@ -68,10 +72,10 @@
       (is (some? (get-in resp [:result :capabilities :tools]))))))
 
 (deftest tools-list-test
-  (testing "returns all 9 tools with schemas"
+  (testing "returns all 10 tools with schemas"
     (let [resp  (call "tools/list")
           tools (get-in resp [:result :tools])]
-      (is (= 9 (count tools)))
+      (is (= 10 (count tools)))
       (is (every? :name tools))
       (is (every? :description tools))
       (is (every? :inputSchema tools)))))
@@ -83,7 +87,7 @@
       (is (= #{"memory_browse_tags" "memory_count_facts" "memory_get_facts"
                "memory_search" "memory_create_tag" "memory_remember"
                "memory_list_blobs" "memory_read_blob"
-               "memory_store_file"}
+               "memory_store_file" "memory_session_compact"}
              names)))))
 
 (deftest ping-test
@@ -203,6 +207,43 @@
       (is (str/includes? text "= clj"))
       (is (str/includes? text "- Clojure error handling"))
       (is (not (str/includes? text "Python basics"))))))
+
+(deftest get-facts-with-since-test
+  (testing "memory_get_facts with since filters by date"
+    (let [old-date (java.util.Date. (- (System/currentTimeMillis) (* 30 24 60 60 1000)))
+          new-date (java.util.Date. (- (System/currentTimeMillis) (* 1 24 60 60 1000)))]
+      (create-tagged-node! *conn* "Old fact" ["clj"] {:updated-at old-date})
+      (create-tagged-node! *conn* "New fact" ["clj"] {:updated-at new-date})
+      (let [resp (call "tools/call"
+                   :params {:name "memory_get_facts"
+                            :arguments {:tag_sets [["clj"]]
+                                        :since "7d"}})
+            text (get-in resp [:result :content 0 :text])]
+        (is (nil? (:error resp)))
+        (is (str/includes? text "New fact"))
+        (is (not (str/includes? text "Old fact")))))))
+
+(deftest get-facts-no-tags-test
+  (testing "memory_get_facts without tag_sets returns date-filtered facts"
+    (let [old-date (java.util.Date. (- (System/currentTimeMillis) (* 30 24 60 60 1000)))
+          new-date (java.util.Date. (- (System/currentTimeMillis) (* 1 24 60 60 1000)))]
+      (create-tagged-node! *conn* "Old fact" ["clj"] {:updated-at old-date})
+      (create-tagged-node! *conn* "New fact" ["python"] {:updated-at new-date})
+      (let [resp (call "tools/call"
+                   :params {:name "memory_get_facts"
+                            :arguments {:since "7d"}})
+            text (get-in resp [:result :content 0 :text])]
+        (is (nil? (:error resp)))
+        (is (str/includes? text "= all"))
+        (is (str/includes? text "New fact"))
+        (is (not (str/includes? text "Old fact")))))))
+
+(deftest render-facts-empty-tags-test
+  (testing "render-facts handles empty tags group"
+    (let [text (protocol/render-facts
+                 [{:tags []
+                   :facts [{:node/content "Some fact"}]}])]
+      (is (= "= all\n- Some fact" text)))))
 
 (deftest create-tag-tool-test
   (testing "memory_create_tag creates a new atomic tag"

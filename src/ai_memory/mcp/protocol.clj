@@ -43,8 +43,11 @@
                                           :description "Array of tag sets. Each set is an array of tag names."}
                                :limit    {:type        "integer"
                                           :description "Max facts per tag set (default 50)"
-                                          :default     50}}
-                  :required   ["tag_sets"]}}
+                                          :default     50}
+                               :since    {:type        "string"
+                                          :description "Start of date range (inclusive). ISO date, datetime, or relative: 7d, 2w, 1m, today, yesterday"}
+                               :until    {:type        "string"
+                                          :description "End of date range (exclusive). ISO date, datetime, or relative: 7d, 2w, 1m, today, yesterday"}}}}
 
    {:name        "memory_search"
     :description "Semantic search across all facts by meaning. Use when you can't find relevant facts via tags, or when you know roughly what you're looking for but not how it's tagged. Returns facts ranked by relevance score."
@@ -149,8 +152,11 @@
   [results]
   (str/join "\n\n"
     (map (fn [{:keys [tags facts]}]
-           (str "= " (tags-header tags) "\n"
-                (str/join "\n" (map render-fact-line facts))))
+           (let [header (if (seq tags)
+                          (tags-header tags)
+                          "all")]
+             (str "= " header "\n"
+                  (str/join "\n" (map render-fact-line facts)))))
          results)))
 
 (defn- format-date [inst]
@@ -216,7 +222,9 @@
                   :offset (or (:offset params) 0)}
     :count-facts {:tag-sets (:tag_sets params)}
     :get-facts   {:tag-sets (:tag_sets params)
-                  :limit    (or (:limit params) 50)}
+                  :limit    (or (:limit params) 50)
+                  :since    (:since params)
+                  :until    (:until params)}
     :search      {:query (:query params)
                   :top-k (or (:top_k params) 10)}
     :create-tag  {:name (:name params)}

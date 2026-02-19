@@ -8,6 +8,7 @@
             [ai-memory.tag.resolve :as tag-resolve]
             [ai-memory.blob.store :as blob-store]
             [ai-memory.session :as session]
+            [ai-memory.util.date :as date]
             [datomic.api :as d]
             [clojure.string :as str])
   (:import [java.util Date UUID]
@@ -85,9 +86,12 @@
   (let [db       (db/db conn)
         body     (:body-params req)
         tag-sets (:tag-sets body)
-        limit    (:limit body 50)]
+        limit    (:limit body 50)
+        since    (date/parse-date-param (:since body))
+        until    (date/parse-date-param (:until body))]
     {:status 200
-     :body   {:results (tag-query/fetch-by-tag-sets db (:metrics cfg) tag-sets {:limit limit})}}))
+     :body   {:results (tag-query/fetch-by-tag-sets db (:metrics cfg) tag-sets
+                         {:limit limit :since since :until until})}}))
 
 (defn recall [conn _cfg req]
   (let [db   (db/db conn)

@@ -6,6 +6,7 @@
 
 (def ^:private node-pull-spec
   [:node/id :node/content :node/weight :node/cycle :node/sources
+   :node/updated-at
    {:node/tag-refs [:tag/name]}])
 
 (defn- pull-nodes
@@ -14,32 +15,60 @@
   (mapv #(d/pull db node-pull-spec %) eids))
 
 (defn by-tag
-  "Nodes with a specific tag."
-  [db tag-name]
-  (let [eids (d/q '[:find [?n ...]
-                    :in $ ?name
-                    :where
-                    [?t :tag/name ?name]
-                    [?n :node/tag-refs ?t]]
-                  db tag-name)]
-    (pull-nodes db eids)))
+  "Nodes with a specific tag. Optional :since/:until (java.util.Date) for date filtering."
+  ([db tag-name] (by-tag db tag-name nil))
+  ([db tag-name {:keys [since until]}]
+   (if (or since until)
+     (let [where-cls (cond-> [['?t :tag/name '?name]
+                              ['?n :node/tag-refs '?t]
+                              ['?n :node/updated-at '?updated]]
+                       since (conj '[(>= ?updated ?since)])
+                       until (conj '[(< ?updated ?until)]))
+           in-cls    (cond-> '($ ?name)
+                       since (conj '?since)
+                       until (conj '?until))
+           query     {:find  '[[?n ...]]
+                      :in    (vec in-cls)
+                      :where where-cls}
+           args      (cond-> [db tag-name]
+                       since (conj since)
+                       until (conj until))
+           eids      (apply d/q query args)]
+       (pull-nodes db eids))
+     (let [eids (d/q '[:find [?n ...]
+                       :in $ ?name
+                       :where
+                       [?t :tag/name ?name]
+                       [?n :node/tag-refs ?t]]
+                     db tag-name)]
+       (pull-nodes db eids)))))
 
 (defn by-tags
-  "Nodes matching ALL given tags (intersection)."
-  [db {:keys [tags]}]
+  "Nodes matching ALL given tags (intersection).
+   Optional :since/:until (java.util.Date) for date filtering on :node/updated-at."
+  [db {:keys [tags since until]}]
   (when (seq tags)
-    (if (= 1 (count tags))
+    (if (and (= 1 (count tags)) (not since) (not until))
       (by-tag db (first tags))
       (let [tag-syms  (mapv #(symbol (str "?t" %)) (range (count tags)))
-            where-cls (into []
-                            (mapcat (fn [sym name]
-                                      [[sym :tag/name name]
-                                       ['?n :node/tag-refs sym]])
-                                    tag-syms tags))
+            where-cls (cond-> (into []
+                                    (mapcat (fn [sym name]
+                                              [[sym :tag/name name]
+                                               ['?n :node/tag-refs sym]])
+                                            tag-syms tags))
+                        (or since until) (conj ['?n :node/updated-at '?updated])
+                        since            (conj '[(>= ?updated ?since)])
+                        until            (conj '[(< ?updated ?until)]))
+            in-cls    (cond-> '[$]
+                        since (conj '?since)
+                        until (conj '?until))
+            args      (cond-> [db]
+                        since (conj since)
+                        until (conj until))
             query     {:find  '[[?n ...]]
-                       :in    '[$]
+                       :in    (vec in-cls)
                        :where where-cls}
-            eids      (d/q query db)]
+            eids      (apply d/q query args)]
         (pull-nodes db eids)))))
 
 (defn by-any-tags
@@ -53,6 +82,32 @@
                       [?n :node/tag-refs ?t]]
                     db tags)]
       (pull-nodes db eids))))
+
+(defn by-date-range
+  "Nodes within a date range on :node/updated-at, no tag filter."
+  [db {:keys [since until]}]
+  (let [where-cls (cond-> [['?n :node/updated-at '?updated]]
+                    since (conj '[(>= ?updated ?since)])
+                    until (conj '[(< ?updated ?until)]))
+        in-cls    (cond-> '[$]
+                    since (conj '?since)
+                    until (conj '?until))
+        args      (cond-> [db]
+                    since (conj since)
+                    until (conj until))
+        query     {:find  '[[?n ...]]
+                   :in    (vec in-cls)
+                   :where where-cls}
+        eids      (apply d/q query args)]
+    (pull-nodes db eids)))
+
+(defn all-nodes
+  "All nodes (for 'latest N' without any filter)."
+  [db]
+  (let [eids (d/q '[:find [?n ...]
+                     :where [?n :node/updated-at]]
+                   db)]
+    (pull-nodes db eids)))
 
 ;; --- Browse (flat list sorted by count) ---
 
@@ -102,18 +157,32 @@
 
 ;; --- Fetch by tag sets (batch with limit) ---
 
+(defn- sort-by-date [facts]
+  (sort-by :node/updated-at #(compare %2 %1) facts))
+
 (defn fetch-by-tag-sets
   "Fetches facts for each tag set (intersection). Per-set limit.
+   Optional :since/:until (java.util.Date) for date filtering.
+   When tag-sets is nil/empty, returns all matching facts in a single group.
+   Results always sorted by :node/updated-at desc.
    Output: [{:tags [...] :facts [...]} ...]"
-  [db registry tag-sets {:keys [limit] :or {limit 50}}]
+  [db registry tag-sets {:keys [limit since until] :or {limit 50}}]
   (metrics/timed registry metrics/read-duration {:operation "fetch_by_tag_sets"}
-    (mapv (fn [tags]
-            {:tags  tags
-             :facts (let [results (by-tags db {:tags tags})]
-                      (if limit
-                        (vec (take limit results))
-                        results))})
-          tag-sets)))
+    (if (seq tag-sets)
+      ;; Tags provided: group by tag set, apply date filter globally
+      (mapv (fn [tags]
+              {:tags  tags
+               :facts (->> (by-tags db {:tags tags :since since :until until})
+                           sort-by-date
+                           (take limit)
+                           vec)})
+            tag-sets)
+      ;; No tags: date-only or "latest N"
+      (let [results (if (or since until)
+                      (by-date-range db {:since since :until until})
+                      (all-nodes db))]
+        [{:tags  []
+          :facts (->> results sort-by-date (take limit) vec)}]))))
 
 ;; --- Reconciliation ---
 
