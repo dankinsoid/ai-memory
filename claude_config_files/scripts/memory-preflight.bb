@@ -1,5 +1,5 @@
 #!/usr/bin/env bb
-;; PreToolUse hook: ensures remote ai-memory blob storage is accessible via SSHFS.
+;; SessionStart hook: ensures remote ai-memory blob storage is accessible via SSHFS.
 ;; Only acts on memory_* tool calls. Never blocks — warns on stderr if setup fails.
 ;;
 ;; MCP env vars (in ~/.claude/settings.json → mcpServers.ai-memory.env):

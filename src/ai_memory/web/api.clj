@@ -7,7 +7,6 @@
             [ai-memory.tag.query :as tag-query]
             [ai-memory.tag.resolve :as tag-resolve]
             [ai-memory.blob.store :as blob-store]
-            [ai-memory.session :as session]
             [ai-memory.util.date :as date]
             [datomic.api :as d]
             [clojure.string :as str])
@@ -112,7 +111,7 @@
     {:status 200
      :body   {:results (node/search db cfg query top-k)}}))
 
-;; --- Remember (full: nodes + turn summary + session summary) ---
+;; --- Remember (nodes + session summary) ---
 
 (defn- find-session-fact
   "Finds existing session node by session-id."
@@ -131,7 +130,8 @@
     (if eid
       @(d/transact conn [[:db/add eid :node/content session-summary]
                          [:db/add eid :node/updated-at (Date.)]])
-      (let [tag-strs (if project [project] ["session-log"])
+      (let [tag-strs (cond-> ["session"]
+                       project (conj project))
             tag-refs (tag-resolve/resolve-tags conn tag-strs)
             tick     (db/current-tick db)]
         (node/create-node conn cfg
@@ -143,18 +143,25 @@
 (defn remember [conn cfg req]
   (let [body            (:body-params req)
         nodes           (:nodes body)
-        turn-summary    (:turn-summary body)
         session-summary (:session-summary body)
         context-id      (:context-id body)
         project         (:project body)
         result          (when (seq nodes)
                           (write/remember conn cfg body))]
-    ;; Turn summary → RAM buffer (NOT a fact)
-    (when (and turn-summary context-id)
-      (session/append-turn-summary! context-id turn-summary))
-    ;; Session summary → Datomic session fact (searchable)
+    ;; Session summary → Datomic + blob meta.edn
     (when (and session-summary context-id)
-      (upsert-session-fact! conn cfg context-id session-summary project))
+      (upsert-session-fact! conn cfg context-id session-summary project)
+      ;; Also update blob meta.edn if blob exists
+      (let [db       (db/db conn)
+            eid      (find-session-fact db context-id)
+            blob-dir (when eid
+                       (:node/blob-dir (d/pull db [:node/blob-dir] eid)))]
+        (when blob-dir
+          (let [base (:blob-path cfg)
+                meta (blob-store/read-meta base blob-dir)]
+            (when meta
+              (blob-store/write-meta! base blob-dir
+                (assoc meta :session-summary session-summary)))))))
     {:status 201
      :body   (or result {:nodes [] :edges-created 0})}))
 
@@ -217,17 +224,29 @@
        :body   {:blob-dir blob-dir
                 :blob-id  (:node-uuid blob-node)}})))
 
-;; --- Session sync (called by Stop hook) ---
+;; --- Session sync (called by UserPromptSubmit hook) ---
 
 (defn- parse-instant [s]
   (when s (Instant/parse s)))
 
+(defn- has-user-text?
+  "Returns true if a message has actual user text (not just tool_result blocks)."
+  [{:keys [type content]}]
+  (and (= "user" type)
+       (if (sequential? content)
+         (some (fn [block]
+                 (and (= "text" (:type block))
+                      (not (str/blank? (:text block)))))
+               content)
+         (and (string? content) (not (str/blank? content))))))
+
 (defn- group-into-turns
-  "Groups messages into turns. A turn starts with a user message."
+  "Groups messages into turns. A turn starts with a user text message
+   (not tool_result). Tool exchanges stay in the same turn."
   [messages]
   (when (seq messages)
     (let [groups (reduce (fn [acc msg]
-                           (if (= "user" (:type msg))
+                           (if (has-user-text? msg)
                              (conj acc [msg])
                              (if (seq acc)
                                (update acc (dec (count acc)) conj msg)
@@ -239,66 +258,78 @@
                :t-end    (parse-instant (:timestamp (last msgs)))})
             groups))))
 
+(defn- extract-text
+  "Extracts text content from a message's content field."
+  [content]
+  (if (string? content)
+    content
+    (->> content
+         (filter #(= "text" (:type %)))
+         (map :text)
+         (remove str/blank?)
+         (str/join "\n"))))
+
 (defn- format-turn-as-markdown
-  "Formats a turn's messages as readable markdown."
+  "Formats a turn's messages as readable markdown.
+   Skips messages with no text content (tool_use, tool_result, thinking)."
   [messages]
-  (str/join "\n\n"
-    (map (fn [{:keys [role content]}]
-           (let [text (if (string? content)
-                        content
-                        (->> content
-                             (filter #(= "text" (:type %)))
-                             (map :text)
-                             (str/join "\n")))]
-             (str "**" (or role "unknown") "**\n" text)))
-         messages)))
+  (->> messages
+       (keep (fn [{:keys [role content]}]
+               (let [text (extract-text content)]
+                 (when-not (str/blank? text)
+                   (str "**" (or role "unknown") "**\n" text)))))
+       (str/join "\n\n")))
 
 (defn- derive-project [cwd]
   (when cwd
     (last (str/split cwd #"/"))))
 
 (defn session-sync [conn cfg req]
-  (let [body      (:body-params req)
+  (let [body       (:body-params req)
         session-id (:session-id body)
         cwd        (:cwd body)
         messages   (:messages body)]
     (if-not session-id
       {:status 400 :body {:error "session_id required"}}
-      (let [base      (:blob-path cfg)
-            db        (db/db conn)
-            project   (derive-project cwd)
-            turns     (group-into-turns messages)
-            summaries (session/get-turn-summaries session-id)
+      (let [base    (:blob-path cfg)
+            db      (db/db conn)
+            project (derive-project cwd)
+            turns   (group-into-turns messages)
 
-            session-eid (find-session-fact db session-id)
-            existing-dir (when session-eid
-                           (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
-            blob-dir    (or existing-dir
-                            (blob-store/make-blob-dir-name base (str "session-" (subs session-id 0 8))))
+            session-eid  (find-session-fact db session-id)
+            existing-dir (or (when session-eid
+                               (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
+                             (blob-store/find-session-blob-dir base session-id))
+            blob-dir     (or existing-dir
+                             (blob-store/make-blob-dir-name base (str "session-" (subs session-id 0 8))))
 
-            section-offset (blob-store/count-sections base blob-dir)
+            ;; Count existing turns to number new ones correctly
+            existing-meta (blob-store/read-meta base blob-dir)
+            turn-offset   (or (:turn-count existing-meta) 0)
 
-            sections-written
-            (doall (map-indexed
-                     (fn [i {:keys [messages t-start t-end]}]
-                       (let [summary  (session/match-summary summaries t-start t-end)
-                             idx      (+ section-offset i)
-                             filename (blob-store/make-section-filename
-                                        idx (or summary (str "turn-" idx)))
-                             content  (format-turn-as-markdown messages)
-                             lines    (count (str/split-lines content))]
-                         (blob-store/write-section! base blob-dir filename content)
-                         (blob-store/write-section-meta! base blob-dir filename
-                           {:file filename :summary summary :lines lines
-                            :timestamp (str t-start)})
-                         filename))
-                     turns))
+            ;; Format new turns as markdown and append to _current.md
+            new-turn-texts
+            (->> turns
+                 (keep-indexed
+                   (fn [i {:keys [messages t-start]}]
+                     (let [content (format-turn-as-markdown messages)]
+                       (when-not (str/blank? content)
+                         (let [turn-num (+ turn-offset i 1)]
+                           (str "## Turn " turn-num
+                                (when t-start (str " (" t-start ")"))
+                                "\n" content "\n\n"))))))
+                 vec)
 
-            total-sections (+ section-offset (count sections-written))
-            ;; Pull session_summary from Datomic (the rolling summary from memory_remember)
+            append-result (when (seq new-turn-texts)
+                            (blob-store/append-current-chunk!
+                              base blob-dir (str/join new-turn-texts)))
+
+            total-turns (+ turn-offset (count new-turn-texts))
+
+            ;; Pull session_summary from Datomic (from memory_remember)
             session-summary (when session-eid
                               (:node/content (d/pull db [:node/content] session-eid)))
-            existing-meta (blob-store/read-meta base blob-dir)
+
             meta-data (merge
                         (or existing-meta
                             {:id         (UUID/randomUUID)
@@ -306,28 +337,31 @@
                              :project    project
                              :created-at (Date.)
                              :session-id session-id})
-                        {:section-count total-sections}
+                        {:turn-count total-turns}
                         (when session-summary
                           {:session-summary session-summary}))]
         (blob-store/write-meta! base blob-dir meta-data)
 
+        ;; Create or link Datomic session node
         (if session-eid
           (when-not existing-dir
             @(d/transact conn [[:db/add session-eid :node/blob-dir blob-dir]
                                [:db/add session-eid :node/updated-at (Date.)]]))
-          (let [tag-refs (when project
-                           (tag-resolve/resolve-tags conn [project]))]
+          (let [tag-strs (cond-> ["session"]
+                           project (conj project))
+                tag-refs (tag-resolve/resolve-tags conn tag-strs)]
             (node/create-node conn cfg
-              {:content    (or (:summary meta-data) "Session conversation")
+              {:content    (or session-summary "Session conversation")
                :tag-refs   tag-refs
                :tick       (db/current-tick db)
                :blob-dir   blob-dir
                :session-id session-id})))
 
         {:status 200
-         :body   {:blob-dir blob-dir
-                  :sections-added (count sections-written)
-                  :total-sections total-sections}}))))
+         :body   {:blob-dir           blob-dir
+                  :turns-added        (count new-turn-texts)
+                  :total-turns        total-turns
+                  :current-chunk-size (or (:byte-count append-result) 0)}}))))
 
 ;; --- Session compact (agent stores detailed summary before context clear) ---
 
@@ -356,3 +390,23 @@
             {:status 200
              :body   {:blob-dir blob-dir
                       :status   "compacted"}}))))))
+
+;; --- Name chunk (agent names the current conversation chunk) ---
+
+(defn name-chunk [conn cfg req]
+  (let [body       (:body-params req)
+        session-id (:session-id body)
+        title      (:title body)]
+    (if-not (and session-id title)
+      {:status 400 :body {:error "session_id and title required"}}
+      (let [base     (:blob-path cfg)
+            db       (db/db conn)
+            eid      (find-session-fact db session-id)
+            blob-dir (or (when eid
+                           (:node/blob-dir (d/pull db [:node/blob-dir] eid)))
+                         (blob-store/find-session-blob-dir base session-id))]
+        (if-not blob-dir
+          {:status 404 :body {:error (str "No blob found for session " session-id)}}
+          (if-let [filename (blob-store/rename-current-chunk! base blob-dir title)]
+            {:status 200 :body {:blob-dir blob-dir :filename filename}}
+            {:status 404 :body {:error "No _current.md to rename"}}))))))

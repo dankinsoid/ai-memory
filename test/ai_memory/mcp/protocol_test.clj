@@ -56,7 +56,7 @@
      uuid)))
 
 (defn- handler []
-  (protocol/make-handler *base-url*))
+  (protocol/make-handler *base-url* "/tmp/ai-memory-test-blobs"))
 
 (defn- call [method & {:keys [id params] :or {id 1 params {}}}]
   ((handler) {:jsonrpc "2.0" :id id :method method :params params}))
@@ -75,7 +75,7 @@
   (testing "returns all 10 tools with schemas"
     (let [resp  (call "tools/list")
           tools (get-in resp [:result :tools])]
-      (is (= 10 (count tools)))
+      (is (= 11 (count tools)))
       (is (every? :name tools))
       (is (every? :description tools))
       (is (every? :inputSchema tools)))))
@@ -87,7 +87,8 @@
       (is (= #{"memory_browse_tags" "memory_count_facts" "memory_get_facts"
                "memory_search" "memory_create_tag" "memory_remember"
                "memory_list_blobs" "memory_read_blob"
-               "memory_store_file" "memory_session_compact"}
+               "memory_store_file" "memory_session_compact"
+               "memory_name_chunk"}
              names)))))
 
 (deftest ping-test
@@ -138,7 +139,7 @@
 
 (deftest render-facts-test
   (testing "renders facts as plain text grouped by tag set"
-    (let [text (protocol/render-facts
+    (let [text (protocol/render-facts "/tmp/blobs"
                  [{:tags ["clj"]
                    :facts [{:node/content "Use ex-info for errors"}
                            {:node/content "Prefer immutable data"}]}
@@ -240,7 +241,7 @@
 
 (deftest render-facts-empty-tags-test
   (testing "render-facts handles empty tags group"
-    (let [text (protocol/render-facts
+    (let [text (protocol/render-facts "/tmp/blobs"
                  [{:tags []
                    :facts [{:node/content "Some fact"}]}])]
       (is (= "= all\n- Some fact" text)))))

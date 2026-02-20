@@ -6,7 +6,7 @@
 
 (def ^:private node-pull-spec
   [:node/id :node/content :node/weight :node/cycle :node/sources
-   :node/updated-at
+   :node/blob-dir :node/updated-at
    {:node/tag-refs [:tag/name]}])
 
 (defn- pull-nodes

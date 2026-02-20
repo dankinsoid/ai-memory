@@ -67,22 +67,20 @@
                   :required   ["name"]}}
 
    {:name        "memory_remember"
-    :description "Store memory facts and/or a turn summary. Facts are deduplicated and linked. Turn summary is stored as a conversation record. Call after each message with at least a turn_summary."
+    :description "Store memory facts and/or a session summary. Facts are deduplicated and linked. Call after each meaningful turn."
     :inputSchema {:type       "object"
-                  :properties {:nodes        {:type        "array"
-                                              :items       {:type       "object"
-                                                            :properties {:content   {:type "string" :description "Fact content (1-3 sentences)"}
-                                                                         :tags      {:type "array" :items {:type "string"} :description "Tag names"}}
-                                                            :required   ["content" "tags"]}
-                                              :description "Memory nodes to store"}
-                               :turn_summary     {:type        "string"
-                                                  :description "One-line turn summary: 'User: <request> → <what I did>'"}
-                               :session_summary  {:type        "string"
-                                                  :description "Rolling 1-sentence session summary (updated each turn). Stored as searchable fact."}
-                               :context_id       {:type        "string"
-                                                  :description "Session ID for context-based linking across calls"}
-                               :project          {:type        "string"
-                                                  :description "Project name. Session summary tagged with this."}}}}
+                  :properties {:nodes           {:type        "array"
+                                                 :items       {:type       "object"
+                                                               :properties {:content   {:type "string" :description "Fact content (1-3 sentences)"}
+                                                                            :tags      {:type "array" :items {:type "string"} :description "Tag names"}}
+                                                               :required   ["content" "tags"]}
+                                                 :description "Memory nodes to store"}
+                               :session_summary {:type        "string"
+                                                 :description "Rolling 1-sentence session summary (updated each turn). Stored as searchable fact."}
+                               :context_id      {:type        "string"
+                                                 :description "Session ID for context-based linking across calls"}
+                               :project         {:type        "string"
+                                                 :description "Project name. Session summary tagged with this."}}}}
 
    {:name        "memory_list_blobs"
     :description "List stored blobs (conversations, documents) sorted by date desc. Returns compact text: one line per blob with date, dir, summary."
@@ -119,6 +117,13 @@
                                :compact_summary {:type "string" :description "Detailed multi-paragraph session summary"}}
                   :required   ["session_id" "compact_summary"]}}
 
+   {:name        "memory_name_chunk"
+    :description "Name the current conversation chunk. Renames _current.md to a numbered, titled chunk file. Call when reminded to create a navigation point in the session history."
+    :inputSchema {:type       "object"
+                  :properties {:context_id {:type "string" :description "Session ID (same as context_id in memory_remember)"}
+                               :title      {:type "string" :description "Short descriptive title for this chunk (e.g. 'designed-blob-architecture')"}}
+                  :required   ["context_id" "title"]}}
+
 ])
 
 ;; --- Compact text rendering ---
@@ -140,23 +145,27 @@
                         (str (tags-header tags) ": " count))
                       results)))
 
-(defn- render-fact-line [fact]
-  (let [content (:node/content fact)
-        sources (:node/sources fact)]
-    (if (seq sources)
-      (str "- " content " [src: " (str/join ", " sources) "]")
+(defn- render-fact-line [blob-path fact]
+  (let [content  (:node/content fact)
+        sources  (:node/sources fact)
+        blob-dir (:node/blob-dir fact)
+        refs     (cond-> []
+                   (seq sources) (into (map #(str "src: " %) sources))
+                   blob-dir      (conj (str "blob: " blob-path "/" blob-dir)))]
+    (if (seq refs)
+      (str "- " content " [" (str/join ", " refs) "]")
       (str "- " content))))
 
 (defn render-facts
   "Renders facts grouped by tag set as plain text. Shows source indicator for facts with blob refs."
-  [results]
+  [blob-path results]
   (str/join "\n\n"
     (map (fn [{:keys [tags facts]}]
            (let [header (if (seq tags)
                           (tags-header tags)
                           "all")]
              (str "= " header "\n"
-                  (str/join "\n" (map render-fact-line facts)))))
+                  (str/join "\n" (map (partial render-fact-line blob-path) facts)))))
          results)))
 
 (defn- format-date [inst]
@@ -207,8 +216,14 @@
            (str "\n" (:summary meta)))
          (when (:status meta)
            (str "\nStatus: " (:status meta)))
-         (when-let [n (:section-count meta)]
-           (str "\n\nSections: " n " (use section param 0.." (dec n) " to read)")))))
+         (when-let [n (:turn-count meta)]
+           (str "\n\nTurns: " n " (use section param 0.." (dec n) " to read)"))
+         (when-let [n (:line-count meta)]
+           (str "\nLines: " n))
+         ;; Legacy: section-count for non-session blobs (memory_store_file)
+         (when (and (not (:turn-count meta)) (:section-count meta))
+           (str "\n\nSections: " (:section-count meta)
+                " (use section param 0.." (dec (:section-count meta)) " to read)")))))
 
 
 
@@ -232,7 +247,6 @@
                                         {:content (:content n)
                                          :tags    (:tags n)})
                                       (:nodes params))
-                  :turn-summary    (:turn_summary params)
                   :session-summary (:session_summary params)
                   :context-id      (:context_id params)
                   :project         (:project params)}
@@ -248,6 +262,8 @@
                       :path    (:path params)}
     :session-compact {:session-id      (:session_id params)
                       :compact-summary (:compact_summary params)}
+    :name-chunk      {:session-id (:context_id params)
+                      :title      (:title params)}
     params))
 
 ;; --- Handler dispatch ---
@@ -263,7 +279,8 @@
     :list-blobs         (server/handle-list-blobs base-url params)
     :read-blob          (server/handle-read-blob base-url params)
     :store-file         (server/handle-store-file base-url params)
-    :session-compact    (server/handle-session-compact base-url params)))
+    :session-compact    (server/handle-session-compact base-url params)
+    :name-chunk         (server/handle-name-chunk base-url params)))
 
 ;; --- JSON-RPC method handlers ---
 
@@ -297,13 +314,14 @@
    "memory_list_blobs"           :list-blobs
    "memory_read_blob"            :read-blob
    "memory_store_file"           :store-file
-   "memory_session_compact"      :session-compact})
+   "memory_session_compact"      :session-compact
+   "memory_name_chunk"           :name-chunk})
 
-(defn- format-result [handler-key result]
+(defn- format-result [blob-path handler-key result]
   (case handler-key
     :browse-tags (render-tag-list result)
     :count-facts (render-counts result)
-    :get-facts   (render-facts result)
+    :get-facts   (render-facts blob-path result)
     :search      (render-search-results result)
     :list-blobs  (render-blob-list result)
     :read-blob   (if (:content result)
@@ -311,7 +329,7 @@
                    (render-blob-meta result))
     (json/generate-string result)))
 
-(defn- handle-tools-call [base-url id params]
+(defn- handle-tools-call [base-url blob-path id params]
   (let [tool-name (:name params)
         arguments (or (:arguments params) {})]
     (if-let [handler-key (get handler-keys tool-name)]
@@ -320,7 +338,7 @@
         {:jsonrpc "2.0"
          :id      id
          :result  {:content [{:type "text"
-                              :text (format-result handler-key result)}]}})
+                              :text (format-result blob-path handler-key result)}]}})
       {:jsonrpc "2.0"
        :id      id
        :error   {:code    -32602
@@ -329,15 +347,15 @@
 ;; --- Top-level dispatch ---
 
 (defn make-handler
-  "Returns a request→response fn closed over base-url."
-  [base-url]
+  "Returns a request→response fn closed over base-url and blob-path."
+  [base-url blob-path]
   (fn [{:keys [id method params]}]
     (log/debug "MCP request:" method)
     (case method
       "initialize"                (handle-initialize id)
       "notifications/initialized" nil
       "tools/list"                (handle-tools-list id)
-      "tools/call"                (handle-tools-call base-url id params)
+      "tools/call"                (handle-tools-call base-url blob-path id params)
       "ping"                      (handle-ping id)
       ;; Unknown method
       (if id

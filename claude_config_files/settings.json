@@ -10,10 +10,22 @@
       "mcp__ai-memory__memory_count_facts",
       "mcp__ai-memory__memory_create_tag",
       "mcp__ai-memory__memory_list_blobs",
-      "mcp__ai-memory__memory_session_compact"
+      "mcp__ai-memory__memory_session_compact",
+      "mcp__ai-memory__memory_name_chunk"
     ]
   },
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bb ~/.claude/hooks/chunk-reminder.bb",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

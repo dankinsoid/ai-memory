@@ -68,3 +68,6 @@
 
 (defn handle-session-compact [base-url params]
   (api-post base-url "/api/session/compact" params))
+
+(defn handle-name-chunk [base-url params]
+  (api-post base-url "/api/session/name-chunk" params))

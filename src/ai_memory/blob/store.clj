@@ -118,13 +118,15 @@
 
 (defn- find-section-file-by-index
   "Finds a section file by numeric prefix (e.g. index 5 → '05-*.md').
-   Falls back to directory listing when :sections is absent from meta."
+   Excludes sidecar .meta.edn files."
   [base-path dir-name index]
   (let [dir    (io/file base-path dir-name)
         prefix (format "%02d-" index)]
     (when (.exists dir)
       (->> (.listFiles dir)
-           (filter #(str/starts-with? (.getName %) prefix))
+           (filter #(let [n (.getName %)]
+                      (and (str/starts-with? n prefix)
+                           (not (str/ends-with? n ".meta.edn")))))
            first))))
 
 (defn read-section-by-index
@@ -163,3 +165,80 @@
   [base-path dir-name]
   (let [meta-file (io/file base-path dir-name "meta.edn")]
     (.exists meta-file)))
+
+(defn find-session-blob-dir
+  "Finds existing blob directory for a session-id by scanning meta.edn files.
+   Returns dir-name or nil."
+  [base-path session-id]
+  (when-let [dirs (list-blob-dirs base-path)]
+    (->> dirs
+         (filter #(str/includes? % "session"))
+         (some (fn [dir-name]
+                 (when-let [meta (read-meta base-path dir-name)]
+                   (when (= session-id (:session-id meta))
+                     dir-name)))))))
+
+;; --- Session chunks (_current.md + named chunks) ---
+
+(def ^:private current-chunk-file "_current.md")
+
+(defn append-current-chunk!
+  "Appends markdown content to _current.md in blob directory.
+   Creates dir and file if needed. Returns {:line-count N :byte-count N}."
+  [base-path dir-name content]
+  (let [dir  (io/file base-path dir-name)
+        file (io/file dir current-chunk-file)]
+    (.mkdirs dir)
+    (spit file content :append true)
+    {:line-count (count (str/split-lines (slurp file)))
+     :byte-count (.length file)}))
+
+(defn list-chunks
+  "Lists session chunk files in a blob directory, sorted for display.
+   Numbered chunks sorted by prefix, _current.md last.
+   Excludes: meta.edn, compact.md.
+   Returns vec of {:file filename :lines N :index N}."
+  [base-path dir-name]
+  (let [dir (io/file base-path dir-name)]
+    (when (.exists dir)
+      (let [files     (->> (.listFiles dir)
+                           (map #(.getName %))
+                           (filter #(str/ends-with? % ".md"))
+                           (remove #{"compact.md"}))
+            numbered  (->> files
+                           (filter #(re-matches #"\d{2,}-.*\.md" %))
+                           sort)
+            current   (when (some #{"_current.md"} files) ["_current.md"])
+            all-chunks (vec (concat numbered current))]
+        (mapv (fn [idx filename]
+                (let [file (io/file base-path dir-name filename)]
+                  {:file  filename
+                   :lines (count (str/split-lines (slurp file)))
+                   :index idx}))
+              (range) all-chunks)))))
+
+(defn- next-chunk-number
+  "Returns the next available chunk number for a blob directory."
+  [base-path dir-name]
+  (let [dir (io/file base-path dir-name)]
+    (if (.exists dir)
+      (let [existing (->> (.listFiles dir)
+                          (map #(.getName %))
+                          (keep #(when-let [m (re-find #"^(\d{2,})-" %)]
+                                   (parse-long (second m)))))]
+        (if (seq existing)
+          (inc (apply max existing))
+          1))
+      1)))
+
+(defn rename-current-chunk!
+  "Renames _current.md to {NN}-{slug}.md. Returns new filename or nil."
+  [base-path dir-name title]
+  (let [dir  (io/file base-path dir-name)
+        src  (io/file dir current-chunk-file)]
+    (when (.exists src)
+      (let [num      (next-chunk-number base-path dir-name)
+            filename (make-section-filename num title)
+            dest     (io/file dir filename)]
+        (.renameTo src dest)
+        filename))))

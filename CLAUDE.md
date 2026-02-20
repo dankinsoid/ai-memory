@@ -81,15 +81,16 @@ For Claude Code sessions: MCP server reads `~/.claude/projects/.../*.jsonl` dire
 Agent calls `memory_remember` after meaningful exchanges:
 ```
 memory_remember({
-  session_id: "...",
-  turn_summary: "Discussed error handling approach",
-  facts: [{title: "...", tags: [...]}]
+  context_id: "...",
+  project: "my-project",
+  session_summary: "Discussed error handling approach for async pipelines",
+  nodes: [{content: "...", tags: [...]}]
 })
 ```
 
-- Agent provides summary + facts (~50-100 extra tokens)
-- MCP server reads full message text from ~/.claude JSONL (0 token cost)
-- Server stores facts in Datomic, chunks in blob storage
+- Agent provides session summary + facts (~50-100 extra tokens)
+- Session summary updates Datomic node + blob meta.edn
+- Stop hook captures full conversation text into blob `conversation.md`
 
 ## Development
 

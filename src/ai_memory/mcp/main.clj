@@ -6,7 +6,9 @@
   (:gen-class))
 
 (defn -main [& _args]
-  (let [base-url (or (System/getenv "AI_MEMORY_URL")
-                     "http://localhost:8080")]
-    (log/info "ai-memory MCP client starting, server:" base-url)
-    (transport/run-loop (protocol/make-handler base-url))))
+  (let [base-url  (or (System/getenv "AI_MEMORY_URL")
+                      "http://localhost:8080")
+        blob-path (or (System/getenv "BLOB_PATH")
+                      (str (System/getProperty "user.home") "/.ai-memory/blobs"))]
+    (log/info "ai-memory MCP client starting, server:" base-url "blobs:" blob-path)
+    (transport/run-loop (protocol/make-handler base-url blob-path))))

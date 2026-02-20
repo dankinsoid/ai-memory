@@ -1,6 +1,11 @@
 #!/usr/bin/env bb
-;; Stop hook: parses Claude Code session JSONL, sends new messages to ai-memory server.
-;; Runs after every agent response. Sends only delta (messages since last sync).
+;; Stop hook: syncs conversation transcript delta to server.
+;;
+;; Reads JSONL transcript, computes delta since last sync,
+;; POSTs to /api/session/sync, saves state (last-uuid + chunk-bytes).
+;;
+;; State file: ~/.claude/hooks/state/{session-id}.edn
+;;   {:last-uuid "..." :chunk-bytes 12345}
 
 (require '[cheshire.core :as json]
          '[babashka.http-client :as http]
@@ -8,8 +13,7 @@
          '[clojure.java.io :as io])
 
 (defn find-transcript
-  "Finds the JSONL transcript file for a session.
-   Claude Code stores transcripts at ~/.claude/projects/<hash>/<session-id>.jsonl"
+  "Finds the JSONL transcript file for a session."
   [session-id]
   (let [projects-dir (str (System/getenv "HOME") "/.claude/projects")]
     (when (fs/exists? projects-dir)
@@ -17,9 +21,7 @@
            (map str)
            first))))
 
-(defn parse-jsonl
-  "Reads JSONL file, returns seq of parsed entries."
-  [path]
+(defn parse-jsonl [path]
   (with-open [rdr (io/reader path)]
     (->> (line-seq rdr)
          (keep (fn [line]
@@ -27,9 +29,7 @@
                       (catch Exception _ nil))))
          vec)))
 
-(defn extract-messages
-  "Filters to user/assistant message entries."
-  [entries]
+(defn extract-messages [entries]
   (->> entries
        (filter #(#{"user" "assistant"} (:type %)))
        (mapv (fn [e]
@@ -39,25 +39,22 @@
                 :role      (get-in e [:message :role])
                 :content   (get-in e [:message :content])}))))
 
-(defn delta-messages
-  "Returns messages after last-uuid. If last-uuid not found, returns all."
-  [entries last-uuid]
+(defn delta-messages [entries last-uuid]
   (if last-uuid
     (let [after (->> entries
                      (drop-while #(not= (:uuid %) last-uuid))
                      rest)]
       (if (seq after)
         (extract-messages after)
-        ;; last-uuid not found (e.g. /clear) — send all
         (extract-messages entries)))
     (extract-messages entries)))
 
 (let [input      (json/parse-string (slurp *in*) true)
       session-id (:session_id input)
       cwd        (:cwd input)
+      base-url   (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080")
       state-dir  (str (System/getenv "HOME") "/.claude/hooks/state")
-      state-file (str state-dir "/" session-id ".edn")
-      port       (or (System/getenv "AI_MEMORY_PORT") "8080")]
+      state-file (str state-dir "/" session-id ".edn")]
 
   (when session-id
     (when-let [transcript (or (:transcript_path input)
@@ -69,17 +66,30 @@
               messages  (delta-messages entries last-uuid)]
 
           (when (seq messages)
-            (try
-              (http/post (str "http://localhost:" port "/api/session/sync")
-                         {:headers {"Content-Type" "application/json"}
-                          :body    (json/generate-string
-                                     {:session_id session-id
-                                      :cwd        cwd
-                                      :messages   messages})})
-              (catch Exception e
-                (binding [*out* *err*]
-                  (println "session-sync: POST failed:" (.getMessage e)))))
+            (let [response
+                  (try
+                    (http/post (str base-url "/api/session/sync")
+                               {:headers {"Content-Type" "application/json"}
+                                :body    (json/generate-string
+                                           {:session_id session-id
+                                            :cwd        cwd
+                                            :messages   messages})})
+                    (catch Exception e
+                      (binding [*out* *err*]
+                        (println "session-sync: POST failed:" (.getMessage e)))
+                      nil))
 
-            ;; Save sync state
-            (fs/create-dirs state-dir)
-            (spit state-file (pr-str {:last-uuid (:uuid (last messages))}))))))))
+                  resp-body (when response
+                              (try (json/parse-string (:body response) true)
+                                   (catch Exception _ nil)))
+
+                  chunk-bytes (or (:current-chunk-size resp-body)
+                                  (:current_chunk_size resp-body)
+                                  0)]
+
+              (fs/create-dirs state-dir)
+              (spit state-file
+                    (pr-str {:last-uuid   (:uuid (last messages))
+                             :chunk-bytes chunk-bytes})))))))))
+
+(System/exit 0)

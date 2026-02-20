@@ -51,7 +51,8 @@
                       ["/blobs/read" {:post (fn [req] (api/read-blob conn cfg req))}]
                       ["/blobs/file" {:post (fn [req] (api/store-file conn cfg req))}]
                       ["/session/sync" {:post (fn [req] (api/session-sync conn cfg req))}]
-                      ["/session/compact" {:post (fn [req] (api/session-compact conn cfg req))}]]]
+                      ["/session/compact" {:post (fn [req] (api/session-compact conn cfg req))}]
+                      ["/session/name-chunk" {:post (fn [req] (api/name-chunk conn cfg req))}]]]
                     {:data {:muuntaja   m/instance
                             :middleware [parameters/parameters-middleware
                                     muuntaja/format-middleware

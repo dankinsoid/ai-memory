@@ -1,7 +1,7 @@
 <!-- ai-memory:start -->
 # Memory
 
-Long-term memory across sessions and projects. 10 MCP tools via `ai-memory` server.
+Long-term memory across sessions and projects. 11 MCP tools via `ai-memory` server.
 
 ## Session Start
 
@@ -21,7 +21,6 @@ Call `memory_remember` when the turn produced something worth persisting. **Skip
 memory_remember({
   context_id: "<session-id>",
   project: "<project-name>",
-  turn_summary: "User: <request> → <what I did>",
   session_summary: "Rolling 1-sentence session summary",
   nodes: [
     { content: "Prefers X over Y", tags: ["pref", "coding-style"] }
@@ -29,8 +28,7 @@ memory_remember({
 })
 ```
 
-**turn_summary** — what the user asked, what you did. One line.
-**session_summary** — rolling summary of entire session. Stored as Datomic fact, upserted each call.
+**session_summary** — rolling summary of entire session. Stored as Datomic fact, upserted each call. Also updates blob meta.
 **project** — always include.
 **nodes** — only for durable knowledge: preferences, decisions, error patterns, domain facts, meta-patterns.
 
@@ -46,6 +44,19 @@ Bad: restates code/docs, too vague, temporary, trivially obvious.
 - **Meta**: underlying philosophy or principle
 
 When 3+ concrete facts share a theme — synthesize a meta-fact.
+
+## Blobs (detailed content)
+
+Facts with `[blob: /path/to/dir]` link to detailed content on disk. Session blobs (tagged `session`) store dialog as named chunk files. Use Read/Glob/Grep on the blob directory directly:
+
+- Start with `compact.md` or `meta.edn` for overview
+- Named chunks (`01-designed-auth.md`, `02-fixed-tests.md`) are the main content
+- `_current.md` is the latest unnamed chunk
+- Never read large files whole — use Grep or Read with offset/limit
+
+### Naming chunks
+
+When you receive a reminder about chunk size, call `memory_name_chunk` with a short title describing the recent work. This creates a navigation point in the session history.
 
 ## Mid-Session Retrieval
 
