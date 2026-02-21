@@ -1,7 +1,7 @@
 <!-- ai-memory:start -->
 # Memory
 
-Long-term memory across sessions and projects. 5 MCP tools via `ai-memory` server.
+Long-term memory across sessions and projects.
 
 ## Session Start
 

@@ -121,7 +121,7 @@
    Excludes sidecar .meta.edn files."
   [base-path dir-name index]
   (let [dir    (io/file base-path dir-name)
-        prefix (format "%02d-" index)]
+        prefix (format "%04d-" index)]
     (when (.exists dir)
       (->> (.listFiles dir)
            (filter #(let [n (.getName %)]
