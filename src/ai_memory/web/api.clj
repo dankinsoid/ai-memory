@@ -172,15 +172,15 @@
         lines    (when (:content body) (count (str/split-lines (:content body))))
         _        (blob-store/write-section-meta! base blob-dir filename
                    {:file filename :summary (:summary body) :lines lines})
-        meta-data {:id           (UUID/randomUUID)
-                   :type         (keyword (or (:type body) "file"))
-                   :title        (:title body)
-                   :project      (:project body)
-                   :created-at   now
-                   :summary      (:summary body)
-                   :source-path  (:path body)
-                   :tags         (:tags body)
-                   :section-count 1}]
+        meta-data (cond-> {:id           (UUID/randomUUID)
+                           :type         (keyword (or (:type body) "file"))
+                           :title        (:title body)
+                           :created-at   now
+                           :summary      (:summary body)
+                           :tags         (:tags body)
+                           :section-count 1}
+                    (:project body)     (assoc :project (:project body))
+                    (:path body)        (assoc :source-path (:path body)))]
     (blob-store/write-meta! base blob-dir meta-data)
     (let [tag-strs (distinct (cons "blob" (:tags body)))
           tag-refs (tag-resolve/resolve-tags conn tag-strs)
@@ -313,11 +313,11 @@
 
             meta-data (merge
                         (or existing-meta
-                            {:id         (UUID/randomUUID)
-                             :type       :session
-                             :project    project
-                             :created-at (Date.)
-                             :session-id session-id})
+                            (cond-> {:id         (UUID/randomUUID)
+                                     :type       :session
+                                     :created-at (Date.)
+                                     :session-id session-id}
+                              project (assoc :project project)))
                         {:turn-count total-turns}
                         (when session-summary
                           {:session-summary session-summary}))]
@@ -368,11 +368,11 @@
                             (let [dir-name (blob-store/make-blob-dir-name
                                              base (str "session-" (subs session-id 0 8)))]
                               (blob-store/write-meta! base dir-name
-                                {:id         (UUID/randomUUID)
-                                 :type       :session
-                                 :project    project
-                                 :created-at (Date.)
-                                 :session-id session-id})
+                                (cond-> {:id         (UUID/randomUUID)
+                                         :type       :session
+                                         :created-at (Date.)
+                                         :session-id session-id}
+                                  project (assoc :project project)))
                               dir-name))
 
             ;; Link blob-dir to existing Datomic node if not yet linked

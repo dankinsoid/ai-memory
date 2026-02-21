@@ -3,6 +3,7 @@
    Blobs live in data/blobs/{YYYY-MM-DD}_{slug}/ with meta.edn + content files."
   (:require [clojure.java.io :as io]
             [clojure.edn :as edn]
+            [clojure.pprint :as pp]
             [clojure.string :as str])
   (:import [java.time LocalDate ZoneId]
            [java.time.format DateTimeFormatter]))
@@ -55,7 +56,7 @@
   (let [dir  (io/file base-path dir-name)
         file (io/file dir "meta.edn")]
     (.mkdirs dir)
-    (spit file (pr-str meta-data))
+    (spit file (with-out-str (pp/pprint meta-data)))
     (.getPath file)))
 
 (defn read-meta
@@ -99,7 +100,7 @@
     (when (>= lines sidecar-min-lines)
       (let [dir  (io/file base-path dir-name)
             file (io/file dir (sidecar-filename filename))]
-        (spit file (pr-str meta-data))
+        (spit file (with-out-str (pp/pprint meta-data)))
         (.getPath file)))))
 
 (defn read-section-meta
