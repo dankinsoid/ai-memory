@@ -113,8 +113,7 @@
   (let [db  (db/db conn)
         eid (find-session-fact db session-id)]
     (if eid
-      @(d/transact conn [[:db/add eid :node/content session-summary]
-                         [:db/add eid :node/updated-at (Date.)]])
+      (node/update-content! conn cfg eid session-summary)
       (let [tag-strs (cond-> ["session"]
                        project (conj project))
             tag-refs (tag-resolve/resolve-tags conn tag-strs)
@@ -388,8 +387,7 @@
                 (when meta
                   (blob-store/write-meta! base blob-dir
                     (assoc meta :compact-summary compact))))
-              @(d/transact conn [[:db/add session-eid :node/content compact]
-                                 [:db/add session-eid :node/updated-at (Date.)]])
+              (node/update-content! conn cfg session-eid compact)
               "stored")]
 
         {:status 200

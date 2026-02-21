@@ -102,6 +102,17 @@
     (when eid
       (d/pull db '[*] eid))))
 
+(defn update-content!
+  "Updates node content and updated-at. Re-embeds in Qdrant unless entity."
+  [conn cfg eid new-content]
+  (let [db   (d/db conn)
+        node (d/pull db [{:node/tag-refs [:tag/name]}] eid)]
+    @(d/transact conn
+       [[:db/add eid :node/content    new-content]
+        [:db/add eid :node/updated-at (now)]])
+    (when-not (skip-embedding? {:tag-refs (:node/tag-refs node)})
+      (embed-async! cfg eid new-content))))
+
 (defn reinforce-node
   "Reinforces existing node: bumps weight, cycle, updated-at. Re-embeds unless entity."
   [conn cfg eid new-content delta current-cycle]
