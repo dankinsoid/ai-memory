@@ -1,7 +1,7 @@
 <!-- ai-memory:start -->
 # Memory
 
-Long-term memory across sessions and projects. 8 MCP tools via `ai-memory` server.
+Long-term memory across sessions and projects. 5 MCP tools via `ai-memory` server.
 
 ## Session Start
 
@@ -49,7 +49,9 @@ Hook reminders will tell you when to call and which params to include. All param
 
 ## Blobs (detailed content)
 
-Facts with `[blob: /path/to/dir]` link to detailed content on disk. Session blobs (tagged `session`) store dialog as named chunk files. Use Read/Glob/Grep on the blob directory directly:
+All blob facts are auto-tagged `blob`. Find them via `memory_get_facts({ filters: [{ tags: ["blob"] }] })`.
+
+Facts with `[blob: /path/to/dir]` link to detailed content on disk. Use Read/Glob/Grep on the blob directory directly:
 
 - Start with `compact.md` or `meta.edn` for overview
 - Named chunks (`01-designed-auth.md`, `02-fixed-tests.md`) are the main content

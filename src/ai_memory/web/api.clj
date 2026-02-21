@@ -3,7 +3,6 @@
             [ai-memory.graph.node :as node]
             [ai-memory.graph.edge :as edge]
             [ai-memory.graph.write :as write]
-            [ai-memory.tag.core :as tag]
             [ai-memory.tag.query :as tag-query]
             [ai-memory.tag.resolve :as tag-resolve]
             [ai-memory.blob.store :as blob-store]
@@ -68,12 +67,6 @@
      :body   (tag-query/browse db {:limit  (or limit 50)
                                     :offset (or offset 0)})}))
 
-(defn create-tag [conn _cfg req]
-  (let [{:keys [name]} (:body-params req)]
-    (tag/ensure-tag! conn name)
-    {:status 201
-     :body   {:tag/name name}}))
-
 (defn count-facts [conn cfg req]
   (let [db       (db/db conn)
         tag-sets (get-in req [:body-params :tag-sets])]
@@ -95,6 +88,15 @@
      :body   {:results (if (seq tags)
                          (tag-query/by-tags db {:tags tags})
                          [])}}))
+
+;; --- Helpers ---
+
+(defn- link-blob-dir!
+  "Links blob-dir to an existing node and ensures it has the 'blob' tag."
+  [conn eid blob-dir]
+  (let [blob-ref (tag-resolve/resolve-tag conn "blob")]
+    (node/update-tag-refs conn eid [blob-ref])
+    @(d/transact conn [[:db/add eid :node/blob-dir blob-dir]])))
 
 ;; --- Remember (nodes + session summary) ---
 
@@ -180,8 +182,8 @@
                    :tags         (:tags body)
                    :section-count 1}]
     (blob-store/write-meta! base blob-dir meta-data)
-    (let [tag-refs (when (seq (:tags body))
-                     (tag-resolve/resolve-tags conn (:tags body)))
+    (let [tag-strs (distinct (cons "blob" (:tags body)))
+          tag-refs (tag-resolve/resolve-tags conn tag-strs)
           blob-node (node/create-node conn cfg
                       {:content   (:summary body)
                        :tag-refs  tag-refs
@@ -324,9 +326,8 @@
         ;; Create or link Datomic session node
         (if session-eid
           (when-not existing-dir
-            @(d/transact conn [[:db/add session-eid :node/blob-dir blob-dir]
-                               [:db/add session-eid :node/updated-at (Date.)]]))
-          (let [tag-strs (cond-> ["session"]
+            (link-blob-dir! conn session-eid blob-dir))
+          (let [tag-strs (cond-> ["session" "blob"]
                            project (conj project))
                 tag-refs (tag-resolve/resolve-tags conn tag-strs)]
             (node/create-node conn cfg
@@ -376,8 +377,7 @@
 
             ;; Link blob-dir to existing Datomic node if not yet linked
             _ (when (and session-eid (not existing-dir))
-                @(d/transact conn [[:db/add session-eid :node/blob-dir blob-dir]
-                                   [:db/add session-eid :node/updated-at (Date.)]]))
+                (link-blob-dir! conn session-eid blob-dir))
 
             ;; 1. Update session summary in Datomic + blob meta
             summary-result
@@ -386,7 +386,7 @@
                 ;; If node was just created by upsert, link blob-dir to it
                 (when-not session-eid
                   (when-let [new-eid (find-session-fact (db/db conn) session-id)]
-                    @(d/transact conn [[:db/add new-eid :node/blob-dir blob-dir]]))))
+                    (link-blob-dir! conn new-eid blob-dir))))
               (let [meta (blob-store/read-meta base blob-dir)]
                 (when meta
                   (blob-store/write-meta! base blob-dir

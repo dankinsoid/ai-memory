@@ -50,13 +50,6 @@
                                           :description "Array of filters. Each filter is an independent query."}}
                   :required   ["filters"]}}
 
-   {:name        "memory_create_tag"
-    :description "Create a new tag. Tags are atomic strings (no hierarchy)."
-    :inputSchema {:type       "object"
-                  :properties {:name {:type        "string"
-                                      :description "Tag name (e.g. 'clj', 'error-handling')"}}
-                  :required   ["name"]}}
-
    {:name        "memory_remember"
     :description "Store memory facts. Facts are deduplicated and linked. Call after each meaningful turn."
     :inputSchema {:type       "object"
@@ -70,22 +63,6 @@
                                                  :description "Session ID for context-based linking across calls"}
                                :project         {:type        "string"
                                                  :description "Project name. Tags facts with this."}}}}
-
-   {:name        "memory_list_blobs"
-    :description "List stored blobs (conversations, documents) sorted by date desc. Returns compact text: one line per blob with date, dir, summary."
-    :inputSchema {:type       "object"
-                  :properties {:limit {:type    "integer"
-                                       :description "Max results (default 20)"
-                                       :default 20}}}}
-
-   {:name        "memory_read_blob"
-    :description "Read blob metadata or a specific section. Call with blob_dir only to see summary + section index. Call with blob_dir + section (0-based) to get full section content."
-    :inputSchema {:type       "object"
-                  :properties {:blob_dir {:type "string"
-                                          :description "Blob directory name (e.g. '2026-02-17_blob-storage-design')"}
-                               :section  {:type ["integer" "null"]
-                                          :description "Section index to read (null = metadata only)"}}
-                  :required   ["blob_dir"]}}
 
    {:name        "memory_store_file"
     :description "Store a file (code, document, image) as a blob. Provide content directly or a file path."
@@ -143,10 +120,6 @@
          content
          (when (seq refs) (str " [" (str/join ", " refs) "]")))))
 
-(defn- format-date [inst]
-  (when inst
-    (subs (str inst) 0 10)))
-
 (defn- render-scored-fact [fact]
   (let [eid     (:db/id fact)
         score   (:search/score fact)
@@ -181,44 +154,6 @@
     "(no results)"
     (str/join "\n\n" (map (partial render-one-group blob-path) results))))
 
-(defn render-blob-list
-  "Renders blob list as compact text. One line per blob."
-  [blobs]
-  (if (empty? blobs)
-    "(no blobs)"
-    (str/join "\n"
-      (map (fn [b]
-             (let [date    (format-date (:node/created-at b))
-                   dir     (:node/blob-dir b)
-                   content (:node/content b)]
-               (str date " blob " dir "\n  " content)))
-           blobs))))
-
-(defn render-blob-meta
-  "Renders blob metadata as readable text."
-  [meta]
-  (if (:error meta)
-    (:error meta)
-    (str (or (:title meta) (:session-id meta) "Blob") "\n"
-         (name (or (:type meta) :unknown)) " | " (:project meta) " | " (format-date (:created-at meta)) "\n"
-         (when-let [ss (:session-summary meta)]
-           (str "\nSession summary: " ss "\n"))
-         (when-let [cs (:compact-summary meta)]
-           (str "\n--- Compact summary ---\n" cs "\n-----------------------\n"))
-         (when (and (not (:compact-summary meta)) (:summary meta) (seq (:summary meta)))
-           (str "\n" (:summary meta)))
-         (when (:status meta)
-           (str "\nStatus: " (:status meta)))
-         (when-let [n (:turn-count meta)]
-           (str "\n\nTurns: " n " (use section param 0.." (dec n) " to read)"))
-         (when-let [n (:line-count meta)]
-           (str "\nLines: " n))
-         ;; Legacy: section-count for non-session blobs (memory_store_file)
-         (when (and (not (:turn-count meta)) (:section-count meta))
-           (str "\n\nSections: " (:section-count meta)
-                " (use section param 0.." (dec (:section-count meta)) " to read)")))))
-
-
 
 ;; --- Parameter conversion (snake_case JSON → kebab-case Clojure) ---
 
@@ -230,16 +165,12 @@
                    :limit    (or (:limit params) 50)
                    :offset   (or (:offset params) 0)}
     :get-facts   {:filters (:filters params)}
-    :create-tag  {:name (:name params)}
     :remember    {:nodes      (mapv (fn [n]
                                       {:content (:content n)
                                        :tags    (:tags n)})
                                     (:nodes params))
                   :context-id (:session_id params)
                   :project    (:project params)}
-    :list-blobs  {:limit (or (:limit params) 20)}
-    :read-blob   {:blob-dir (:blob_dir params)
-                  :section  (:section params)}
     :store-file      {:title   (:title params)
                       :project (:project params)
                       :summary (:summary params)
@@ -260,10 +191,7 @@
   (case handler-key
     :explore-tags       (server/handle-explore-tags base-url params)
     :get-facts          (server/handle-get-facts base-url params)
-    :create-tag         (server/handle-create-tag base-url params)
     :remember           (server/handle-remember base-url params)
-    :list-blobs         (server/handle-list-blobs base-url params)
-    :read-blob          (server/handle-read-blob base-url params)
     :store-file         (server/handle-store-file base-url params)
     :session            (server/handle-session base-url params)))
 
@@ -292,10 +220,7 @@
 (def ^:private handler-keys
   {"memory_explore_tags"          :explore-tags
    "memory_get_facts"            :get-facts
-   "memory_create_tag"           :create-tag
    "memory_remember"             :remember
-   "memory_list_blobs"           :list-blobs
-   "memory_read_blob"            :read-blob
    "memory_store_file"           :store-file
    "memory_session"              :session})
 
@@ -305,10 +230,6 @@
                     :browse (render-tag-list (:data result))
                     :count  (render-counts (:data result)))
     :get-facts   (render-filter-results blob-path result)
-    :list-blobs  (render-blob-list result)
-    :read-blob   (if (:content result)
-                   (:content result)
-                   (render-blob-meta result))
     (json/generate-string result)))
 
 (defn- handle-tools-call [base-url blob-path id params]

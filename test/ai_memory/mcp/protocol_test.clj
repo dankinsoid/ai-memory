@@ -1,7 +1,6 @@
 (ns ai-memory.mcp.protocol-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
-            [cheshire.core :as json]
             [datomic.api :as d]
             [ai-memory.db.core :as db]
             [ai-memory.tag.core :as tag]
@@ -83,8 +82,7 @@
     (let [resp  (call "tools/list")
           names (set (map :name (get-in resp [:result :tools])))]
       (is (= #{"memory_explore_tags" "memory_get_facts"
-               "memory_create_tag" "memory_remember"
-               "memory_list_blobs" "memory_read_blob"
+               "memory_remember"
                "memory_store_file" "memory_session"}
              names)))))
 
@@ -242,12 +240,3 @@
                    :facts [{:db/id 201 :node/content "Some fact"}]}])]
       (is (= "= all\n- [201] Some fact" text)))))
 
-(deftest create-tag-tool-test
-  (testing "memory_create_tag creates a new atomic tag"
-    (let [resp (call "tools/call"
-                 :params {:name "memory_create_tag"
-                          :arguments {:name "rust"}})
-          text (get-in resp [:result :content 0 :text])
-          data (json/parse-string text true)]
-      (is (nil? (:error resp)))
-      (is (= "rust" (:tag/name data))))))

@@ -41,17 +41,8 @@
 (defn handle-get-facts [base-url {:keys [filters]}]
   (:results (api-post base-url "/api/tags/facts" {:filters filters})))
 
-(defn handle-create-tag [base-url {:keys [name]}]
-  (api-post base-url "/api/tags" {:name name}))
-
 (defn handle-remember [base-url params]
   (api-post base-url "/api/remember" params))
-
-(defn handle-list-blobs [base-url {:keys [limit] :or {limit 20}}]
-  (:blobs (api-get base-url "/api/blobs" {:limit limit})))
-
-(defn handle-read-blob [base-url {:keys [blob-dir section]}]
-  (api-post base-url "/api/blobs/read" {:blob-dir blob-dir :section section}))
 
 (defn handle-store-file [base-url params]
   (:body (http/post (str base-url "/api/blobs/file")
