@@ -358,30 +358,53 @@
       (let [base        (:blob-path cfg)
             db          (db/db conn)
             session-eid (find-session-fact db session-id)
-            blob-dir    (or (when session-eid
-                              (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
-                            (blob-store/find-session-blob-dir base session-id))
+            existing-dir (or (when session-eid
+                               (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
+                             (blob-store/find-session-blob-dir base session-id))
+
+            ;; Create blob dir on first call if it doesn't exist yet
+            blob-dir    (or existing-dir
+                            (let [dir-name (blob-store/make-blob-dir-name
+                                             base (str "session-" (subs session-id 0 8)))]
+                              (blob-store/write-meta! base dir-name
+                                {:id         (UUID/randomUUID)
+                                 :type       :session
+                                 :project    project
+                                 :created-at (Date.)
+                                 :session-id session-id})
+                              dir-name))
+
+            ;; Link blob-dir to existing Datomic node if not yet linked
+            _ (when (and session-eid (not existing-dir))
+                @(d/transact conn [[:db/add session-eid :node/blob-dir blob-dir]
+                                   [:db/add session-eid :node/updated-at (Date.)]]))
 
             ;; 1. Update session summary in Datomic + blob meta
             summary-result
             (when summary
-              (upsert-session-fact! conn cfg session-id summary project)
-              (when blob-dir
-                (let [meta (blob-store/read-meta base blob-dir)]
-                  (when meta
-                    (blob-store/write-meta! base blob-dir
-                      (assoc meta :session-summary summary)))))
-              "updated")
+              (let [_ (upsert-session-fact! conn cfg session-id summary project)]
+                ;; If node was just created by upsert, link blob-dir to it
+                (when-not session-eid
+                  (when-let [new-eid (find-session-fact (db/db conn) session-id)]
+                    @(d/transact conn [[:db/add new-eid :node/blob-dir blob-dir]]))))
+              (let [meta (blob-store/read-meta base blob-dir)]
+                (when meta
+                  (blob-store/write-meta! base blob-dir
+                    (assoc meta :session-summary summary))))
+              (if existing-dir "updated" "created"))
+
+            ;; Re-read session-eid after potential upsert
+            session-eid (or session-eid (find-session-fact (db/db conn) session-id))
 
             ;; 2. Name current chunk
             chunk-result
-            (when (and chunk-title blob-dir)
+            (when chunk-title
               (or (blob-store/rename-current-chunk! base blob-dir chunk-title)
                   "no _current.md to rename"))
 
             ;; 3. Compact summary
             compact-result
-            (when (and compact blob-dir session-eid)
+            (when (and compact session-eid)
               (blob-store/write-section! base blob-dir "compact.md" compact)
               (let [meta (blob-store/read-meta base blob-dir)]
                 (when meta
@@ -391,7 +414,7 @@
               "stored")]
 
         {:status 200
-         :body   (cond-> {:blob-dir (or blob-dir "not-yet-created")}
+         :body   (cond-> {:blob-dir blob-dir}
                    summary-result (assoc :summary summary-result)
                    chunk-result   (assoc :chunk chunk-result)
                    compact-result (assoc :compact compact-result))}))))
