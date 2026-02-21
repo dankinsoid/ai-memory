@@ -50,6 +50,11 @@
 ## Web API
 - [x] REST routes: health, remember, recall, tags, nodes, graph (`web/handler.clj`)
 - [x] API handlers with JSON serialization (`web/api.clj`)
+- [x] `GET /api/stats` — global counts (facts, tags, edges, tick)
+- [x] `GET /api/graph/top-nodes` — highest effective-weight nodes for graph entry
+- [x] `GET /api/graph/neighborhood` — BFS subgraph around a node (lazy graph loading)
+- [x] `GET /api/facts/:id` — single fact detail with edges and metadata
+- [x] `offset` + `total` pagination in `/api/tags/facts` filters
 - [ ] Integration tests for Web API
 
 ## MCP Server (agent interface)
@@ -84,13 +89,15 @@
 - [x] Format as clean markdown sections
 - [ ] End-to-end test: store-conversation with real session JSONL
 
-## Frontend
-- [x] D3 force-directed graph visualization (`ui/graph.cljs`)
-- [x] Tab navigation: Graph / Tags (`ui/core.cljs`)
-- [x] HTTP fetch utility (`ui/http.cljs`)
-- [x] Tag taxonomy browser — D3 collapsible tree, multi-select, facts panel (`ui/tags.cljs`)
-- [ ] Search / filter interface
-- [ ] Node detail view
+## Frontend (Playground v2 — Preact + Sigma.js, no build step)
+- [x] Replaced ClojureScript/Reagent/D3 with plain JS + CDN (Preact, HTM, Sigma.js)
+- [x] Design system: dark theme with depth layering, CSS custom properties (`css/theme.css`)
+- [x] Explore view: tag sidebar with multi-select, semantic search, infinite-scroll fact list
+- [x] Fact detail panel: slide-in with full metadata, edges, blob/session info
+- [x] Graph view: Sigma.js WebGL graph, lazy neighborhood expansion, ForceAtlas2 layout
+- [x] Stat bar: live fact/tag/edge/tick counters
+- [x] Keyboard shortcuts: `/` to search, `Escape` to close
+- [ ] Polish: skeleton loading states, responsive layout, empty state illustrations
 
 ## Infrastructure
 - [x] Docker Compose: Datomic, app, TEI, Qdrant, Prometheus, Grafana
@@ -101,7 +108,6 @@
 
 ## Dev & Build
 - [x] REPL helpers: start/stop/restart (`dev/user.clj`)
-- [x] deps.edn: dev, test, cljs, build aliases
+- [x] deps.edn: dev, test, build aliases
 - [x] Kaocha test runner
-- [x] Shadow-cljs config
 - [x] Uberjar build (`build.clj`)

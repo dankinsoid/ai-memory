@@ -3,7 +3,6 @@ target/
 .nrepl-port
 .shadow-cljs/
 node_modules/
-resources/public/js/
 *.class
 *.jar
 .DS_Store

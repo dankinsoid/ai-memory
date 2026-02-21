@@ -52,7 +52,10 @@
                                                                      :sort_by {:type "string"
                                                                                :enum ["weight" "date"]
                                                                                :description "Sort order: weight (decayed importance, default) or date (newest first)"
-                                                                               :default "weight"}}}
+                                                                               :default "weight"}
+                                                                     :offset {:type "integer"
+                                                                              :description "Skip first N results for pagination (default 0)"
+                                                                              :default 0}}}
                                           :description "Array of filters. Each filter is an independent query."}}
                   :required   ["filters"]}}
 

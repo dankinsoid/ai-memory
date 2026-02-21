@@ -225,8 +225,8 @@
          (or (nil? until) (.before updated until)))))
 
 (defn- execute-filter
-  "Executes a single filter. Returns {:filter <input> :facts [...]}."
-  [db cfg registry {:keys [id session-id tags query since until limit sort-by] :as filter-spec}]
+  "Executes a single filter. Returns {:filter <input> :facts [...] :total N}."
+  [db cfg registry {:keys [id session-id tags query since until limit offset sort-by] :as filter-spec}]
   (cond
     ;; Direct session-id lookup
     session-id
@@ -234,32 +234,40 @@
                       :in $ ?sid
                       :where [?e :node/session-id ?sid]]
                     db session-id)
-          fact (when eid (d/pull db node-pull-spec eid))]
+          fact (when eid (d/pull db node-pull-spec eid))
+          facts (if (:node/content fact) [fact] [])]
       {:filter filter-spec
-       :facts  (if (:node/content fact) [fact] [])})
+       :facts  facts
+       :total  (count facts)})
 
     ;; Direct ID lookup (Datomic entity ID)
     id
     (let [eid  (cond (number? id) (long id)
                      (string? id) (parse-long id))
-          fact (when eid (d/pull db node-pull-spec eid))]
+          fact (when eid (d/pull db node-pull-spec eid))
+          facts (if (:node/content fact) [fact] [])]
       {:filter filter-spec
-       :facts  (if (:node/content fact) [fact] [])})
+       :facts  facts
+       :total  (count facts)})
 
     ;; Vector search path — post-filter by tags and dates, sorted by search score
     query
     (let [since-d       (date/parse-date-param since)
           until-d       (date/parse-date-param until)
           default-limit (or limit 10)
-          ;; Fetch more from Qdrant to allow for post-filtering
-          search-limit  (* default-limit (if (or tags since until) 5 1))
+          ;; Fetch more from Qdrant to allow for post-filtering + offset
+          search-limit  (* (+ default-limit (or offset 0))
+                           (if (or tags since until) 5 1))
           hits          (node/search db cfg query search-limit)
           filtered      (cond->> hits
                           tags    (filter (partial has-all-tags? tags))
                           since-d (filter (partial in-date-range? since-d nil))
-                          until-d (filter (partial in-date-range? nil until-d)))]
+                          until-d (filter (partial in-date-range? nil until-d)))
+          total         (count (vec filtered))
+          page          (->> filtered (drop (or offset 0)) (take default-limit) vec)]
       {:filter filter-spec
-       :facts  (vec (take default-limit filtered))})
+       :facts  page
+       :total  total})
 
     ;; Datomic path — tag intersection + date filter
     :else
@@ -269,9 +277,13 @@
           results       (cond
                           (seq tags) (by-tags db {:tags tags :since since-d :until until-d})
                           (or since-d until-d) (by-date-range db {:since since-d :until until-d})
-                          :else (all-nodes db))]
+                          :else (all-nodes db))
+          sorted        (sort-facts db sort-by results)
+          total         (count sorted)
+          page          (->> sorted (drop (or offset 0)) (take default-limit) vec)]
       {:filter filter-spec
-       :facts  (->> results (sort-facts db sort-by) (take default-limit) vec)})))
+       :facts  page
+       :total  total})))
 
 (defn fetch-by-filters
   "Executes an array of filters. Each filter is a map with optional keys:

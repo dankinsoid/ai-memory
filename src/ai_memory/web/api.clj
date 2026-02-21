@@ -5,6 +5,7 @@
             [ai-memory.graph.write :as write]
             [ai-memory.tag.query :as tag-query]
             [ai-memory.tag.resolve :as tag-resolve]
+            [ai-memory.decay.core :as decay]
             [ai-memory.blob.store :as blob-store]
             [datomic.api :as d]
             [clojure.string :as str])
@@ -44,6 +45,121 @@
     {:status 200
      :body   {:nodes (mapv node->d3 nodes)
               :links (mapv edge->d3 edges)}}))
+
+;; --- Stats ---
+
+(defn get-stats
+  "Returns global counts for the playground stat bar."
+  [conn _req]
+  (let [db (db/db conn)]
+    {:status 200
+     :body   {:fact-count (or (d/q '[:find (count ?n) . :where [?n :node/content]] db) 0)
+              :tag-count  (or (d/q '[:find (count ?t) . :where [?t :tag/name]] db) 0)
+              :edge-count (or (d/q '[:find (count ?e) . :where [?e :edge/id]] db) 0)
+              :tick       (db/current-tick db)}}))
+
+;; --- Graph: top nodes ---
+
+(def ^:private node-pull-spec-full
+  [:db/id :node/content :node/weight :node/cycle :node/created-at :node/updated-at
+   :node/blob-dir :node/session-id :node/sources
+   {:node/tag-refs [:tag/name :tag/node-count]}])
+
+(defn get-top-nodes
+  "Returns highest effective-weight nodes as graph entry points."
+  [conn _cfg req]
+  (let [db    (db/db conn)
+        limit (min 100 (or (some-> (get-in req [:query-params "limit"]) parse-long) 20))
+        tag   (get-in req [:query-params "tag"])
+        tick  (db/current-tick db)
+        nodes (if tag
+                (tag-query/by-tag db tag)
+                (tag-query/all-nodes db))
+        with-ew (mapv (fn [n]
+                         (assoc n ::ew
+                           (decay/effective-weight
+                             (or (:node/weight n) 1.0)
+                             (or (:node/cycle n) 0)
+                             tick
+                             decay/default-decay-factor)))
+                       nodes)
+        top-n (->> with-ew (sort-by ::ew >) (take limit))]
+    {:status 200
+     :body   {:nodes (mapv (fn [n]
+                             (-> (node->d3 n)
+                                 (assoc :effective-weight (::ew n))
+                                 (assoc :edge-count (count (edge/find-edges-from db (:db/id n))))))
+                           top-n)}}))
+
+;; --- Graph: neighborhood BFS ---
+
+(defn- bfs-neighborhood
+  "BFS traversal from center node, collecting nodes and edges up to `depth` hops."
+  [db center-eid depth limit]
+  (loop [frontier #{center-eid}
+         visited  #{center-eid}
+         nodes    []
+         edges    []
+         d        0]
+    (if (or (>= d depth) (empty? frontier))
+      {:nodes nodes :edges edges :has-more (and (< d depth) (not (empty? frontier)))}
+      (let [new-edges   (mapcat #(edge/find-edges-from db %) frontier)
+            neighbor-ids (->> new-edges
+                              (keep #(get-in % [:edge/to :db/id]))
+                              (remove visited)
+                              distinct
+                              (take limit))
+            new-nodes   (mapv #(d/pull db node-pull-spec-full %) neighbor-ids)
+            edges-d3    (mapv edge->d3 new-edges)]
+        (recur (set neighbor-ids)
+               (into visited neighbor-ids)
+               (into nodes (mapv node->d3 new-nodes))
+               (into edges edges-d3)
+               (inc d))))))
+
+(defn get-graph-neighborhood
+  "Returns subgraph around a center node."
+  [conn _cfg req]
+  (let [db      (db/db conn)
+        node-id (some-> (get-in req [:query-params "node_id"]) parse-long)
+        depth   (min 3 (or (some-> (get-in req [:query-params "depth"]) parse-long) 1))
+        limit   (min 200 (or (some-> (get-in req [:query-params "limit"]) parse-long) 50))]
+    (if-not node-id
+      {:status 400 :body {:error "node_id required"}}
+      (let [center (d/pull db node-pull-spec-full node-id)
+            result (bfs-neighborhood db node-id depth limit)]
+        (if (:node/content center)
+          {:status 200
+           :body   (assoc result :center (node->d3 center))}
+          {:status 404 :body {:error "Node not found"}})))))
+
+;; --- Fact detail ---
+
+(defn get-fact-detail
+  "Returns single fact with full metadata, edges, and effective weight."
+  [conn _cfg req]
+  (let [db  (db/db conn)
+        id  (some-> (get-in req [:path-params :id]) parse-long)]
+    (if-not id
+      {:status 400 :body {:error "id required"}}
+      (let [node (d/pull db node-pull-spec-full id)
+            tick (db/current-tick db)
+            eff-w (decay/effective-weight
+                    (or (:node/weight node) 1.0)
+                    (or (:node/cycle node) 0)
+                    tick decay/default-decay-factor)
+            edges (edge/find-edges-from db id)]
+        (if (:node/content node)
+          {:status 200
+           :body   {:fact             (node->d3 node)
+                    :effective-weight eff-w
+                    :edges            (mapv edge->d3 edges)
+                    :created-at       (str (:node/created-at node))
+                    :updated-at       (str (:node/updated-at node))
+                    :blob-dir         (:node/blob-dir node)
+                    :session-id       (:node/session-id node)
+                    :sources          (vec (:node/sources node))}}
+          {:status 404 :body {:error "Not found"}})))))
 
 ;; --- Nodes ---
 
