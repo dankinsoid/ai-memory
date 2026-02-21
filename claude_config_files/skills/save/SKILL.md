@@ -1,25 +1,15 @@
 ---
 name: save
-description: Save a detailed session summary to memory before clearing context. Generates a comprehensive summary of the current session, stores it via memory_session MCP tool, and prepares for context handoff.
+description: Save a detailed session summary to memory before clearing context. Generates a comprehensive compact summary, stores it via memory_session MCP tool. Use before /clear or /compact, at the end of a long session, or when switching tasks. The "write" side of session continuity — /load is the "read" side.
 ---
 
 # Save Session
 
-## Goal
+The compact content must be **self-contained** — a future agent with zero context should understand the full situation from it alone.
 
-Generate and store a session summary so that a future agent with zero context can resume this work. This is the "write" side of session continuity — `/load` is the "read" side.
+## 1. Generate compact content
 
-## When to use
-
-- Before `/clear` or `/compact` when context is getting large
-- At the end of a long session
-- When switching to a different task/project
-
-## Workflow
-
-### 1. Generate compact.md
-
-Two parts: a **structured header** for quick orientation, then a **compression-gradient narrative** where detail increases toward the end.
+Two parts: a **structured header** for quick orientation, then a **compression-gradient narrative** where detail increases toward the end (recent work matters most for resumption, early work only needs enough context to understand the arc).
 
 ```markdown
 Status: in-progress | completed | blocked
@@ -28,7 +18,7 @@ Blockers: <if any, otherwise "none">
 
 ---
 
-<Overview sentence — what was this session about and what's the outcome.>
+<Overview sentence — what was this session about, what's the outcome.>
 
 <Early session — high compression: 1-2 sentences per topic.>
 
@@ -40,30 +30,34 @@ Include code snippets, exact error messages, specific function names.>
 <Current state: what is working, what is broken, what is half-done.>
 
 ## User requirements
-- <requirements, preferences, corrections, and remarks from the user>
+- <requirements, preferences, corrections from the user>
 - <specific to this project/task — things the next agent must respect>
 ```
 
-#### Rules
+### Rules
 
-- **Structured header always present** — Status, Next, Blockers.
-- **Compression gradient** — early work gets 1-2 sentences, recent work gets full paragraphs.
-- **Concrete identifiers** — file paths, function names, error messages. Not "refactored the tag system" but "renamed `tag/tree.clj` to `tag/query.clj`".
+- **Concrete identifiers** — file paths, function names, error messages. Not "refactored the tag system" but "renamed `tag/tree.clj` → `tag/query.clj`".
+- **Include dead ends** — rejected approaches and *why* they were rejected, so the next agent doesn't retry them.
 - **Don't duplicate meta.edn** — project, summary, date, session-id, turn count are already there.
-- **Include dead ends** — rejected approaches prevent the next agent from retrying.
-- **User requirements section** — capture user requirements, preferences, corrections, and remarks specific to this project/task. Skip if there were none.
+- **User requirements** — capture preferences, corrections, and constraints specific to this task. Skip section if there were none.
 
-### 2. Call `memory_session` with all three params
+## 2. Call `memory_session`
 
-- `summary` — session arc as a fact (follows Fact Format: lowercase, no articles, imperative/declarative)
-- `chunk_title` — title for the last chunk of work
-- `compact` — the generated content from step 1
+```
+memory_session({
+  session_id: "<session-id>",
+  summary: "<session arc as Fact Format>",
+  chunk_title: "<title for last chunk>",
+  compact: "<content from step 1>"
+})
+```
 
-### 3. Report to user
+`summary` follows Fact Format — single lowercase sentence, no articles, arrow → for sequences:
 
-- Confirm summary was saved, show blob-dir
-- Tell user: "You can now /clear. To resume later: /load"
+```
+updated load/save skills → compressed for tokens → verified against current api
+```
 
-## Important
+## 3. Confirm to user
 
-- The compact content should be **self-contained** — a future agent with no context should understand the full situation from it alone.
+Show blob-dir. Tell user: "You can now /clear. To resume later: /load"
