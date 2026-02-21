@@ -103,8 +103,8 @@
          (if need-chunk?
            (str "Chunk ~" (quot context-tokens 1000) "K tokens. "
                 "Call memory_session with session_id: \"" session-id
-                "\", chunk_title, and summary.")
+                "\", chunk_title, and summary. Summary is a fact — follow Fact Format.")
            (str "Call memory_session with session_id: \"" session-id
-                "\" and summary.")))))))
+                "\" and summary. Summary is a fact — follow Fact Format.")))))))
 
 (System/exit 0)

@@ -55,7 +55,7 @@ Include code snippets, exact error messages, specific function names.>
 
 ### 2. Call `memory_session` with all three params
 
-- `summary` — session arc, 1-3 sentences
+- `summary` — session arc as a fact (follows Fact Format: lowercase, no articles, imperative/declarative)
 - `chunk_title` — title for the last chunk of work
 - `compact` — the generated content from step 1
 

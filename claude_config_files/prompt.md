@@ -12,7 +12,7 @@ memory_remember({
   session_id: "<session-id>",
   project: "<project-name>",
   nodes: [
-    { content: "Prefers X over Y", tags: ["pref", "coding-style"] }
+    { content: "prefer X over Y for Z", tags: ["pref", "coding-style"] }
   ]
 })
 ```
@@ -20,6 +20,23 @@ memory_remember({
 **project** — always include.
 **nodes** — only for durable knowledge: preferences, decisions, error patterns, domain facts, meta-patterns.
 **language** — always store fact content in English regardless of conversation language.
+
+### Fact Format
+
+Single lowercase sentence. No articles (a/an/the), no filler words.
+Active voice, present tense. Don't restate what tags already convey.
+Imperative for actionable knowledge (prefer, use, avoid, when X do Y).
+Declarative for domain facts (subject verb object).
+Connectors: over, for, when, because. Arrow → for sequences.
+
+```
+prefer core.async over callbacks for async clojure code
+use qdrant for vector search with cosine similarity
+when async pipeline blocks, configure thread pool size
+avoid raw callbacks in clojure because of poor error propagation
+ai-memory stores facts in datomic with tag-based retrieval
+explored dedup strategies → chose normalized prose → designed prompt
+```
 
 ### Fact Quality
 
@@ -37,6 +54,7 @@ When 3+ concrete facts share a theme — synthesize a meta-fact.
 ## Session Metadata — `memory_session`
 
 Hook reminders will tell you when to call and which params to include. All params except `session_id` are optional.
+`summary` is a fact — follows Fact Format above.
 
 ## Blobs (detailed content)
 
