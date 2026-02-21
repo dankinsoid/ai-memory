@@ -35,9 +35,9 @@
 
 (deftest make-section-filename-test
   (testing "creates numbered slug filename"
-    (is (= "00-initial-requirements.md"
+    (is (= "0000-initial-requirements.md"
            (store/make-section-filename 0 "Initial requirements")))
-    (is (= "03-schema-changes.md"
+    (is (= "0003-schema-changes.md"
            (store/make-section-filename 3 "Schema changes")))))
 
 ;; --- write / read ---
@@ -61,18 +61,18 @@
   (testing "reads section by index with sidecar meta"
     (let [dir-name "2026-02-17_test-blob"
           content  (apply str (repeat 25 "line\n"))] ;; 25 lines → triggers sidecar
-      (store/write-section! *base-path* dir-name "01-second.md" content)
-      (store/write-section-meta! *base-path* dir-name "01-second.md"
-        {:file "01-second.md" :summary "Second" :lines 25})
+      (store/write-section! *base-path* dir-name "0001-second.md" content)
+      (store/write-section-meta! *base-path* dir-name "0001-second.md"
+        {:file "0001-second.md" :summary "Second" :lines 25})
       (let [result (store/read-section-by-index *base-path* dir-name 1)]
         (is (= "Second" (get-in result [:meta :summary])))
         (is (= content (:content result))))))
 
   (testing "reads section by index without sidecar — derives meta from file"
     (let [dir-name "2026-02-17_test-blob2"]
-      (store/write-section! *base-path* dir-name "00-intro.md" "Hello\nWorld")
+      (store/write-section! *base-path* dir-name "0000-intro.md" "Hello\nWorld")
       (let [result (store/read-section-by-index *base-path* dir-name 0)]
-        (is (= "00-intro.md" (get-in result [:meta :file])))
+        (is (= "0000-intro.md" (get-in result [:meta :file])))
         (is (= 2 (get-in result [:meta :lines])))
         (is (= "Hello\nWorld" (:content result)))))))
 
@@ -115,16 +115,16 @@
 (deftest list-chunks-test
   (testing "lists numbered chunks sorted, _current.md last"
     (let [dir "2026-02-20_session-chunks"]
-      (store/write-section! *base-path* dir "01-first-topic.md" "Content 1\n")
-      (store/write-section! *base-path* dir "02-second-topic.md" "Content 2\n")
+      (store/write-section! *base-path* dir "0001-first-topic.md" "Content 1\n")
+      (store/write-section! *base-path* dir "0002-second-topic.md" "Content 2\n")
       (store/append-current-chunk! *base-path* dir "Current content\n")
       ;; Also write meta.edn and compact.md — should be excluded
       (store/write-meta! *base-path* dir {:id "test"})
       (store/write-section! *base-path* dir "compact.md" "Summary")
       (let [chunks (store/list-chunks *base-path* dir)]
         (is (= 3 (count chunks)))
-        (is (= "01-first-topic.md" (:file (first chunks))))
-        (is (= "02-second-topic.md" (:file (second chunks))))
+        (is (= "0001-first-topic.md" (:file (first chunks))))
+        (is (= "0002-second-topic.md" (:file (second chunks))))
         (is (= "_current.md" (:file (last chunks))))
         (is (= 0 (:index (first chunks))))
         (is (= 2 (:index (last chunks))))))))
@@ -134,7 +134,7 @@
     (let [dir "2026-02-20_session-rename"]
       (store/append-current-chunk! *base-path* dir "Some content\n")
       (let [filename (store/rename-current-chunk! *base-path* dir "designed-auth-system")]
-        (is (= "01-designed-auth-system.md" filename))
+        (is (= "0001-designed-auth-system.md" filename))
         (is (.exists (io/file *base-path* dir filename)))
         (is (not (.exists (io/file *base-path* dir "_current.md")))))))
 
@@ -142,7 +142,7 @@
     (let [dir "2026-02-20_session-rename"]
       (store/append-current-chunk! *base-path* dir "More content\n")
       (let [filename (store/rename-current-chunk! *base-path* dir "fixed-tests")]
-        (is (= "02-fixed-tests.md" filename)))))
+        (is (= "0002-fixed-tests.md" filename)))))
 
   (testing "returns nil when no _current.md exists"
     (is (nil? (store/rename-current-chunk! *base-path* "2026-02-20_session-rename" "nothing")))))
