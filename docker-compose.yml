@@ -34,13 +34,13 @@ services:
         condition: service_healthy
 
   embedding:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.2
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
     platform: linux/amd64
     ports:
       - "8090:80"
     volumes:
       - embedding-models:/data
-    command: --model-id sentence-transformers/all-MiniLM-L6-v2
+    command: --model-id nomic-ai/modernbert-embed-base
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
       interval: 10s

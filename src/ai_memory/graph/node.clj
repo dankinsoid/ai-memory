@@ -29,7 +29,7 @@
   "Embeds content in Qdrant using entity ID as point ID. Logs warning on failure, never throws."
   [cfg eid content]
   (try
-    (let [vector (embedding/embed (:embedding-url cfg) content)]
+    (let [vector (embedding/embed-document (:embedding-url cfg) content)]
       (vs/upsert-point! (:qdrant-url cfg) eid vector {}))
     (catch Exception e
       (log/warn e "Failed to vectorize node" eid))))
@@ -70,7 +70,7 @@
   "Finds nodes semantically similar to `text`.
    Returns nodes from Datomic enriched with :search/score, sorted by score desc."
   [db cfg text top-k]
-  (let [qvec (embedding/embed (:embedding-url cfg) text)
+  (let [qvec (embedding/embed-query (:embedding-url cfg) text)
         hits (vs/search (:qdrant-url cfg) qvec top-k)]
     (->> hits
          (filter #(>= (:score %) min-score))

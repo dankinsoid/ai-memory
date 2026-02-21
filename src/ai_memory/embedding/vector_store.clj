@@ -5,7 +5,7 @@
             [clojure.tools.logging :as log]))
 
 (def ^:private collection-name "nodes")
-(def ^:private vector-size 384) ;; all-MiniLM-L6-v2
+(def ^:private vector-size 768) ;; nomic-ai/modernbert-embed-base
 
 (defn ensure-collection!
   "Creates the collection if it doesn't exist."
