@@ -67,7 +67,7 @@
                   :required   ["name"]}}
 
    {:name        "memory_remember"
-    :description "Store memory facts and/or a session summary. Facts are deduplicated and linked. Call after each meaningful turn."
+    :description "Store memory facts. Facts are deduplicated and linked. Call after each meaningful turn."
     :inputSchema {:type       "object"
                   :properties {:nodes           {:type        "array"
                                                  :items       {:type       "object"
@@ -75,12 +75,10 @@
                                                                             :tags      {:type "array" :items {:type "string"} :description "Tag names"}}
                                                                :required   ["content" "tags"]}
                                                  :description "Memory nodes to store"}
-                               :session_summary {:type        "string"
-                                                 :description "Rolling 1-sentence session summary (updated each turn). Stored as searchable fact."}
                                :context_id      {:type        "string"
                                                  :description "Session ID for context-based linking across calls"}
                                :project         {:type        "string"
-                                                 :description "Project name. Session summary tagged with this."}}}}
+                                                 :description "Project name. Tags facts with this."}}}}
 
    {:name        "memory_list_blobs"
     :description "List stored blobs (conversations, documents) sorted by date desc. Returns compact text: one line per blob with date, dir, summary."
@@ -110,19 +108,15 @@
                                :path    {:type ["string" "null"] :description "Absolute file path (server reads from disk)"}}
                   :required   ["title" "project" "summary" "tags"]}}
 
-   {:name        "memory_session_compact"
-    :description "Store a detailed session summary before clearing context. The agent generates a comprehensive summary of the current session and sends it here. The summary is saved in the session blob and becomes searchable. Use this with the /compact skill."
-    :inputSchema {:type       "object"
-                  :properties {:session_id      {:type "string" :description "Current session ID (context_id)"}
-                               :compact_summary {:type "string" :description "Detailed multi-paragraph session summary"}}
-                  :required   ["session_id" "compact_summary"]}}
-
-   {:name        "memory_name_chunk"
-    :description "Name the current conversation chunk. Renames _current.md to a numbered, titled chunk file. Call when reminded to create a navigation point in the session history."
+   {:name        "memory_session"
+    :description "Update session metadata. Combine any of: summary (session arc), chunk_title (name current chunk), compact (detailed summary for /save). Call with whichever params are relevant — hook reminders will tell you which."
     :inputSchema {:type       "object"
                   :properties {:context_id {:type "string" :description "Session ID (same as context_id in memory_remember)"}
-                               :title      {:type "string" :description "Short descriptive title for this chunk (e.g. 'designed-blob-architecture')"}}
-                  :required   ["context_id" "title"]}}
+                               :project    {:type "string" :description "Project name"}
+                               :summary    {:type "string" :description "Session arc summary: main topics in order, 1-3 sentences (e.g. 'Designed blob storage → implemented sync hook → debugged SSHFS mount')"}
+                               :chunk_title {:type "string" :description "Short title for current conversation chunk (e.g. 'designed-blob-architecture'). Renames _current.md to a numbered file."}
+                               :compact    {:type "string" :description "Detailed multi-paragraph session summary for /save. Stored as compact.md in the blob and becomes the searchable fact content."}}
+                  :required   ["context_id"]}}
 
 ])
 
@@ -243,13 +237,12 @@
     :search      {:query (:query params)
                   :top-k (or (:top_k params) 10)}
     :create-tag  {:name (:name params)}
-    :remember    {:nodes           (mapv (fn [n]
-                                        {:content (:content n)
-                                         :tags    (:tags n)})
-                                      (:nodes params))
-                  :session-summary (:session_summary params)
-                  :context-id      (:context_id params)
-                  :project         (:project params)}
+    :remember    {:nodes      (mapv (fn [n]
+                                      {:content (:content n)
+                                       :tags    (:tags n)})
+                                    (:nodes params))
+                  :context-id (:context_id params)
+                  :project    (:project params)}
     :list-blobs  {:limit (or (:limit params) 20)}
     :read-blob   {:blob-dir (:blob_dir params)
                   :section  (:section params)}
@@ -260,10 +253,11 @@
                       :type    (:type params)
                       :content (:content params)
                       :path    (:path params)}
-    :session-compact {:session-id      (:session_id params)
-                      :compact-summary (:compact_summary params)}
-    :name-chunk      {:session-id (:context_id params)
-                      :title      (:title params)}
+    :session         {:session-id   (:context_id params)
+                      :project      (:project params)
+                      :summary      (:summary params)
+                      :chunk-title  (:chunk_title params)
+                      :compact      (:compact params)}
     params))
 
 ;; --- Handler dispatch ---
@@ -279,8 +273,7 @@
     :list-blobs         (server/handle-list-blobs base-url params)
     :read-blob          (server/handle-read-blob base-url params)
     :store-file         (server/handle-store-file base-url params)
-    :session-compact    (server/handle-session-compact base-url params)
-    :name-chunk         (server/handle-name-chunk base-url params)))
+    :session            (server/handle-session base-url params)))
 
 ;; --- JSON-RPC method handlers ---
 
@@ -314,8 +307,7 @@
    "memory_list_blobs"           :list-blobs
    "memory_read_blob"            :read-blob
    "memory_store_file"           :store-file
-   "memory_session_compact"      :session-compact
-   "memory_name_chunk"           :name-chunk})
+   "memory_session"              :session})
 
 (defn- format-result [blob-path handler-key result]
   (case handler-key

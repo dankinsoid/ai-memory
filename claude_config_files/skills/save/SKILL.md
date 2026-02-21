@@ -1,6 +1,6 @@
 ---
 name: save
-description: Save a detailed session summary to memory before clearing context. Generates a comprehensive summary of the current session, stores it via memory_session_compact MCP tool, and prepares for context handoff.
+description: Save a detailed session summary to memory before clearing context. Generates a comprehensive summary of the current session, stores it via memory_session MCP tool, and prepares for context handoff.
 ---
 
 # Save Session
@@ -29,45 +29,37 @@ Blockers: <if any, otherwise "none">
 
 ---
 
-<First sentence: 1-2 sentence overview of the entire session — this gets extracted for search indexing.>
+<Overview sentence — what was this session about and what's the outcome.>
 
-<Early session — high compression: 1-2 sentences per topic. What was done, broad strokes.>
+<Early session — high compression: 1-2 sentences per topic.>
 
-<Middle session — moderate detail: key decisions with rationale, alternatives rejected and why.>
+<Middle session — moderate detail: key decisions with rationale.>
 
-<Recent work — full detail: what was tried, what worked, what didn't. Include code snippets,
-exact error messages, specific function names. This section gets the most space.>
+<Recent work — full detail: what was tried, what worked, what didn't.
+Include code snippets, exact error messages, specific function names.>
 
 <Current state: what is working, what is broken, what is half-done.>
 ```
 
 #### Rules
 
-- **Structured header always present** — Status, Files, Next, Blockers. Four lines, no exceptions.
-- **Compression gradient** — early work gets 1-2 sentences, recent work gets full paragraphs. A future agent needs to know *where you left off* in detail, not *how you got started*.
-- **No rigid sections in the narrative** — adapt to what actually happened. Debugging sessions look different from feature implementation, research looks different from refactoring. Allocate space proportionally to importance, not to template slots.
-- **Concrete identifiers** — file paths, function names, error messages, config values. "Refactored the tag system" is useless. "Renamed `tag/tree.clj` to `tag/query.clj`, updated ns refs in `protocol.clj` and `api.clj`" is actionable.
-- **Don't duplicate meta.edn** — project name, date, session-id, turn count, and the rolling 1-sentence session-summary are already in meta.edn. compact.md adds depth, not repetition.
-- **Include dead ends** — rejected approaches and why they failed are valuable context. "Tried buddy.auth wrap-authorization — no effect because X" prevents the next agent from retrying.
+- **Structured header always present** — Status, Files, Next, Blockers.
+- **Compression gradient** — early work gets 1-2 sentences, recent work gets full paragraphs.
+- **Concrete identifiers** — file paths, function names, error messages. Not "refactored the tag system" but "renamed `tag/tree.clj` to `tag/query.clj`".
+- **Don't duplicate meta.edn** — project, date, session-id, turn count are already there.
+- **Include dead ends** — rejected approaches prevent the next agent from retrying.
 
-### 2. Call MCP tool
+### 2. Call `memory_session` with all three params
 
-```
-memory_session_compact({
-  session_id: "<current context_id from memory_remember calls>",
-  compact_summary: "<the generated summary>"
-})
-```
+- `summary` — session arc, 1-3 sentences
+- `chunk_title` — title for the last chunk of work
+- `compact` — the generated content from step 1
 
 ### 3. Report to user
 
-- Confirm summary was saved
-- Show the blob-dir where it was stored
+- Confirm summary was saved, show blob-dir
 - Tell user: "You can now /clear. To resume later: /load"
 
 ## Important
 
-- The summary should be **self-contained** — a future agent with no context should understand the full situation from compact.md alone
-- The **first sentence after `---`** is critical — it gets extracted as the searchable summary in Datomic. Make it count: cover what the session was about and its outcome.
-- The session_id comes from the `context_id` parameter used in `memory_remember` calls throughout the session
-- If no `context_id` was used this session, the MCP tool will create a new session blob
+- The compact content should be **self-contained** — a future agent with no context should understand the full situation from it alone.

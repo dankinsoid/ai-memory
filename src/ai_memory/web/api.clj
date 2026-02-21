@@ -141,27 +141,10 @@
            :session-id session-id})))))
 
 (defn remember [conn cfg req]
-  (let [body            (:body-params req)
-        nodes           (:nodes body)
-        session-summary (:session-summary body)
-        context-id      (:context-id body)
-        project         (:project body)
-        result          (when (seq nodes)
-                          (write/remember conn cfg body))]
-    ;; Session summary → Datomic + blob meta.edn
-    (when (and session-summary context-id)
-      (upsert-session-fact! conn cfg context-id session-summary project)
-      ;; Also update blob meta.edn if blob exists
-      (let [db       (db/db conn)
-            eid      (find-session-fact db context-id)
-            blob-dir (when eid
-                       (:node/blob-dir (d/pull db [:node/blob-dir] eid)))]
-        (when blob-dir
-          (let [base (:blob-path cfg)
-                meta (blob-store/read-meta base blob-dir)]
-            (when meta
-              (blob-store/write-meta! base blob-dir
-                (assoc meta :session-summary session-summary)))))))
+  (let [body   (:body-params req)
+        nodes  (:nodes body)
+        result (when (seq nodes)
+                 (write/remember conn cfg body))]
     {:status 201
      :body   (or result {:nodes [] :edges-created 0})}))
 
@@ -280,6 +263,18 @@
                    (str "**" (or role "unknown") "**\n" text)))))
        (str/join "\n\n")))
 
+(defn- extract-first-user-prompt
+  "Extracts a truncated first user message as a fallback session summary.
+   Returns nil if no user text found."
+  [messages]
+  (when-let [first-user (first (filter has-user-text? messages))]
+    (let [text (extract-text (:content first-user))
+          max-len 120]
+      (when-not (str/blank? text)
+        (if (<= (count text) max-len)
+          text
+          (str (subs text 0 max-len) "..."))))))
+
 (defn- derive-project [cwd]
   (when cwd
     (last (str/split cwd #"/"))))
@@ -351,7 +346,9 @@
                            project (conj project))
                 tag-refs (tag-resolve/resolve-tags conn tag-strs)]
             (node/create-node conn cfg
-              {:content    (or session-summary "Session conversation")
+              {:content    (or session-summary
+                               (extract-first-user-prompt messages)
+                               "Session conversation")
                :tag-refs   tag-refs
                :tick       (db/current-tick db)
                :blob-dir   blob-dir
@@ -363,50 +360,55 @@
                   :total-turns        total-turns
                   :current-chunk-size (or (:byte-count append-result) 0)}}))))
 
-;; --- Session compact (agent stores detailed summary before context clear) ---
+;; --- Unified session update (summary, chunk naming, compact) ---
 
-(defn session-compact [conn cfg req]
-  (let [body            (:body-params req)
-        session-id      (:session-id body)
-        compact-summary (:compact-summary body)]
-    (if-not (and session-id compact-summary)
-      {:status 400 :body {:error "session_id and compact_summary required"}}
-      (let [db          (db/db conn)
-            base        (:blob-path cfg)
+(defn session-update [conn cfg req]
+  (let [body        (:body-params req)
+        session-id  (:session-id body)
+        project     (:project body)
+        summary     (:summary body)
+        chunk-title (:chunk-title body)
+        compact     (:compact body)]
+    (if-not session-id
+      {:status 400 :body {:error "session_id required"}}
+      (let [base        (:blob-path cfg)
+            db          (db/db conn)
             session-eid (find-session-fact db session-id)
-            blob-dir    (when session-eid
-                          (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))]
-        (if-not blob-dir
-          {:status 404 :body {:error (str "No blob found for session " session-id)}}
-          (let [;; Write compact.md to blob dir
-                _    (blob-store/write-section! base blob-dir "compact.md" compact-summary)
-                ;; Update meta.edn with compact summary
-                meta (blob-store/read-meta base blob-dir)
-                meta (assoc meta :compact-summary compact-summary)
-                _    (blob-store/write-meta! base blob-dir meta)
-                ;; Update session node content in Datomic (searchable)
-                _    @(d/transact conn [[:db/add session-eid :node/content compact-summary]
-                                        [:db/add session-eid :node/updated-at (Date.)]])]
-            {:status 200
-             :body   {:blob-dir blob-dir
-                      :status   "compacted"}}))))))
+            blob-dir    (or (when session-eid
+                              (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
+                            (blob-store/find-session-blob-dir base session-id))
 
-;; --- Name chunk (agent names the current conversation chunk) ---
+            ;; 1. Update session summary in Datomic + blob meta
+            summary-result
+            (when summary
+              (upsert-session-fact! conn cfg session-id summary project)
+              (when blob-dir
+                (let [meta (blob-store/read-meta base blob-dir)]
+                  (when meta
+                    (blob-store/write-meta! base blob-dir
+                      (assoc meta :session-summary summary)))))
+              "updated")
 
-(defn name-chunk [conn cfg req]
-  (let [body       (:body-params req)
-        session-id (:session-id body)
-        title      (:title body)]
-    (if-not (and session-id title)
-      {:status 400 :body {:error "session_id and title required"}}
-      (let [base     (:blob-path cfg)
-            db       (db/db conn)
-            eid      (find-session-fact db session-id)
-            blob-dir (or (when eid
-                           (:node/blob-dir (d/pull db [:node/blob-dir] eid)))
-                         (blob-store/find-session-blob-dir base session-id))]
-        (if-not blob-dir
-          {:status 404 :body {:error (str "No blob found for session " session-id)}}
-          (if-let [filename (blob-store/rename-current-chunk! base blob-dir title)]
-            {:status 200 :body {:blob-dir blob-dir :filename filename}}
-            {:status 404 :body {:error "No _current.md to rename"}}))))))
+            ;; 2. Name current chunk
+            chunk-result
+            (when (and chunk-title blob-dir)
+              (or (blob-store/rename-current-chunk! base blob-dir chunk-title)
+                  "no _current.md to rename"))
+
+            ;; 3. Compact summary
+            compact-result
+            (when (and compact blob-dir session-eid)
+              (blob-store/write-section! base blob-dir "compact.md" compact)
+              (let [meta (blob-store/read-meta base blob-dir)]
+                (when meta
+                  (blob-store/write-meta! base blob-dir
+                    (assoc meta :compact-summary compact))))
+              @(d/transact conn [[:db/add session-eid :node/content compact]
+                                 [:db/add session-eid :node/updated-at (Date.)]])
+              "stored")]
+
+        {:status 200
+         :body   (cond-> {:blob-dir (or blob-dir "not-yet-created")}
+                   summary-result (assoc :summary summary-result)
+                   chunk-result   (assoc :chunk chunk-result)
+                   compact-result (assoc :compact compact-result))}))))

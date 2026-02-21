@@ -66,8 +66,5 @@
             :as              :json
             :throw-exceptions false})))
 
-(defn handle-session-compact [base-url params]
-  (api-post base-url "/api/session/compact" params))
-
-(defn handle-name-chunk [base-url params]
-  (api-post base-url "/api/session/name-chunk" params))
+(defn handle-session [base-url params]
+  (api-post base-url "/api/session" params))

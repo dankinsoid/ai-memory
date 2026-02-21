@@ -83,14 +83,13 @@ Agent calls `memory_remember` after meaningful exchanges:
 memory_remember({
   context_id: "...",
   project: "my-project",
-  session_summary: "Discussed error handling approach for async pipelines",
   nodes: [{content: "...", tags: [...]}]
 })
 ```
 
-- Agent provides session summary + facts (~50-100 extra tokens)
-- Session summary updates Datomic node + blob meta.edn
-- Stop hook captures full conversation text into blob `conversation.md`
+- Agent provides facts (~50-100 extra tokens)
+- Session summary managed separately via `memory_session` tool (hook-driven reminders)
+- Stop hook captures full conversation text into blob chunks
 
 ## Development
 
