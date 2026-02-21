@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ai-memory — long-term memory system for AI agents. Designed for years of use across many projects, making agents more personalized and capable of learning.
 
+Status: early development, no need worry about breaking changes.
+
 ## Source of Truth
 
 `claude_config_files/` contains all agent configuration that gets manually copied to `~/.claude/`:

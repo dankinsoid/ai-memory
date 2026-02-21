@@ -1,11 +1,13 @@
 (ns ai-memory.tag.query
   "Tag-based retrieval: set operations over tagged nodes."
   (:require [ai-memory.tag.core :as tag]
+            [ai-memory.graph.node :as node]
             [ai-memory.metrics :as metrics]
+            [ai-memory.util.date :as date]
             [datomic.api :as d]))
 
 (def ^:private node-pull-spec
-  [:node/id :node/content :node/weight :node/cycle :node/sources
+  [:db/id :node/content :node/weight :node/cycle :node/sources
    :node/blob-dir :node/updated-at
    {:node/tag-refs [:tag/name]}])
 
@@ -184,6 +186,68 @@
         [{:tags  []
           :facts (->> results sort-by-date (take limit) vec)}]))))
 
+;; --- Unified filter-based retrieval ---
+
+(defn- has-all-tags?
+  "Returns true if node has ALL specified tag names."
+  [tag-names node]
+  (let [node-tags (set (map :tag/name (:node/tag-refs node)))]
+    (every? node-tags tag-names)))
+
+(defn- in-date-range?
+  "Returns true if node's updated-at falls within [since, until)."
+  [since until node]
+  (let [updated (:node/updated-at node)]
+    (and (or (nil? since) (not (.before updated since)))
+         (or (nil? until) (.before updated until)))))
+
+(defn- execute-filter
+  "Executes a single filter. Returns {:filter <input> :facts [...]}."
+  [db cfg registry {:keys [id tags query since until limit] :as filter-spec}]
+  (cond
+    ;; Direct ID lookup (Datomic entity ID)
+    id
+    (let [eid  (cond (number? id) (long id)
+                     (string? id) (parse-long id))
+          fact (when eid (d/pull db node-pull-spec eid))]
+      {:filter filter-spec
+       :facts  (if (:node/content fact) [fact] [])})
+
+    ;; Vector search path — post-filter by tags and dates
+    query
+    (let [since-d       (date/parse-date-param since)
+          until-d       (date/parse-date-param until)
+          default-limit (or limit 10)
+          ;; Fetch more from Qdrant to allow for post-filtering
+          search-limit  (* default-limit (if (or tags since until) 5 1))
+          hits          (node/search db cfg query search-limit)
+          filtered      (cond->> hits
+                          tags    (filter (partial has-all-tags? tags))
+                          since-d (filter (partial in-date-range? since-d nil))
+                          until-d (filter (partial in-date-range? nil until-d)))]
+      {:filter filter-spec
+       :facts  (vec (take default-limit filtered))})
+
+    ;; Datomic path — tag intersection + date filter
+    :else
+    (let [since-d       (date/parse-date-param since)
+          until-d       (date/parse-date-param until)
+          default-limit (or limit 50)
+          results       (cond
+                          (seq tags) (by-tags db {:tags tags :since since-d :until until-d})
+                          (or since-d until-d) (by-date-range db {:since since-d :until until-d})
+                          :else (all-nodes db))]
+      {:filter filter-spec
+       :facts  (->> results sort-by-date (take default-limit) vec)})))
+
+(defn fetch-by-filters
+  "Executes an array of filters. Each filter is a map with optional keys:
+   :tags, :query, :since, :until, :limit.
+   Returns [{:filter {...} :facts [...]} ...]."
+  [db cfg registry filters]
+  (metrics/timed registry metrics/read-duration {:operation "fetch_by_filters"}
+    (mapv (partial execute-filter db cfg registry) filters)))
+
 ;; --- Reconciliation ---
 
 (defn reconcile-counts!
@@ -216,12 +280,11 @@
 ;; --- Node info ---
 
 (defn node-tags
-  "Returns all tag names for a given node."
-  [db node-id]
+  "Returns all tag names for a given node (by entity ID)."
+  [db eid]
   (d/q '[:find [?name ...]
-         :in $ ?nid
+         :in $ ?eid
          :where
-         [?n :node/id ?nid]
-         [?n :node/tag-refs ?t]
+         [?eid :node/tag-refs ?t]
          [?t :tag/name ?name]]
-       db node-id))
+       db eid))

@@ -325,7 +325,7 @@
         (str (count facts) " fact" (when (not= 1 (count facts)) "s") " found")]
        (if (seq facts)
          (for [fact facts]
-           ^{:key (or (:node/id fact) (random-uuid))}
+           ^{:key (or (:db/id fact) (random-uuid))}
            [fact-card fact])
          [:div {:style {:color "#555" :font-size "13px" :padding "20px 0" :text-align "center"}}
           "No facts found for this tag combination"])])))

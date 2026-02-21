@@ -43,5 +43,5 @@
 
   ;; Query all nodes
   (d/q '[:find [(pull ?e [*]) ...]
-         :where [?e :node/id]]
+         :where [?e :node/content]]
        (db/db (conn))))

@@ -6,7 +6,6 @@
       "mcp__ai-memory__memory_remember",
       "mcp__ai-memory__memory_store_file",
       "mcp__ai-memory__memory_read_blob",
-      "mcp__ai-memory__memory_search",
       "mcp__ai-memory__memory_count_facts",
       "mcp__ai-memory__memory_create_tag",
       "mcp__ai-memory__memory_list_blobs",

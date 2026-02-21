@@ -7,7 +7,6 @@
             [ai-memory.tag.query :as tag-query]
             [ai-memory.tag.resolve :as tag-resolve]
             [ai-memory.blob.store :as blob-store]
-            [ai-memory.util.date :as date]
             [datomic.api :as d]
             [clojure.string :as str])
   (:import [java.util Date UUID]
@@ -24,15 +23,15 @@
     :else                 "fact"))
 
 (defn- node->d3 [n]
-  {:id      (str (:node/id n))
+  {:id      (str (:db/id n))
    :content (:node/content n)
    :type    (infer-d3-type n)
    :weight  (:node/weight n)
    :tags    (mapv :tag/name (:node/tag-refs n))})
 
 (defn- edge->d3 [e]
-  {:source (str (get-in e [:edge/from :node/id]))
-   :target (str (get-in e [:edge/to :node/id]))
+  {:source (str (get-in e [:edge/from :db/id]))
+   :target (str (get-in e [:edge/to :db/id]))
    :weight (:edge/weight e)})
 
 (defn get-graph
@@ -40,7 +39,7 @@
   [conn _req]
   (let [db    (db/db conn)
         nodes (d/q '[:find [(pull ?e [* {:node/tag-refs [:tag/name]}]) ...]
-                      :where [?e :node/id]]
+                      :where [?e :node/content]]
                     db)
         edges (edge/find-all db)]
     {:status 200
@@ -82,15 +81,11 @@
      :body   {:counts (tag-query/count-by-tag-sets db (:metrics cfg) tag-sets)}}))
 
 (defn get-facts [conn cfg req]
-  (let [db       (db/db conn)
-        body     (:body-params req)
-        tag-sets (:tag-sets body)
-        limit    (:limit body 50)
-        since    (date/parse-date-param (:since body))
-        until    (date/parse-date-param (:until body))]
+  (let [db      (db/db conn)
+        body    (:body-params req)
+        filters (:filters body)]
     {:status 200
-     :body   {:results (tag-query/fetch-by-tag-sets db (:metrics cfg) tag-sets
-                         {:limit limit :since since :until until})}}))
+     :body   {:results (tag-query/fetch-by-filters db cfg (:metrics cfg) filters)}}))
 
 (defn recall [conn _cfg req]
   (let [db   (db/db conn)
@@ -100,16 +95,6 @@
      :body   {:results (if (seq tags)
                          (tag-query/by-tags db {:tags tags})
                          [])}}))
-
-;; --- Search ---
-
-(defn search [conn cfg req]
-  (let [db    (db/db conn)
-        body  (:body-params req)
-        query (:query body)
-        top-k (:top-k body 10)]
-    {:status 200
-     :body   {:results (node/search db cfg query top-k)}}))
 
 ;; --- Remember (nodes + session summary) ---
 
@@ -205,7 +190,7 @@
                        :blob-dir  blob-dir})]
       {:status 201
        :body   {:blob-dir blob-dir
-                :blob-id  (:node-uuid blob-node)}})))
+                :blob-id  (:node-eid blob-node)}})))
 
 ;; --- Session sync (called by UserPromptSubmit hook) ---
 

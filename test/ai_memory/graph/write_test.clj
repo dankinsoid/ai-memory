@@ -31,23 +31,23 @@
 ;; --- Helpers ---
 
 (defn- create-test-node!
-  "Creates a node directly (bypassing write pipeline) for test setup."
+  "Creates a node directly (bypassing write pipeline) for test setup.
+   Returns Datomic entity ID."
   ([conn content] (create-test-node! conn content 0))
   ([conn content tick]
-   (let [uuid (d/squuid)]
-     @(d/transact conn
-        [{:db/id        (d/tempid :db.part/user)
-          :node/id      uuid
-          :node/content content
-          :node/weight  1.0
-          :node/cycle   tick}])
-     uuid)))
+   (let [tempid (d/tempid :db.part/user)
+         tx     @(d/transact conn
+                   [{:db/id        tempid
+                     :node/content content
+                     :node/weight  1.0
+                     :node/cycle   tick}])]
+     (d/resolve-tempid (:db-after tx) (:tempids tx) tempid))))
 
 (defn- all-edges [conn]
   (edge/find-all (d/db conn)))
 
-(defn- edges-between [conn from-id to-id]
-  (edge/find-edge-between (d/db conn) from-id to-id))
+(defn- edges-between [conn from-eid to-eid]
+  (edge/find-edge-between (d/db conn) from-eid to-eid))
 
 ;; --- Tests ---
 
@@ -214,36 +214,36 @@
 ;; --- Entity node tests ---
 
 (defn- create-entity-node!
-  "Creates an entity node (tagged entity) directly for test setup."
+  "Creates an entity node (tagged entity) directly for test setup.
+   Returns Datomic entity ID."
   [conn content tick]
-  (let [uuid (d/squuid)]
+  (let [tempid (d/tempid :db.part/user)]
     (tag/ensure-tag! conn "entity")
-    @(d/transact conn
-       [{:db/id          (d/tempid :db.part/user)
-         :node/id        uuid
-         :node/content   content
-         :node/weight    1.0
-         :node/cycle     tick
-         :node/tag-refs  [[:tag/name "entity"]]}])
-    uuid))
+    (let [tx @(d/transact conn
+                [{:db/id          tempid
+                  :node/content   content
+                  :node/weight    1.0
+                  :node/cycle     tick
+                  :node/tag-refs  [[:tag/name "entity"]]}])]
+      (d/resolve-tempid (:db-after tx) (:tempids tx) tempid))))
 
 (deftest entity-find-by-content-test
   (testing "find-entity-by-content returns entity by exact match"
-    (let [uuid (create-entity-node! *conn* "user" 0)
-          db   (d/db *conn*)]
-      (is (= uuid (:node/id (node/find-entity-by-content db "user"))))
+    (let [eid (create-entity-node! *conn* "user" 0)
+          db  (d/db *conn*)]
+      (is (= eid (:db/id (node/find-entity-by-content db "user"))))
       (is (nil? (node/find-entity-by-content db "User")))
       (is (nil? (node/find-entity-by-content db "user preferences"))))))
 
 (deftest entity-dedup-exact-match-test
   (testing "entity nodes dedup via exact content match, not vector search"
-    (let [uuid (create-entity-node! *conn* "Clojure" 1)
-          db   (d/db *conn*)
+    (let [eid (create-entity-node! *conn* "Clojure" 1)
+          db  (d/db *conn*)
           node-data {:content "Clojure" :tags ["entity"]}
           opts {:dedup-threshold 0.85 :reinforcement-delta 0.2}
           result (#'write/find-duplicate-node db {} "Clojure" node-data opts)]
       (is (some? result))
-      (is (= uuid (:node/id result))))))
+      (is (= eid (:db/id result))))))
 
 (deftest entity-not-found-creates-new-test
   (testing "entity with no match creates new node"

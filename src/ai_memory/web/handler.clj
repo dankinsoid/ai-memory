@@ -46,7 +46,6 @@
                                 :post (fn [req] (api/create-tag conn cfg req))}]
                       ["/tags/count" {:post (fn [req] (api/count-facts conn cfg req))}]
                       ["/tags/facts" {:post (fn [req] (api/get-facts conn cfg req))}]
-                      ["/search" {:post (fn [req] (api/search conn cfg req))}]
                       ["/blobs" {:get (fn [req] (api/list-blobs conn cfg req))}]
                       ["/blobs/read" {:post (fn [req] (api/read-blob conn cfg req))}]
                       ["/blobs/file" {:post (fn [req] (api/store-file conn cfg req))}]

@@ -22,18 +22,18 @@
       (log/info "Created Qdrant collection" collection-name))))
 
 (defn upsert-point!
-  "Upserts a single node vector. `node-uuid` — UUID string, `vector` — seq of doubles,
-   `payload` — map with metadata (content, type, tags, etc.)."
-  [base-url node-uuid vector payload]
+  "Upserts a single node vector. `point-id` — Datomic entity ID (long) or UUID string.
+   `vector` — seq of doubles, `payload` — map with metadata."
+  [base-url point-id vector payload]
   (http/put (str base-url "/collections/" collection-name "/points")
             {:content-type :json
              :body (json/generate-string
-                    {:points [{:id      node-uuid
+                    {:points [{:id      point-id
                                :vector  vector
                                :payload payload}]})}))
 
 (defn search
-  "Returns top-k nearest node UUIDs with scores.
+  "Returns top-k nearest point IDs with scores.
    Optional `filter-map` for Qdrant filtering (by tags, type, etc.)."
   ([base-url query-vector top-k]
    (search base-url query-vector top-k nil))
@@ -52,9 +52,9 @@
                          :payload (:payload r)}))))))
 
 (defn delete-point!
-  "Removes a node vector by UUID."
-  [base-url node-uuid]
+  "Removes a node vector by point ID."
+  [base-url point-id]
   (http/post (str base-url "/collections/" collection-name "/points/delete")
              {:content-type :json
               :body (json/generate-string
-                     {:points [node-uuid]})}))
+                     {:points [point-id]})}))

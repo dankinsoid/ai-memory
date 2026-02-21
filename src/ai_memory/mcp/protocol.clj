@@ -36,28 +36,24 @@
                   :required   ["tag_sets"]}}
 
    {:name        "memory_get_facts"
-    :description "Fetch facts matching tag set intersections. Returns fact content, all tags, and metadata grouped by queried tag set."
+    :description "Fetch facts matching filters. Each filter can combine: tags (intersection), query (semantic search), date range, limit. Returns one result group per filter."
     :inputSchema {:type       "object"
-                  :properties {:tag_sets {:type        "array"
-                                          :items       {:type "array" :items {:type "string"}}
-                                          :description "Array of tag sets. Each set is an array of tag names."}
-                               :limit    {:type        "integer"
-                                          :description "Max facts per tag set (default 50)"
-                                          :default     50}
-                               :since    {:type        "string"
-                                          :description "Start of date range (inclusive). ISO date, datetime, or relative: 7d, 2w, 1m, today, yesterday"}
-                               :until    {:type        "string"
-                                          :description "End of date range (exclusive). ISO date, datetime, or relative: 7d, 2w, 1m, today, yesterday"}}}}
-
-   {:name        "memory_search"
-    :description "Semantic search across all facts by meaning. Use when you can't find relevant facts via tags, or when you know roughly what you're looking for but not how it's tagged. Returns facts ranked by relevance score."
-    :inputSchema {:type       "object"
-                  :properties {:query {:type        "string"
-                                       :description "Natural language search query"}
-                               :top_k {:type        "integer"
-                                       :description "Max results (default 10)"
-                                       :default     10}}
-                  :required   ["query"]}}
+                  :properties {:filters  {:type        "array"
+                                          :items       {:type       "object"
+                                                        :properties {:id    {:type "integer"
+                                                                             :description "Fetch a specific fact by entity ID (overrides other filters)"}
+                                                                     :tags  {:type "array" :items {:type "string"}
+                                                                             :description "Tag names — facts must have ALL (intersection)"}
+                                                                     :query {:type "string"
+                                                                             :description "Semantic search query"}
+                                                                     :since {:type "string"
+                                                                             :description "Date range start (ISO date, datetime, or relative: 7d, 2w, 1m, today, yesterday)"}
+                                                                     :until {:type "string"
+                                                                             :description "Date range end"}
+                                                                     :limit {:type "integer"
+                                                                             :description "Max results for this filter (default 50, or 10 if query)"}}}
+                                          :description "Array of filters. Each filter is an independent query."}}
+                  :required   ["filters"]}}
 
    {:name        "memory_create_tag"
     :description "Create a new tag. Tags are atomic strings (no hierarchy)."
@@ -140,47 +136,55 @@
                       results)))
 
 (defn- render-fact-line [blob-path fact]
-  (let [content  (:node/content fact)
+  (let [eid      (:db/id fact)
+        content  (:node/content fact)
         sources  (:node/sources fact)
         blob-dir (:node/blob-dir fact)
         refs     (cond-> []
                    (seq sources) (into (map #(str "src: " %) sources))
                    blob-dir      (conj (str "blob: " blob-path "/" blob-dir)))]
-    (if (seq refs)
-      (str "- " content " [" (str/join ", " refs) "]")
-      (str "- " content))))
-
-(defn render-facts
-  "Renders facts grouped by tag set as plain text. Shows source indicator for facts with blob refs."
-  [blob-path results]
-  (str/join "\n\n"
-    (map (fn [{:keys [tags facts]}]
-           (let [header (if (seq tags)
-                          (tags-header tags)
-                          "all")]
-             (str "= " header "\n"
-                  (str/join "\n" (map (partial render-fact-line blob-path) facts)))))
-         results)))
+    (str "- "
+         (when eid (str "[" eid "] "))
+         content
+         (when (seq refs) (str " [" (str/join ", " refs) "]")))))
 
 (defn- format-date [inst]
   (when inst
     (subs (str inst) 0 10)))
 
-(defn render-search-results
-  "Renders vector search results as text. Score + content + tags per fact."
-  [results]
+(defn- render-scored-fact [fact]
+  (let [eid     (:db/id fact)
+        score   (:search/score fact)
+        content (:node/content fact)
+        tags    (->> (:node/tag-refs fact)
+                     (map :tag/name)
+                     (str/join ", "))]
+    (str (format "%.2f" (double score))
+         (when eid (str " [" eid "]"))
+         " " content
+         (when (seq tags) (str " [" tags "]")))))
+
+(defn- filter-header [{:keys [id tags query]}]
+  (let [parts (cond-> []
+                id          (conj (str "id: " id))
+                (seq tags)  (conj (tags-header tags))
+                query       (conj (str "search: \"" query "\"")))]
+    (if (seq parts) (str/join " | " parts) "all")))
+
+(defn- render-one-group [blob-path {:keys [filter facts]}]
+  (let [scored? (some :search/score facts)
+        header  (filter-header filter)]
+    (str "= " header "\n"
+         (if scored?
+           (str/join "\n" (map render-scored-fact facts))
+           (str/join "\n" (map (partial render-fact-line blob-path) facts))))))
+
+(defn render-filter-results
+  "Renders unified filter results. Adapts format per group: scored for query results, plain for tag results."
+  [blob-path results]
   (if (empty? results)
-    "(no matches)"
-    (str/join "\n"
-      (map (fn [node]
-             (let [score   (:search/score node)
-                   content (:node/content node)
-                   tags    (->> (:node/tag-refs node)
-                                (map :tag/name)
-                                (str/join ", "))]
-               (str (format "%.2f" (double score)) " " content
-                    (when (seq tags) (str " [" tags "]")))))
-           results))))
+    "(no results)"
+    (str/join "\n\n" (map (partial render-one-group blob-path) results))))
 
 (defn render-blob-list
   "Renders blob list as compact text. One line per blob."
@@ -230,12 +234,7 @@
     :browse-tags {:limit  (or (:limit params) 50)
                   :offset (or (:offset params) 0)}
     :count-facts {:tag-sets (:tag_sets params)}
-    :get-facts   {:tag-sets (:tag_sets params)
-                  :limit    (or (:limit params) 50)
-                  :since    (:since params)
-                  :until    (:until params)}
-    :search      {:query (:query params)
-                  :top-k (or (:top_k params) 10)}
+    :get-facts   {:filters (:filters params)}
     :create-tag  {:name (:name params)}
     :remember    {:nodes      (mapv (fn [n]
                                       {:content (:content n)
@@ -267,7 +266,6 @@
     :browse-tags        (server/handle-browse-tags base-url params)
     :count-facts        (server/handle-count-facts base-url params)
     :get-facts          (server/handle-get-facts base-url params)
-    :search             (server/handle-search-facts base-url params)
     :create-tag         (server/handle-create-tag base-url params)
     :remember           (server/handle-remember base-url params)
     :list-blobs         (server/handle-list-blobs base-url params)
@@ -301,7 +299,6 @@
   {"memory_browse_tags"          :browse-tags
    "memory_count_facts"          :count-facts
    "memory_get_facts"            :get-facts
-   "memory_search"               :search
    "memory_create_tag"           :create-tag
    "memory_remember"             :remember
    "memory_list_blobs"           :list-blobs
@@ -313,8 +310,7 @@
   (case handler-key
     :browse-tags (render-tag-list result)
     :count-facts (render-counts result)
-    :get-facts   (render-facts blob-path result)
-    :search      (render-search-results result)
+    :get-facts   (render-filter-results blob-path result)
     :list-blobs  (render-blob-list result)
     :read-blob   (if (:content result)
                    (:content result)

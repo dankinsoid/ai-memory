@@ -12,13 +12,7 @@
   :db/cardinality :db.cardinality/one
   :db/doc         "Materialized count of nodes with this tag. Maintained by write pipeline."}
 
- ;; --- Node ---
- {:db/ident       :node/id
-  :db/valueType   :db.type/uuid
-  :db/cardinality :db.cardinality/one
-  :db/unique      :db.unique/identity
-  :db/doc         "Unique node identifier"}
-
+ ;; --- Node (identified by :db/id) ---
  {:db/ident       :node/content
   :db/valueType   :db.type/string
   :db/cardinality :db.cardinality/one

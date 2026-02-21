@@ -92,25 +92,25 @@
 
 (defn- process-node
   "Dedup check + create or reinforce. Resolves tags to entity refs.
-   Returns {:id uuid :status :created/:reinforced}."
+   Returns {:id entity-id :status :created/:reinforced}."
   [conn cfg node-data tick opts]
   (let [db         (db/db conn)
         tag-refs   (when (seq (:tags node-data))
                      (tag-resolve/resolve-tags conn (:tags node-data)))
         duplicate  (find-duplicate-node db cfg (:content node-data) node-data opts)]
     (if duplicate
-      (let [node-uuid (:node/id duplicate)]
-        (node/reinforce-node conn cfg node-uuid
+      (let [eid (:db/id duplicate)]
+        (node/reinforce-node conn cfg eid
                              (:content node-data)
                              (:reinforcement-delta opts)
                              tick)
-        (node/update-tag-refs conn node-uuid tag-refs)
-        {:id node-uuid :status :reinforced})
+        (node/update-tag-refs conn eid tag-refs)
+        {:id eid :status :reinforced})
       (let [result (node/create-node conn cfg
                      (-> node-data
                          (dissoc :tags :node-type)
                          (assoc :tick tick :tag-refs tag-refs)))]
-        {:id (:node-uuid result) :status :created}))))
+        {:id (:node-eid result) :status :created}))))
 
 (defn- create-batch-edges
   "Creates bidirectional edges between all nodes in the batch (weight=1.0).

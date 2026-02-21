@@ -8,41 +8,38 @@
 (def ^:private max-weight 5.0)
 
 (defn create-edge
-  "Creates a weighted edge between two nodes."
+  "Creates a weighted edge between two nodes (by entity ID)."
   [conn {:keys [from to weight cycle]}]
   @(d/transact conn
      [{:db/id       (d/tempid :db.part/user)
        :edge/id     (d/squuid)
-       :edge/from   [:node/id from]
-       :edge/to     [:node/id to]
+       :edge/from   from
+       :edge/to     to
        :edge/weight (or weight 1.0)
        :edge/cycle  (or cycle 0)}]))
 
-(defn find-edges-from [db node-id]
-  (d/q '[:find [(pull ?e [* {:edge/to [:node/id :node/content]}]) ...]
-         :in $ ?from-id
+(defn find-edges-from [db from-eid]
+  (d/q '[:find [(pull ?e [* {:edge/to [:db/id :node/content]}]) ...]
+         :in $ ?from-eid
          :where
-         [?e :edge/from ?from]
-         [?from :node/id ?from-id]]
-       db node-id))
+         [?e :edge/from ?from-eid]]
+       db from-eid))
 
 (defn find-edge-between
-  "Finds edge entity ID from `from-id` to `to-id`, or nil."
-  [db from-id to-id]
+  "Finds edge entity ID from `from-eid` to `to-eid`, or nil."
+  [db from-eid to-eid]
   (d/q '[:find ?eid .
-         :in $ ?from-id ?to-id
+         :in $ ?from-eid ?to-eid
          :where
-         [?e :edge/from ?from]
-         [?from :node/id ?from-id]
-         [?e :edge/to ?to]
-         [?to :node/id ?to-id]
+         [?e :edge/from ?from-eid]
+         [?e :edge/to ?to-eid]
          [?e :edge/id ?eid]]
-       db from-id to-id))
+       db from-eid to-eid))
 
 (defn find-all [db]
   (d/q '[:find [(pull ?e [:edge/id :edge/weight :edge/cycle
-                          {:edge/from [:node/id]}
-                          {:edge/to   [:node/id]}]) ...]
+                          {:edge/from [:db/id]}
+                          {:edge/to   [:db/id]}]) ...]
          :where [?e :edge/id]]
        db))
 
@@ -59,9 +56,9 @@
 
 (defn find-or-create-edge
   "Creates edge if not exists, strengthens if it does."
-  [conn from-id to-id weight current-cycle]
+  [conn from-eid to-eid weight current-cycle]
   (let [db       (d/db conn)
-        existing (find-edge-between db from-id to-id)]
+        existing (find-edge-between db from-eid to-eid)]
     (if existing
       (strengthen conn existing weight current-cycle)
-      (create-edge conn {:from from-id :to to-id :weight weight :cycle current-cycle}))))
+      (create-edge conn {:from from-eid :to to-eid :weight weight :cycle current-cycle}))))

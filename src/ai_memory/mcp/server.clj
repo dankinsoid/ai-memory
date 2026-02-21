@@ -37,15 +37,8 @@
 (defn handle-count-facts [base-url {:keys [tag-sets]}]
   (:counts (api-post base-url "/api/tags/count" {:tag-sets tag-sets})))
 
-(defn handle-get-facts [base-url {:keys [tag-sets limit since until] :or {limit 50}}]
-  (:results (api-post base-url "/api/tags/facts"
-              (cond-> {:limit limit}
-                tag-sets (assoc :tag-sets tag-sets)
-                since    (assoc :since since)
-                until    (assoc :until until)))))
-
-(defn handle-search-facts [base-url {:keys [query top-k] :or {top-k 10}}]
-  (:results (api-post base-url "/api/search" {:query query :top-k top-k})))
+(defn handle-get-facts [base-url {:keys [filters]}]
+  (:results (api-post base-url "/api/tags/facts" {:filters filters})))
 
 (defn handle-create-tag [base-url {:keys [name]}]
   (api-post base-url "/api/tags" {:name name}))

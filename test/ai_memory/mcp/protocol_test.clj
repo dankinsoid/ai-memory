@@ -38,22 +38,21 @@
 (defn- create-tagged-node!
   ([conn content tag-names] (create-tagged-node! conn content tag-names nil))
   ([conn content tag-names opts]
-   (let [uuid (d/squuid)
-         now  (java.util.Date.)]
+   (let [now    (java.util.Date.)
+         tempid (d/tempid :db.part/user)]
      (doseq [n tag-names]
        (tag/ensure-tag! conn n))
      (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
            count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
-           node-map  (cond-> {:db/id           (d/tempid :db.part/user)
-                              :node/id         uuid
-                              :node/content    content
-                              :node/weight     1.0
-                              :node/cycle      0
-                              :node/tag-refs   tag-refs
-                              :node/created-at now
-                              :node/updated-at (or (:updated-at opts) now)})]
-       @(d/transact conn (into [node-map] count-txs)))
-     uuid)))
+           node-map  {:db/id           tempid
+                      :node/content    content
+                      :node/weight     1.0
+                      :node/cycle      0
+                      :node/tag-refs   tag-refs
+                      :node/created-at now
+                      :node/updated-at (or (:updated-at opts) now)}
+           tx @(d/transact conn (into [node-map] count-txs))]
+       (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
 
 (defn- handler []
   (protocol/make-handler *base-url* "/tmp/ai-memory-test-blobs"))
@@ -75,7 +74,6 @@
   (testing "returns all tools with schemas"
     (let [resp  (call "tools/list")
           tools (get-in resp [:result :tools])]
-      (is (= 10 (count tools)))
       (is (every? :name tools))
       (is (every? :description tools))
       (is (every? :inputSchema tools)))))
@@ -85,7 +83,7 @@
     (let [resp  (call "tools/list")
           names (set (map :name (get-in resp [:result :tools])))]
       (is (= #{"memory_browse_tags" "memory_count_facts" "memory_get_facts"
-               "memory_search" "memory_create_tag" "memory_remember"
+               "memory_create_tag" "memory_remember"
                "memory_list_blobs" "memory_read_blob"
                "memory_store_file" "memory_session"}
              names)))))
@@ -136,20 +134,20 @@
              [{:tags ["clj"] :count 87}
               {:tags ["clj" "error-handling"] :count 7}])))))
 
-(deftest render-facts-test
-  (testing "renders facts as plain text grouped by tag set"
-    (let [text (protocol/render-facts "/tmp/blobs"
-                 [{:tags ["clj"]
-                   :facts [{:node/content "Use ex-info for errors"}
-                           {:node/content "Prefer immutable data"}]}
-                  {:tags ["python"]
-                   :facts [{:node/content "Use dataclasses"}]}])]
+(deftest render-filter-results-test
+  (testing "renders filter results with entity IDs"
+    (let [text (protocol/render-filter-results "/tmp/blobs"
+                 [{:filter {:tags ["clj"]}
+                   :facts [{:db/id 101 :node/content "Use ex-info for errors"}
+                           {:db/id 102 :node/content "Prefer immutable data"}]}
+                  {:filter {:tags ["python"]}
+                   :facts [{:db/id 103 :node/content "Use dataclasses"}]}])]
       (is (= (str "= clj\n"
-                   "- Use ex-info for errors\n"
-                   "- Prefer immutable data\n"
+                   "- [101] Use ex-info for errors\n"
+                   "- [102] Prefer immutable data\n"
                    "\n"
                    "= python\n"
-                   "- Use dataclasses")
+                   "- [103] Use dataclasses")
              text)))))
 
 ;; --- Tool dispatch with embedded HTTP server ---
@@ -200,12 +198,12 @@
     (create-tagged-node! *conn* "Python basics" ["python"])
     (let [resp (call "tools/call"
                  :params {:name "memory_get_facts"
-                          :arguments {:tag_sets [["clj"]]
-                                      :limit 10}})
+                          :arguments {:filters [{:tags ["clj"] :limit 10}]}})
           text (get-in resp [:result :content 0 :text])]
       (is (nil? (:error resp)))
       (is (str/includes? text "= clj"))
-      (is (str/includes? text "- Clojure error handling"))
+      (is (str/includes? text "Clojure error handling"))
+      (is (re-find #"\[(\d+)\]" text) "should include entity ID")
       (is (not (str/includes? text "Python basics"))))))
 
 (deftest get-facts-with-since-test
@@ -216,34 +214,33 @@
       (create-tagged-node! *conn* "New fact" ["clj"] {:updated-at new-date})
       (let [resp (call "tools/call"
                    :params {:name "memory_get_facts"
-                            :arguments {:tag_sets [["clj"]]
-                                        :since "7d"}})
+                            :arguments {:filters [{:tags ["clj"] :since "7d"}]}})
             text (get-in resp [:result :content 0 :text])]
         (is (nil? (:error resp)))
         (is (str/includes? text "New fact"))
         (is (not (str/includes? text "Old fact")))))))
 
 (deftest get-facts-no-tags-test
-  (testing "memory_get_facts without tag_sets returns date-filtered facts"
+  (testing "memory_get_facts with date-only filter"
     (let [old-date (java.util.Date. (- (System/currentTimeMillis) (* 30 24 60 60 1000)))
           new-date (java.util.Date. (- (System/currentTimeMillis) (* 1 24 60 60 1000)))]
       (create-tagged-node! *conn* "Old fact" ["clj"] {:updated-at old-date})
       (create-tagged-node! *conn* "New fact" ["python"] {:updated-at new-date})
       (let [resp (call "tools/call"
                    :params {:name "memory_get_facts"
-                            :arguments {:since "7d"}})
+                            :arguments {:filters [{:since "7d"}]}})
             text (get-in resp [:result :content 0 :text])]
         (is (nil? (:error resp)))
         (is (str/includes? text "= all"))
         (is (str/includes? text "New fact"))
         (is (not (str/includes? text "Old fact")))))))
 
-(deftest render-facts-empty-tags-test
-  (testing "render-facts handles empty tags group"
-    (let [text (protocol/render-facts "/tmp/blobs"
-                 [{:tags []
-                   :facts [{:node/content "Some fact"}]}])]
-      (is (= "= all\n- Some fact" text)))))
+(deftest render-filter-results-empty-filter-test
+  (testing "render-filter-results handles filter with no tags/query"
+    (let [text (protocol/render-filter-results "/tmp/blobs"
+                 [{:filter {}
+                   :facts [{:db/id 201 :node/content "Some fact"}]}])]
+      (is (= "= all\n- [201] Some fact" text)))))
 
 (deftest create-tag-tool-test
   (testing "memory_create_tag creates a new atomic tag"

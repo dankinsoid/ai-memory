@@ -26,26 +26,25 @@
 
 (defn- create-tagged-node!
   "Creates a node with tag refs and increments materialized counts.
-   Optional opts map with :updated-at (java.util.Date)."
+   Optional opts map with :updated-at (java.util.Date).
+   Returns Datomic entity ID."
   ([conn content tag-names] (create-tagged-node! conn content tag-names nil))
   ([conn content tag-names opts]
-   (let [uuid (d/squuid)
-         now  (java.util.Date.)]
+   (let [now    (java.util.Date.)
+         tempid (d/tempid :db.part/user)]
      (doseq [n tag-names]
        (tag/ensure-tag! conn n))
      (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
            count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
-           node-map  (cond-> {:db/id           (d/tempid :db.part/user)
-                              :node/id         uuid
-                              :node/content    content
-                              :node/weight     1.0
-                              :node/cycle      0
-                              :node/tag-refs   tag-refs
-                              :node/created-at now
-                              :node/updated-at (or (:updated-at opts) now)}
-                       (:updated-at opts) identity)]
-       @(d/transact conn (into [node-map] count-txs)))
-     uuid)))
+           node-map  {:db/id           tempid
+                      :node/content    content
+                      :node/weight     1.0
+                      :node/cycle      0
+                      :node/tag-refs   tag-refs
+                      :node/created-at now
+                      :node/updated-at (or (:updated-at opts) now)}
+           tx @(d/transact conn (into [node-map] count-txs))]
+       (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
 
 ;; --- Existing tests ---
 

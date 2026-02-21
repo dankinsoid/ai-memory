@@ -31,7 +31,7 @@
                                                     decay-factor)
                                       next-activation (* activation effective-w)]
                                 :when (> next-activation threshold)]
-                            [(get-in e [:edge/to :node/id]) next-activation])]
+                            [(get-in e [:edge/to :db/id]) next-activation])]
             (recur (into queue neighbors)
                    (assoc visited node-id activation))))))))
 
