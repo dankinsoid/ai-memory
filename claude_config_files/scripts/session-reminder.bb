@@ -103,8 +103,8 @@
          (if need-chunk?
            (str "Chunk ~" (quot context-tokens 1000) "K tokens. "
                 "Call memory_session with session_id: \"" session-id
-                "\", chunk_title, and summary. Summary is a fact — follow Fact Format.")
+                "\", chunk_title, and summary. Summary is cumulative session arc — all major topics in order with → arrows (e.g. 'designed X → implemented Y → fixed Z').")
            (str "Call memory_session with session_id: \"" session-id
-                "\" and summary. Summary is a fact — follow Fact Format.")))))))
+                "\" and summary. Summary is cumulative session arc — all major topics in order with → arrows (e.g. 'designed X → implemented Y → fixed Z').")))))))
 
 (System/exit 0)
