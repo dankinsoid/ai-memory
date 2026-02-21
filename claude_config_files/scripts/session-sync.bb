@@ -31,7 +31,8 @@
 
 (defn extract-messages [entries]
   (->> entries
-       (filter #(#{"user" "assistant"} (:type %)))
+       (filter #(and (#{"user" "assistant"} (:type %))
+                     (not (:isMeta %))))
        (mapv (fn [e]
                {:uuid      (:uuid e)
                 :timestamp (:timestamp e)
