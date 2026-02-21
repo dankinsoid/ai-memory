@@ -57,7 +57,8 @@
 
 (def fact-filters
   (cond-> [{:tags ["pref"]}
-           {:tags ["universal"]}]
+           {:tags ["universal"]}
+           {:tags ["session" "blob"] :sort_by "date" :limit 5}]
     ;; Add project filter if project detected
     project-name (conj {:tags [project-name]})
     ;; Add current session on clear/compact
@@ -65,8 +66,6 @@
     (conj {:session_id session-id})))
 
 (def facts-data (api-post "/api/tags/facts" {:filters fact-filters}))
-
-(def blobs-data (api-get "/api/blobs" {"limit" "5"}))
 
 ;; --- Format output ---
 
@@ -96,20 +95,20 @@
                          tags)]
       (str "## Tags\n" (str/join ", " formatted)))))
 
-(defn format-blobs [blobs]
-  (when (seq blobs)
+(defn format-sessions [facts]
+  (when (seq facts)
     (str "## Recent Sessions\n"
          (str/join "\n"
-           (map (fn [b]
-                  (let [content    (get b (keyword "node/content"))
-                        blob-dir   (get b (keyword "node/blob-dir"))
-                        created    (get b (keyword "node/created-at"))
-                        date-str   (when created
-                                     (subs (str created) 0 (min 10 (count (str created)))))]
+           (map (fn [f]
+                  (let [content    (get f (keyword "node/content"))
+                        blob-dir   (get f (keyword "node/blob-dir"))
+                        updated    (get f (keyword "node/updated-at"))
+                        date-str   (when updated
+                                     (subs (str updated) 0 (min 10 (count (str updated)))))]
                     (str "- " (or date-str "?") ": "
                          (or content "(no summary)")
                          (when blob-dir (str " [blob: " blob-dir "]")))))
-                blobs)))))
+                facts)))))
 
 (defn format-timestamp []
   (let [now    (java.time.ZonedDateTime/now)
@@ -142,15 +141,20 @@
           (fn [r] (some? (get-in r [:filter :session-id])))
           "Current Session (continued)"))
 
+      sessions-section
+      (let [session-group (first (filter
+                                   (fn [r] (= (get-in r [:filter :tags]) ["session" "blob"]))
+                                   results))]
+        (format-sessions (:facts session-group)))
+
       tags-section    (format-tags tags-data)
-      blobs-section   (format-blobs (:blobs blobs-data))
       timestamp       (format-timestamp)
 
       sections (remove nil? [pref-section
                              universal-section
                              project-section
                              session-section
-                             blobs-section
+                             sessions-section
                              tags-section])]
 
   (when (seq sections)

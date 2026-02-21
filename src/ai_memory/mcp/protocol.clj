@@ -48,7 +48,11 @@
                                                                      :until {:type "string"
                                                                              :description "Date range end"}
                                                                      :limit {:type "integer"
-                                                                             :description "Max results for this filter (default 50, or 10 if query)"}}}
+                                                                             :description "Max results for this filter (default 50, or 10 if query)"}
+                                                                     :sort_by {:type "string"
+                                                                               :enum ["weight" "date"]
+                                                                               :description "Sort order: weight (decayed importance, default) or date (newest first)"
+                                                                               :default "weight"}}}
                                           :description "Array of filters. Each filter is an independent query."}}
                   :required   ["filters"]}}
 

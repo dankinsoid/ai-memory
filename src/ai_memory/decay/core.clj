@@ -1,7 +1,8 @@
-;; ⚠ EXPERIMENTAL — part of graph-based memory approach, paused.
-;; See CLAUDE.md for context.
-
 (ns ai-memory.decay.core)
+
+(def default-decay-factor
+  "Per-tick decay factor. 0.95^10 ≈ 0.60, 0.95^50 ≈ 0.08."
+  0.95)
 
 (defn effective-weight
   "Computes decayed weight: base * decay_factor ^ (current_cycle - last_cycle)"

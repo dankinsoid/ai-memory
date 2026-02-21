@@ -2,6 +2,8 @@
   "Tag-based retrieval: set operations over tagged nodes."
   (:require [ai-memory.tag.core :as tag]
             [ai-memory.graph.node :as node]
+            [ai-memory.decay.core :as decay]
+            [ai-memory.db.core :as db-core]
             [ai-memory.metrics :as metrics]
             [ai-memory.util.date :as date]
             [datomic.api :as d]))
@@ -162,20 +164,41 @@
 (defn- sort-by-date [facts]
   (sort-by :node/updated-at #(compare %2 %1) facts))
 
+(defn- sort-by-weight
+  "Sorts facts by effective weight (decayed) desc. Requires current tick from db."
+  [db facts]
+  (let [current-tick (db-core/current-tick db)
+        decay-factor decay/default-decay-factor]
+    (sort-by (fn [fact]
+               (decay/effective-weight
+                 (or (:node/weight fact) 1.0)
+                 (or (:node/cycle fact) 0)
+                 current-tick
+                 decay-factor))
+             #(compare %2 %1)
+             facts)))
+
+(defn- sort-facts
+  "Dispatches sorting: \"date\" → by updated-at, \"weight\" (default) → by effective weight."
+  [db sort-by-param facts]
+  (case sort-by-param
+    "date" (sort-by-date facts)
+    (sort-by-weight db facts)))
+
 (defn fetch-by-tag-sets
   "Fetches facts for each tag set (intersection). Per-set limit.
    Optional :since/:until (java.util.Date) for date filtering.
+   Optional :sort-by — \"weight\" (default) or \"date\".
    When tag-sets is nil/empty, returns all matching facts in a single group.
-   Results always sorted by :node/updated-at desc.
    Output: [{:tags [...] :facts [...]} ...]"
-  [db registry tag-sets {:keys [limit since until] :or {limit 50}}]
+  [db registry tag-sets {:keys [limit since until sort-by] :or {limit 50}}]
   (metrics/timed registry metrics/read-duration {:operation "fetch_by_tag_sets"}
     (if (seq tag-sets)
       ;; Tags provided: group by tag set, apply date filter globally
       (mapv (fn [tags]
               {:tags  tags
                :facts (->> (by-tags db {:tags tags :since since :until until})
-                           sort-by-date
+                           (sort-facts db sort-by)
                            (take limit)
                            vec)})
             tag-sets)
@@ -184,7 +207,7 @@
                       (by-date-range db {:since since :until until})
                       (all-nodes db))]
         [{:tags  []
-          :facts (->> results sort-by-date (take limit) vec)}]))))
+          :facts (->> results (sort-facts db sort-by) (take limit) vec)}]))))
 
 ;; --- Unified filter-based retrieval ---
 
@@ -203,7 +226,7 @@
 
 (defn- execute-filter
   "Executes a single filter. Returns {:filter <input> :facts [...]}."
-  [db cfg registry {:keys [id session-id tags query since until limit] :as filter-spec}]
+  [db cfg registry {:keys [id session-id tags query since until limit sort-by] :as filter-spec}]
   (cond
     ;; Direct session-id lookup
     session-id
@@ -223,7 +246,7 @@
       {:filter filter-spec
        :facts  (if (:node/content fact) [fact] [])})
 
-    ;; Vector search path — post-filter by tags and dates
+    ;; Vector search path — post-filter by tags and dates, sorted by search score
     query
     (let [since-d       (date/parse-date-param since)
           until-d       (date/parse-date-param until)
@@ -248,7 +271,7 @@
                           (or since-d until-d) (by-date-range db {:since since-d :until until-d})
                           :else (all-nodes db))]
       {:filter filter-spec
-       :facts  (->> results sort-by-date (take default-limit) vec)})))
+       :facts  (->> results (sort-facts db sort-by) (take default-limit) vec)})))
 
 (defn fetch-by-filters
   "Executes an array of filters. Each filter is a map with optional keys:

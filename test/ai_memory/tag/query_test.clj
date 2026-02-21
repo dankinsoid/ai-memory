@@ -3,7 +3,8 @@
             [datomic.api :as d]
             [ai-memory.db.core :as db]
             [ai-memory.tag.core :as tag]
-            [ai-memory.tag.query :as query]))
+            [ai-memory.tag.query :as query]
+            [ai-memory.decay.core :as decay]))
 
 (def ^:dynamic *conn* nil)
 
@@ -26,7 +27,7 @@
 
 (defn- create-tagged-node!
   "Creates a node with tag refs and increments materialized counts.
-   Optional opts map with :updated-at (java.util.Date).
+   Optional opts map with :updated-at, :weight, :cycle.
    Returns Datomic entity ID."
   ([conn content tag-names] (create-tagged-node! conn content tag-names nil))
   ([conn content tag-names opts]
@@ -38,13 +39,16 @@
            count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
            node-map  {:db/id           tempid
                       :node/content    content
-                      :node/weight     1.0
-                      :node/cycle      0
+                      :node/weight     (or (:weight opts) 1.0)
+                      :node/cycle      (or (:cycle opts) 0)
                       :node/tag-refs   tag-refs
                       :node/created-at now
                       :node/updated-at (or (:updated-at opts) now)}
            tx @(d/transact conn (into [node-map] count-txs))]
        (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
+
+(defn- set-tick! [conn tick-val]
+  @(d/transact conn [{:db/id :tick/singleton :tick/value tick-val}]))
 
 ;; --- Existing tests ---
 
@@ -222,11 +226,11 @@
       (is (= 1 (count (:facts (first results))))))))
 
 (deftest fetch-latest-n-test
-  (testing "fetch-by-tag-sets with just limit returns latest N sorted by date desc"
+  (testing "fetch-by-tag-sets with date sort returns latest N sorted by date desc"
     (create-tagged-node! *conn* "Oldest" ["clj"] {:updated-at (days-ago 30)})
     (create-tagged-node! *conn* "Middle" ["python"] {:updated-at (days-ago 10)})
     (create-tagged-node! *conn* "Newest" ["rust"] {:updated-at (days-ago 1)})
-    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil nil {:limit 2})
+    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil nil {:limit 2 :sort-by "date"})
           facts   (:facts (first results))]
       (is (= 2 (count facts)))
       (is (= "Newest" (:node/content (first facts))))
@@ -245,3 +249,56 @@
     (let [result (query/reconcile-counts! *conn*)]
       (is (pos? (:tags-updated result)))
       (is (= 2 (:tag/node-count (d/entity (d/db *conn*) [:tag/name "clj"])))))))
+
+;; --- Sort tests ---
+
+(deftest sort-by-weight-test
+  (testing "weight sort puts reinforced old fact above newer unreinforced fact"
+    ;; Simulate: tick is at 100
+    (set-tick! *conn* 100)
+    ;; Old reinforced fact: weight=3.0, cycle=98 (recently reinforced)
+    ;; effective = 3.0 * 0.95^(100-98) = 3.0 * 0.9025 = 2.7075
+    (create-tagged-node! *conn* "reinforced-old" ["clj"]
+                         {:weight 3.0 :cycle 98 :updated-at (days-ago 20)})
+    ;; New unreinforced fact: weight=1.0, cycle=99
+    ;; effective = 1.0 * 0.95^(100-99) = 1.0 * 0.95 = 0.95
+    (create-tagged-node! *conn* "new-unreinforced" ["clj"]
+                         {:weight 1.0 :cycle 99 :updated-at (days-ago 1)})
+    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+                    [["clj"]]
+                    {:limit 50 :sort-by "weight"})
+          facts (:facts (first results))]
+      (is (= "reinforced-old" (:node/content (first facts))))
+      (is (= "new-unreinforced" (:node/content (second facts)))))))
+
+(deftest sort-by-date-explicit-test
+  (testing "date sort puts newer fact first regardless of weight"
+    (set-tick! *conn* 100)
+    ;; High weight but old date
+    (create-tagged-node! *conn* "heavy-old" ["clj"]
+                         {:weight 5.0 :cycle 98 :updated-at (days-ago 20)})
+    ;; Low weight but recent date
+    (create-tagged-node! *conn* "light-new" ["clj"]
+                         {:weight 1.0 :cycle 99 :updated-at (days-ago 1)})
+    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+                    [["clj"]]
+                    {:limit 50 :sort-by "date"})
+          facts (:facts (first results))]
+      (is (= "light-new" (:node/content (first facts))))
+      (is (= "heavy-old" (:node/content (second facts)))))))
+
+(deftest sort-by-weight-default-test
+  (testing "default sort (no sort-by param) uses weight"
+    (set-tick! *conn* 50)
+    ;; Abandoned fact: weight=1.0, cycle=0 → effective = 1.0 * 0.95^50 ≈ 0.077
+    (create-tagged-node! *conn* "abandoned" ["clj"]
+                         {:weight 1.0 :cycle 0 :updated-at (days-ago 1)})
+    ;; Active fact: weight=2.0, cycle=49 → effective = 2.0 * 0.95^1 = 1.9
+    (create-tagged-node! *conn* "active" ["clj"]
+                         {:weight 2.0 :cycle 49 :updated-at (days-ago 10)})
+    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+                    [["clj"]]
+                    {:limit 50})
+          facts (:facts (first results))]
+      (is (= "active" (:node/content (first facts))))
+      (is (= "abandoned" (:node/content (second facts)))))))
