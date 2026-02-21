@@ -46,8 +46,9 @@ Include code snippets, exact error messages, specific function names.>
 - **Structured header always present** — Status, Files, Next, Blockers.
 - **Compression gradient** — early work gets 1-2 sentences, recent work gets full paragraphs.
 - **Concrete identifiers** — file paths, function names, error messages. Not "refactored the tag system" but "renamed `tag/tree.clj` to `tag/query.clj`".
-- **Don't duplicate meta.edn** — project, date, session-id, turn count are already there.
+- **Don't duplicate meta.edn** — project, summary, date, session-id, turn count are already there.
 - **Include dead ends** — rejected approaches prevent the next agent from retrying.
+- **User requirements and corrections** — capture key user feedback that shaped decisions (e.g. "user asked to combine three tools into one", "user rejected separate section — prefers inline in narrative"). These prevent the next agent from re-proposing rejected approaches.
 
 ### 2. Call `memory_session` with all three params
 
