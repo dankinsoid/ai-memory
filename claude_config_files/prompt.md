@@ -19,7 +19,7 @@ Call `memory_remember` when the turn produced something worth persisting. **Skip
 
 ```
 memory_remember({
-  context_id: "<session-id>",
+  session_id: "<session-id>",
   project: "<project-name>",
   nodes: [
     { content: "Prefers X over Y", tags: ["pref", "coding-style"] }
@@ -45,7 +45,7 @@ When 3+ concrete facts share a theme — synthesize a meta-fact.
 
 ## Session Metadata — `memory_session`
 
-Hook reminders will tell you when to call and which params to include. All params except `context_id` are optional.
+Hook reminders will tell you when to call and which params to include. All params except `session_id` are optional.
 
 ## Blobs (detailed content)
 

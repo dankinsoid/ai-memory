@@ -102,9 +102,9 @@
         (println
          (if need-chunk?
            (str "Chunk ~" (quot context-tokens 1000) "K tokens. "
-                "Call memory_session with context_id: \"" session-id
+                "Call memory_session with session_id: \"" session-id
                 "\", chunk_title, and summary.")
-           (str "Call memory_session with context_id: \"" session-id
+           (str "Call memory_session with session_id: \"" session-id
                 "\" and summary.")))))))
 
 (System/exit 0)

@@ -75,7 +75,7 @@ Skip non-message types: `queue-operation`, `file-history-snapshot`.
 
 ```
 Agent calls memory_remember({
-  context_id: "session-123",
+  session_id: "session-123",
   turn_summary: "User: hook architecture → designed Stop hook + HTTP sync",
   session_summary: "Integrating ai-memory session storage via Stop hook",
   nodes: [{ content: "...", tags: [...] }]
@@ -226,7 +226,7 @@ New:
 3. `session_summary` → find-or-create session fact:
    - Query: `[:find ?e . :where [?e :node/session-id session-id]]`
    - If exists: update `:node/content` with new session_summary
-   - If not: create node `{:node-type :session, :content session_summary, :session-id context-id, :tag-refs [proj/*]}`
+   - If not: create node `{:node-type :session, :content session_summary, :session-id session-id, :tag-refs [proj/*]}`
 
 File: `src/ai_memory/mcp/server.clj` — `handle-remember`
 
@@ -370,7 +370,7 @@ Update `doc/memory-prompt.md` and sync to `~/.claude/CLAUDE.md`:
 
 ```
 memory_remember({
-  context_id: "<session-id>",
+  session_id: "<session-id>",
   turn_summary: "User: <request gist> → <what I did/decided>",
   session_summary: "One-sentence rolling summary of entire session so far",
   nodes: [...]

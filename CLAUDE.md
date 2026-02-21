@@ -83,7 +83,7 @@ For Claude Code sessions: MCP server reads `~/.claude/projects/.../*.jsonl` dire
 Agent calls `memory_remember` after meaningful exchanges:
 ```
 memory_remember({
-  context_id: "...",
+  session_id: "...",
   project: "my-project",
   nodes: [{content: "...", tags: [...]}]
 })

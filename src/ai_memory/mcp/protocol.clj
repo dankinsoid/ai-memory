@@ -71,7 +71,7 @@
                                                                             :tags      {:type "array" :items {:type "string"} :description "Tag names"}}
                                                                :required   ["content" "tags"]}
                                                  :description "Memory nodes to store"}
-                               :context_id      {:type        "string"
+                               :session_id      {:type        "string"
                                                  :description "Session ID for context-based linking across calls"}
                                :project         {:type        "string"
                                                  :description "Project name. Tags facts with this."}}}}
@@ -107,12 +107,12 @@
    {:name        "memory_session"
     :description "Update session metadata. Combine any of: summary (session arc), chunk_title (name current chunk), compact (detailed summary for /save). Call with whichever params are relevant — hook reminders will tell you which."
     :inputSchema {:type       "object"
-                  :properties {:context_id {:type "string" :description "Session ID (same as context_id in memory_remember)"}
+                  :properties {:session_id {:type "string" :description "Session ID (same as session_id in memory_remember)"}
                                :project    {:type "string" :description "Project name"}
                                :summary    {:type "string" :description "Session arc summary: main topics in order, 1-3 sentences (e.g. 'Designed blob storage → implemented sync hook → debugged SSHFS mount')"}
                                :chunk_title {:type "string" :description "Short title for current conversation chunk (e.g. 'designed-blob-architecture'). Renames _current.md to a numbered file."}
                                :compact    {:type "string" :description "Detailed multi-paragraph session summary for /save. Stored as compact.md in the blob and becomes the searchable fact content."}}
-                  :required   ["context_id"]}}
+                  :required   ["session_id"]}}
 
 ])
 
@@ -240,7 +240,7 @@
                                       {:content (:content n)
                                        :tags    (:tags n)})
                                     (:nodes params))
-                  :context-id (:context_id params)
+                  :context-id (:session_id params)
                   :project    (:project params)}
     :list-blobs  {:limit (or (:limit params) 20)}
     :read-blob   {:blob-dir (:blob_dir params)
@@ -252,7 +252,7 @@
                       :type    (:type params)
                       :content (:content params)
                       :path    (:path params)}
-    :session         {:session-id   (:context_id params)
+    :session         {:session-id   (:session_id params)
                       :project      (:project params)
                       :summary      (:summary params)
                       :chunk-title  (:chunk_title params)

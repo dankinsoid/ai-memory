@@ -29,7 +29,7 @@ data/blobs/{YYYY-MM-DD}_session-{id8}/
 2. Hook syncs new conversation turns to server → server appends to `_current.md`
 3. Server returns `current-chunk-size` in response
 4. If `_current.md` > ~50KB, hook outputs a reminder to the agent
-5. Agent calls `memory_name_chunk({context_id, title})` → server renames `_current.md` to `{NN}-{slug}.md`
+5. Agent calls `memory_name_chunk({session_id, title})` → server renames `_current.md` to `{NN}-{slug}.md`
 6. Next sync creates a fresh `_current.md`
 
 ### _current.md format

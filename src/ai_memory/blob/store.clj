@@ -42,12 +42,12 @@
     (unique-dir-name base-path name)))
 
 (defn make-section-filename
-  "Creates section filename: {NN}-{slug}.{ext}"
+  "Creates section filename: {NNNN}-{slug}.{ext}"
   [index summary & {:keys [ext] :or {ext "md"}}]
   (let [slug (slugify summary)
         ;; Limit slug length to avoid filesystem issues
         slug (subs slug 0 (min (count slug) 60))]
-    (format "%02d-%s.%s" index slug ext)))
+    (format "%04d-%s.%s" index slug ext)))
 
 (defn write-meta!
   "Writes meta.edn to blob directory."
@@ -141,12 +141,12 @@
        :content content})))
 
 (defn count-sections
-  "Counts section files in a blob directory (files matching NN-*.ext pattern)."
+  "Counts section files in a blob directory (files matching NNNN-*.ext pattern)."
   [base-path dir-name]
   (let [dir (io/file base-path dir-name)]
     (if (.exists dir)
       (->> (.listFiles dir)
-           (filter #(re-matches #"\d{2,}-.*" (.getName %)))
+           (filter #(re-matches #"\d{4,}-.*" (.getName %)))
            count)
       0)))
 
@@ -206,7 +206,7 @@
                            (filter #(str/ends-with? % ".md"))
                            (remove #{"compact.md"}))
             numbered  (->> files
-                           (filter #(re-matches #"\d{2,}-.*\.md" %))
+                           (filter #(re-matches #"\d{4,}-.*\.md" %))
                            sort)
             current   (when (some #{"_current.md"} files) ["_current.md"])
             all-chunks (vec (concat numbered current))]
@@ -224,7 +224,7 @@
     (if (.exists dir)
       (let [existing (->> (.listFiles dir)
                           (map #(.getName %))
-                          (keep #(when-let [m (re-find #"^(\d{2,})-" %)]
+                          (keep #(when-let [m (re-find #"^(\d{4,})-" %)]
                                    (parse-long (second m)))))]
         (if (seq existing)
           (inc (apply max existing))
@@ -232,7 +232,7 @@
       1)))
 
 (defn rename-current-chunk!
-  "Renames _current.md to {NN}-{slug}.md. Returns new filename or nil."
+  "Renames _current.md to {NNNN}-{slug}.md. Returns new filename or nil."
   [base-path dir-name title]
   (let [dir  (io/file base-path dir-name)
         src  (io/file dir current-chunk-file)]
