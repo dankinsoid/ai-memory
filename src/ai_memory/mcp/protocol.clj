@@ -35,8 +35,10 @@
     :inputSchema {:type       "object"
                   :properties {:filters  {:type        "array"
                                           :items       {:type       "object"
-                                                        :properties {:id    {:type "integer"
-                                                                             :description "Fetch a specific fact by entity ID (overrides other filters)"}
+                                                        :properties {:id         {:type "integer"
+                                                                                  :description "Fetch a specific fact by entity ID (overrides other filters)"}
+                                                                     :session_id {:type "string"
+                                                                                  :description "Fetch session fact by session ID"}
                                                                      :tags  {:type "array" :items {:type "string"}
                                                                              :description "Tag names — facts must have ALL (intersection)"}
                                                                      :query {:type "string"

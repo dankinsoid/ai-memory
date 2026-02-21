@@ -36,12 +36,17 @@
     ],
     "SessionStart": [
       {
-        "matcher": "startup",
+        "matcher": "startup|clear|compact",
         "hooks": [
           {
             "type": "command",
             "command": "bb ~/.claude/hooks/memory-preflight.bb",
             "timeout": 30000
+          },
+          {
+            "type": "command",
+            "command": "bb ~/.claude/hooks/session-start.bb",
+            "timeout": 15000
           }
         ]
       }

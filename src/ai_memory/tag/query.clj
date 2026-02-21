@@ -203,8 +203,18 @@
 
 (defn- execute-filter
   "Executes a single filter. Returns {:filter <input> :facts [...]}."
-  [db cfg registry {:keys [id tags query since until limit] :as filter-spec}]
+  [db cfg registry {:keys [id session-id tags query since until limit] :as filter-spec}]
   (cond
+    ;; Direct session-id lookup
+    session-id
+    (let [eid  (d/q '[:find ?e .
+                      :in $ ?sid
+                      :where [?e :node/session-id ?sid]]
+                    db session-id)
+          fact (when eid (d/pull db node-pull-spec eid))]
+      {:filter filter-spec
+       :facts  (if (:node/content fact) [fact] [])})
+
     ;; Direct ID lookup (Datomic entity ID)
     id
     (let [eid  (cond (number? id) (long id)

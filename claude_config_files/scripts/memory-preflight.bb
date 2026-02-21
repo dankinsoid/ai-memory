@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 ;; SessionStart hook: ensures remote ai-memory blob storage is accessible via SSHFS.
-;; Only acts on memory_* tool calls. Never blocks — warns on stderr if setup fails.
+;; Never blocks — warns on stderr if setup fails.
 ;;
 ;; MCP env vars (in ~/.claude/settings.json → mcpServers.ai-memory.env):
 ;;   AI_MEMORY_SSH        — SSH host, e.g. "user@server.com" (absent = local, skip)
@@ -14,11 +14,6 @@
 ;; --- Read hook input ---
 
 (def input (json/parse-string (slurp *in*) true))
-(def tool-name (or (:tool_name input) ""))
-
-;; Only act on memory_* tools
-(when-not (str/starts-with? tool-name "memory_")
-  (System/exit 0))
 
 ;; --- Read MCP config ---
 
