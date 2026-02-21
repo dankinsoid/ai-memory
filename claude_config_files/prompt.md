@@ -1,17 +1,17 @@
 <!-- ai-memory:start -->
 # Memory
 
-Long-term memory across sessions and projects. 9 MCP tools via `ai-memory` server.
+Long-term memory across sessions and projects. 8 MCP tools via `ai-memory` server.
 
 ## Session Start
 
 Before working on the first message:
 
-1. `memory_browse_tags({ limit: 50 })` — see all tags sorted by usage
+1. `memory_explore_tags({ limit: 50 })` — see all tags sorted by usage
 2. `memory_get_facts({ filters: [{ tags: ["pref"] }, { tags: ["universal"] }, { tags: ["{project}"] }] })` — load preferences, universal facts, and project context
 3. Based on the task, load relevant domain facts too (e.g. `{ tags: ["clojure", "error-handling"] }` — intersection of two tags)
 
-Multiple filters in one call. Use `memory_count_facts` first only when a tag set might return 50+ results.
+Multiple filters in one call. Use `memory_explore_tags({ tag_sets: [...] })` first only when a tag set might return 50+ results.
 
 ## Remembering
 
@@ -60,7 +60,7 @@ Facts with `[blob: /path/to/dir]` link to detailed content on disk. Session blob
 
 When facing a design decision or unfamiliar area:
 
-1. `memory_count_facts` with candidate tag sets
+1. `memory_explore_tags` with candidate tag sets
 2. `memory_get_facts` if counts manageable
 
 Filters support semantic search via `query` — use when you know *what* you're looking for but not *how it's tagged*:

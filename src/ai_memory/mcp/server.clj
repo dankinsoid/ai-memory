@@ -31,11 +31,12 @@
 
 ;; --- Tool handlers (each proxies to one HTTP endpoint) ---
 
-(defn handle-browse-tags [base-url {:keys [limit offset] :or {limit 50 offset 0}}]
-  (api-get base-url "/api/tags" {:limit limit :offset offset}))
-
-(defn handle-count-facts [base-url {:keys [tag-sets]}]
-  (:counts (api-post base-url "/api/tags/count" {:tag-sets tag-sets})))
+(defn handle-explore-tags [base-url {:keys [tag-sets limit offset] :or {limit 50 offset 0}}]
+  (if (seq tag-sets)
+    {:mode :count
+     :data (:counts (api-post base-url "/api/tags/count" {:tag-sets tag-sets}))}
+    {:mode :browse
+     :data (api-get base-url "/api/tags" {:limit limit :offset offset})}))
 
 (defn handle-get-facts [base-url {:keys [filters]}]
   (:results (api-post base-url "/api/tags/facts" {:filters filters})))

@@ -82,7 +82,7 @@
   (testing "tool names match expected"
     (let [resp  (call "tools/list")
           names (set (map :name (get-in resp [:result :tools])))]
-      (is (= #{"memory_browse_tags" "memory_count_facts" "memory_get_facts"
+      (is (= #{"memory_explore_tags" "memory_get_facts"
                "memory_create_tag" "memory_remember"
                "memory_list_blobs" "memory_read_blob"
                "memory_store_file" "memory_session"}
@@ -152,13 +152,13 @@
 
 ;; --- Tool dispatch with embedded HTTP server ---
 
-(deftest browse-tags-tool-test
-  (testing "memory_browse_tags returns flat tag list"
+(deftest explore-tags-browse-test
+  (testing "memory_explore_tags without tag_sets returns flat tag list"
     (create-tagged-node! *conn* "Fact 1" ["clj"])
     (create-tagged-node! *conn* "Fact 2" ["clj"])
     (create-tagged-node! *conn* "Fact 3" ["python"])
     (let [resp (call "tools/call"
-                 :params {:name "memory_browse_tags"
+                 :params {:name "memory_explore_tags"
                           :arguments {:limit 50}})
           text (get-in resp [:result :content 0 :text])
           lines (str/split-lines text)]
@@ -168,20 +168,20 @@
       ;; Sorted by count desc: clj 2 first
       (is (str/starts-with? (first lines) "clj")))))
 
-(deftest browse-tags-empty-test
-  (testing "memory_browse_tags with no tags returns (no tags)"
+(deftest explore-tags-empty-test
+  (testing "memory_explore_tags with no tags returns (no tags)"
     (let [resp (call "tools/call"
-                 :params {:name "memory_browse_tags"
+                 :params {:name "memory_explore_tags"
                           :arguments {}})
           text (get-in resp [:result :content 0 :text])]
       (is (= "(no tags)" text)))))
 
-(deftest count-facts-tool-test
-  (testing "memory_count_facts returns text counts"
+(deftest explore-tags-count-test
+  (testing "memory_explore_tags with tag_sets returns text counts"
     (create-tagged-node! *conn* "A" ["clj" "error-handling"])
     (create-tagged-node! *conn* "B" ["clj"])
     (let [resp (call "tools/call"
-                 :params {:name "memory_count_facts"
+                 :params {:name "memory_explore_tags"
                           :arguments {:tag_sets [["clj"]
                                                  ["clj" "error-handling"]]}})
           text (get-in resp [:result :content 0 :text])

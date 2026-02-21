@@ -17,23 +17,18 @@
 ;; --- Tool definitions ---
 
 (def tools
-  [{:name        "memory_browse_tags"
-    :description "List all tags sorted by usage count. Returns one tag per line: `name count`."
-    :inputSchema {:type       "object"
-                  :properties {:limit  {:type        "integer"
-                                        :description "Max tags to return (default 50)"
-                                        :default     50}
-                               :offset {:type        "integer"
-                                        :description "Skip first N tags (default 0)"
-                                        :default     0}}}}
-
-   {:name        "memory_count_facts"
-    :description "Count facts matching tag set intersections without fetching content. Send multiple tag sets to compare counts and decide which to fetch. Each tag set returns facts that have ALL listed tags."
+  [{:name        "memory_explore_tags"
+    :description "Explore tag space: list all tags with usage counts, or count facts for specific tag set intersections. Omit tag_sets to browse all tags. Provide tag_sets to count intersection sizes."
     :inputSchema {:type       "object"
                   :properties {:tag_sets {:type        "array"
                                           :items       {:type "array" :items {:type "string"}}
-                                          :description "Array of tag sets. Each set is an array of tag names."}}
-                  :required   ["tag_sets"]}}
+                                          :description "Array of tag sets. Each set is an array of tag names. Returns count of facts matching ALL tags in each set."}
+                               :limit    {:type        "integer"
+                                          :description "Max tags to return when browsing (default 50). Ignored when tag_sets provided."
+                                          :default     50}
+                               :offset   {:type        "integer"
+                                          :description "Skip first N tags when browsing (default 0). Ignored when tag_sets provided."
+                                          :default     0}}}}
 
    {:name        "memory_get_facts"
     :description "Fetch facts matching filters. Each filter can combine: tags (intersection), query (semantic search), date range, limit. Returns one result group per filter."
@@ -231,9 +226,9 @@
   "Explicit per-tool parameter conversion. Not a generic deep transform."
   [handler-key params]
   (case handler-key
-    :browse-tags {:limit  (or (:limit params) 50)
-                  :offset (or (:offset params) 0)}
-    :count-facts {:tag-sets (:tag_sets params)}
+    :explore-tags {:tag-sets (:tag_sets params)
+                   :limit    (or (:limit params) 50)
+                   :offset   (or (:offset params) 0)}
     :get-facts   {:filters (:filters params)}
     :create-tag  {:name (:name params)}
     :remember    {:nodes      (mapv (fn [n]
@@ -263,8 +258,7 @@
 
 (defn- call-tool [base-url handler-key params]
   (case handler-key
-    :browse-tags        (server/handle-browse-tags base-url params)
-    :count-facts        (server/handle-count-facts base-url params)
+    :explore-tags       (server/handle-explore-tags base-url params)
     :get-facts          (server/handle-get-facts base-url params)
     :create-tag         (server/handle-create-tag base-url params)
     :remember           (server/handle-remember base-url params)
@@ -296,8 +290,7 @@
   (into {} (map (juxt :name (fn [t] (:handler-key t)))) tools))
 
 (def ^:private handler-keys
-  {"memory_browse_tags"          :browse-tags
-   "memory_count_facts"          :count-facts
+  {"memory_explore_tags"          :explore-tags
    "memory_get_facts"            :get-facts
    "memory_create_tag"           :create-tag
    "memory_remember"             :remember
@@ -308,8 +301,9 @@
 
 (defn- format-result [blob-path handler-key result]
   (case handler-key
-    :browse-tags (render-tag-list result)
-    :count-facts (render-counts result)
+    :explore-tags (case (:mode result)
+                    :browse (render-tag-list (:data result))
+                    :count  (render-counts (:data result)))
     :get-facts   (render-filter-results blob-path result)
     :list-blobs  (render-blob-list result)
     :read-blob   (if (:content result)
