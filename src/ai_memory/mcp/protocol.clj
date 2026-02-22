@@ -104,7 +104,7 @@
                                :project    {:type "string" :description "Project name"}
                                :summary    {:type "string" :description "Session arc summary: main topics in order, 1-3 sentences (e.g. 'Designed blob storage → implemented sync hook → debugged SSHFS mount')"}
                                :chunk_title {:type "string" :description "Short title for current conversation chunk (e.g. 'designed-blob-architecture'). Renames _current.md to a numbered file."}
-                               :compact    {:type "string" :description "Detailed multi-paragraph session summary for /save. Stored as compact.md in the blob and becomes the searchable fact content."}}
+                               :compact    {:type "string" :description "Detailed multi-paragraph session summary for /save. Stored as compact.md in the blob."}}
                   :required   ["session_id"]}}
 
 ])

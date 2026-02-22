@@ -536,7 +536,7 @@
               (or (blob-store/rename-current-chunk! base blob-dir chunk-title)
                   "no _current.md to rename"))
 
-            ;; 3. Compact summary
+            ;; 3. Compact summary (blob only, not stored as fact content)
             compact-result
             (when (and compact session-eid)
               (blob-store/write-section! base blob-dir "compact.md" compact)
@@ -544,7 +544,6 @@
                 (when meta
                   (blob-store/write-meta! base blob-dir
                     (assoc meta :compact-summary compact))))
-              (node/update-content! conn cfg session-eid compact)
               "stored")]
 
         {:status 200
