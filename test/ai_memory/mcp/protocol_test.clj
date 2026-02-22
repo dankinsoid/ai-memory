@@ -54,7 +54,7 @@
        (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
 
 (defn- handler []
-  (protocol/make-handler *base-url* "/tmp/ai-memory-test-blobs"))
+  (protocol/make-handler *base-url*))
 
 (defn- call [method & {:keys [id params] :or {id 1 params {}}}]
   ((handler) {:jsonrpc "2.0" :id id :method method :params params}))
@@ -134,7 +134,7 @@
 
 (deftest render-filter-results-test
   (testing "renders filter results with entity IDs"
-    (let [text (protocol/render-filter-results "/tmp/blobs"
+    (let [text (protocol/render-filter-results
                  [{:filter {:tags ["clj"]}
                    :facts [{:db/id 101 :node/content "Use ex-info for errors"}
                            {:db/id 102 :node/content "Prefer immutable data"}]}
@@ -235,7 +235,7 @@
 
 (deftest render-filter-results-empty-filter-test
   (testing "render-filter-results handles filter with no tags/query"
-    (let [text (protocol/render-filter-results "/tmp/blobs"
+    (let [text (protocol/render-filter-results
                  [{:filter {}
                    :facts [{:db/id 201 :node/content "Some fact"}]}])]
       (is (= "= all\n- [201] Some fact" text)))))

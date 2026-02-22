@@ -116,14 +116,14 @@
                         (str (tags-header tags) ": " count))
                       results)))
 
-(defn- render-fact-line [blob-path fact]
+(defn- render-fact-line [fact]
   (let [eid      (:db/id fact)
         content  (:node/content fact)
         sources  (:node/sources fact)
         blob-dir (:node/blob-dir fact)
         refs     (cond-> []
                    (seq sources) (into (map #(str "src: " %) sources))
-                   blob-dir      (conj (str "blob: " blob-path "/" blob-dir)))]
+                   blob-dir      (conj (str "blob: " blob-dir)))]
     (str "- "
          (when eid (str "[" eid "] "))
          content
@@ -148,20 +148,20 @@
                 query       (conj (str "search: \"" query "\"")))]
     (if (seq parts) (str/join " | " parts) "all")))
 
-(defn- render-one-group [blob-path {:keys [filter facts]}]
+(defn- render-one-group [{:keys [filter facts]}]
   (let [scored? (some :search/score facts)
         header  (filter-header filter)]
     (str "= " header "\n"
          (if scored?
            (str/join "\n" (map render-scored-fact facts))
-           (str/join "\n" (map (partial render-fact-line blob-path) facts))))))
+           (str/join "\n" (map render-fact-line facts))))))
 
 (defn render-filter-results
   "Renders unified filter results. Adapts format per group: scored for query results, plain for tag results."
-  [blob-path results]
+  [results]
   (if (empty? results)
     "(no results)"
-    (str/join "\n\n" (map (partial render-one-group blob-path) results))))
+    (str/join "\n\n" (map render-one-group results))))
 
 
 ;; --- Parameter conversion (snake_case JSON → kebab-case Clojure) ---
@@ -233,15 +233,15 @@
    "memory_store_file"           :store-file
    "memory_session"              :session})
 
-(defn- format-result [blob-path handler-key result]
+(defn- format-result [handler-key result]
   (case handler-key
     :explore-tags (case (:mode result)
                     :browse (render-tag-list (:data result))
                     :count  (render-counts (:data result)))
-    :get-facts   (render-filter-results blob-path result)
+    :get-facts   (render-filter-results result)
     (json/generate-string result)))
 
-(defn- handle-tools-call [base-url blob-path id params]
+(defn- handle-tools-call [base-url id params]
   (let [tool-name (:name params)
         arguments (or (:arguments params) {})]
     (if-let [handler-key (get handler-keys tool-name)]
@@ -250,7 +250,7 @@
         {:jsonrpc "2.0"
          :id      id
          :result  {:content [{:type "text"
-                              :text (format-result blob-path handler-key result)}]}})
+                              :text (format-result handler-key result)}]}})
       {:jsonrpc "2.0"
        :id      id
        :error   {:code    -32602
@@ -259,15 +259,15 @@
 ;; --- Top-level dispatch ---
 
 (defn make-handler
-  "Returns a request→response fn closed over base-url and blob-path."
-  [base-url blob-path]
+  "Returns a request→response fn closed over base-url."
+  [base-url]
   (fn [{:keys [id method params]}]
     (log/debug "MCP request:" method)
     (case method
       "initialize"                (handle-initialize id)
       "notifications/initialized" nil
       "tools/list"                (handle-tools-list id)
-      "tools/call"                (handle-tools-call base-url blob-path id params)
+      "tools/call"                (handle-tools-call base-url id params)
       "ping"                      (handle-ping id)
       ;; Unknown method
       (if id

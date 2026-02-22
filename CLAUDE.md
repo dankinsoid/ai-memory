@@ -10,6 +10,8 @@ Early development — no backwards compatibility concerns, no production DB yet.
 - `prompt.md` → global CLAUDE.md (Memory section)
 - `settings.json`, `skills/`, `scripts/` → corresponding dirs
 
+NEVER edit `~/.claude/` files directly - use `bb scripts/sync_config.bb` to copy from `claude_config_files/` to `~/.claude/`.
+
 Always edit in this repo first, then copy.
 
 ## Commands

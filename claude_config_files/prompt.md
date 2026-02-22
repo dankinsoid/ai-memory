@@ -61,12 +61,7 @@ Bad: `fixed edge cases` (only last action, loses session context).
 
 ## Blobs (detailed content)
 
-Facts with `[blob: /path/to/dir]` link to detailed content on disk. Use Read/Glob/Grep on the blob directory directly:
-
-- Start with `compact.md` or `meta.edn` for overview
-- Named chunks (`01-designed-auth.md`, `02-fixed-tests.md`) are the main content
-- `_current.md` is the latest unnamed chunk
-- Never read large files whole — use Grep or Read with offset/limit
+Facts with `[blob: dir-name]` reference blob directories. Full path: `{blobs-location}/{dir-name}`
 
 ## Mid-Session Retrieval
 
