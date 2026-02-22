@@ -246,7 +246,10 @@
   (let [db  (db/db conn)
         eid (find-session-fact db session-id)]
     (if eid
-      (node/update-content! conn cfg eid session-summary)
+      (do (node/update-content! conn cfg eid session-summary)
+          (when project
+            (let [tag-refs (tag-resolve/resolve-tags conn [project])]
+              (node/update-tag-refs conn eid tag-refs))))
       (let [tag-strs (cond-> ["session"]
                        project (conj project))
             tag-refs (tag-resolve/resolve-tags conn tag-strs)

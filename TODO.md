@@ -83,6 +83,11 @@
 - [x] Source indicator in fact rendering (`[src: ...]`)
 - [x] Tests (12 tests, 25 assertions)
 
+## Project Identity
+- [ ] Stable project ID via git root commit hash (`git rev-list --max-parents=0 HEAD`)
+- [ ] Fallback to folder name when no git
+- [ ] Handle project renames: map old folder name → stable ID
+
 ## Session Ingestion
 - [x] Read `~/.claude/projects/.../*.jsonl` (`blob/ingest.clj`)
 - [x] Parse and clean user/assistant text messages
