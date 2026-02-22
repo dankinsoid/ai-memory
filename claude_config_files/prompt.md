@@ -55,9 +55,10 @@ When 3+ concrete facts share a theme — synthesize a meta-fact.
 
 Hook reminders will tell you when to call and which params to include. All params except `session_id` are optional.
 
-`summary` — **cumulative session arc**, not just latest action. Cover all major topics in order using → arrows. Each call replaces the previous summary, so always include the full arc.
-Example: `explored dedup strategies → chose normalized prose → designed prompt → fixed edge cases`
-Bad: `fixed edge cases` (only last action, loses session context).
+`summary` — short session topic name. If session covered multiple unrelated topics, join with → arrows. Each call replaces the previous summary, so always include the full arc. Omit routine actions (commit, push, restart) — only meaningful topics.
+Example (single topic): `blob storage architecture`
+Example (multiple topics): `dedup strategies → prompt design`
+Bad: `explored dedup strategies → chose normalized prose → designed prompt → committed and pushed` (too verbose, lists actions instead of topics).
 
 ## Blobs (detailed content)
 
