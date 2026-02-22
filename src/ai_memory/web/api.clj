@@ -551,3 +551,31 @@
                    summary-result (assoc :summary summary-result)
                    chunk-result   (assoc :chunk chunk-result)
                    compact-result (assoc :compact compact-result))}))))
+
+;; --- Session continuation (linking across /clear) ---
+
+(defn session-continue [conn cfg req]
+  (let [body            (:body-params req)
+        prev-session-id (:prev-session-id body)
+        session-id      (:session-id body)
+        project         (:project body)]
+    (if-not (and prev-session-id session-id)
+      {:status 400 :body {:error "prev-session-id and session-id required"}}
+      (let [db       (db/db conn)
+            prev-eid (find-session-fact db prev-session-id)]
+        (if-not prev-eid
+          {:status 200 :body {:status "prev-not-found"}}
+          (let [;; Create new session fact if it doesn't exist yet
+                _        (when-not (find-session-fact db session-id)
+                           (upsert-session-fact! conn cfg session-id
+                             (str "continuation of " prev-session-id) project))
+                new-db   (db/db conn)
+                new-eid  (find-session-fact new-db session-id)
+                tick     (db/current-tick new-db)
+                prev-dir (:node/blob-dir (d/pull new-db [:node/blob-dir] prev-eid))]
+            ;; Create typed continuation edge: new → prev
+            (edge/find-or-create-edge conn new-eid prev-eid 0.5 tick
+              {:type :continuation})
+            {:status 200
+             :body   (cond-> {:status "linked" :edge-created true}
+                       prev-dir (assoc :prev-blob-dir prev-dir))}))))))
