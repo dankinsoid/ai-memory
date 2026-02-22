@@ -36,6 +36,18 @@
         ]
       }
     ],
+    "SessionEnd": [
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bb ~/.claude/hooks/session-end.bb",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup|clear|compact",

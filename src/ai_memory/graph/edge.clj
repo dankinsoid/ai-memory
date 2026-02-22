@@ -8,15 +8,17 @@
 (def ^:private max-weight 5.0)
 
 (defn create-edge
-  "Creates a weighted edge between two nodes (by entity ID)."
-  [conn {:keys [from to weight cycle]}]
+  "Creates a weighted edge between two nodes (by entity ID).
+   Optional :type for typed edges (e.g. :continuation)."
+  [conn {:keys [from to weight cycle type]}]
   @(d/transact conn
-     [{:db/id       (d/tempid :db.part/user)
-       :edge/id     (d/squuid)
-       :edge/from   from
-       :edge/to     to
-       :edge/weight (or weight 1.0)
-       :edge/cycle  (or cycle 0)}]))
+     [(cond-> {:db/id       (d/tempid :db.part/user)
+               :edge/id     (d/squuid)
+               :edge/from   from
+               :edge/to     to
+               :edge/weight (or weight 1.0)
+               :edge/cycle  (or cycle 0)}
+        type (assoc :edge/type type))]))
 
 (defn find-edges-from [db from-eid]
   (d/q '[:find [(pull ?e [* {:edge/to [:db/id :node/content]}]) ...]
@@ -55,10 +57,14 @@
          :edge/cycle  current-cycle}])))
 
 (defn find-or-create-edge
-  "Creates edge if not exists, strengthens if it does."
-  [conn from-eid to-eid weight current-cycle]
-  (let [db       (d/db conn)
-        existing (find-edge-between db from-eid to-eid)]
-    (if existing
-      (strengthen conn existing weight current-cycle)
-      (create-edge conn {:from from-eid :to to-eid :weight weight :cycle current-cycle}))))
+  "Creates edge if not exists, strengthens if it does.
+   Optional opts: {:type :continuation} for typed edges."
+  ([conn from-eid to-eid weight current-cycle]
+   (find-or-create-edge conn from-eid to-eid weight current-cycle nil))
+  ([conn from-eid to-eid weight current-cycle opts]
+   (let [db       (d/db conn)
+         existing (find-edge-between db from-eid to-eid)]
+     (if existing
+       (strengthen conn existing weight current-cycle)
+       (create-edge conn (cond-> {:from from-eid :to to-eid :weight weight :cycle current-cycle}
+                           (:type opts) (assoc :type (:type opts))))))))

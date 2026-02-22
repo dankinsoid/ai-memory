@@ -54,6 +54,7 @@
                       ["/blobs/read" {:post (fn [req] (api/read-blob conn cfg req))}]
                       ["/blobs/file" {:post (fn [req] (api/store-file conn cfg req))}]
                       ["/session/sync" {:post (fn [req] (api/session-sync conn cfg req))}]
+                      ["/session/continue" {:post (fn [req] (api/session-continue conn cfg req))}]
                       ["/session" {:post (fn [req] (api/session-update conn cfg req))}]]]
                     {:data {:muuntaja   m/instance
                             :middleware [parameters/parameters-middleware

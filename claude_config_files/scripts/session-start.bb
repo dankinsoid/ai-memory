@@ -10,6 +10,7 @@
 
 (require '[cheshire.core :as json]
          '[babashka.http-client :as http]
+         '[babashka.fs :as fs]
          '[clojure.string :as str])
 
 (def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
@@ -50,6 +51,21 @@
   (when cwd
     (let [parts (str/split cwd #"/")]
       (last parts))))
+
+;; --- Session continuation (on clear) ---
+
+(def continuation-result
+  (when (and (= hook-source "clear") project-name session-id)
+    (let [state-dir  (str (System/getenv "HOME") "/.claude/hooks/state")
+          cache-file (str state-dir "/prev-session-" project-name ".edn")]
+      (when (fs/exists? cache-file)
+        (let [cache  (read-string (slurp cache-file))
+              result (api-post "/api/session/continue"
+                       {:prev_session_id (:session-id cache)
+                        :session_id      session-id
+                        :project         project-name})]
+          (fs/delete cache-file)
+          result)))))
 
 ;; --- Fetch data from API ---
 
@@ -170,9 +186,14 @@
         (str "## Blobs\nAll blob directories are under `"
              (or mount "~/.ai-memory/blobs") "/`"))
 
+      continuation-section
+      (when-let [prev-dir (:prev-blob-dir continuation-result)]
+        (str "## Continuation\nThis session continues a previous conversation. Previous blob: " prev-dir))
+
       sections (remove nil? [pref-section
                              universal-section
                              project-section
+                             continuation-section
                              session-section
                              sessions-section
                              blob-location

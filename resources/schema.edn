@@ -94,6 +94,11 @@
   :db/cardinality :db.cardinality/one
   :db/doc         "Last reinforcement cycle"}
 
+ {:db/ident       :edge/type
+  :db/valueType   :db.type/keyword
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Edge type: :continuation (session follows session). Nil for organic edges."}
+
  ;; --- Global tick ---
  {:db/ident       :tick/value
   :db/valueType   :db.type/long
