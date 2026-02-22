@@ -12,6 +12,11 @@
   :db/cardinality :db.cardinality/one
   :db/doc         "Materialized count of nodes with this tag. Maintained by write pipeline."}
 
+ {:db/ident       :tag/tier
+  :db/valueType   :db.type/keyword
+  :db/cardinality :db.cardinality/one
+  :db/doc         "Tag tier: :aspect (fixed vocabulary). Nil for free-form tags (projects, technologies, domains)."}
+
  ;; --- Node (identified by :db/id) ---
  {:db/ident       :node/content
   :db/valueType   :db.type/string

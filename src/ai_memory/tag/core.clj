@@ -12,6 +12,6 @@
 (defn all-tags
   "Returns all tags with materialized counts."
   [db]
-  (d/q '[:find [(pull ?t [:tag/name :tag/node-count]) ...]
+  (d/q '[:find [(pull ?t [:tag/name :tag/node-count :tag/tier]) ...]
          :where [?t :tag/name]]
        db))

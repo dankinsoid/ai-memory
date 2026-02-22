@@ -87,13 +87,23 @@
                                (str " {" (str/join ", " tags) "}")))))
                     facts)))))))
 
+(defn format-tag [t]
+  (str (get t (keyword "tag/name"))
+       " (" (or (get t (keyword "tag/node-count")) 0) ")"))
+
 (defn format-tags [tags]
   (when (seq tags)
-    (let [formatted (map (fn [t]
-                           (str (get t (keyword "tag/name"))
-                                " (" (or (get t (keyword "tag/node-count")) 0) ")"))
-                         tags)]
-      (str "## Tags\n" (str/join ", " formatted)))))
+    (let [{aspect true other false}
+          (group-by #(= "aspect" (get % (keyword "tag/tier"))) tags)
+          aspect  (sort-by (keyword "tag/name") aspect)
+          other   (->> other
+                       (remove #(#{"session" "universal"} (get % (keyword "tag/name"))))
+                       (sort-by (keyword "tag/node-count") (fn [a b] (compare (or b 0) (or a 0)))))]
+      (str "## Tags\n"
+           (when (seq aspect)
+             (str "Aspect: " (str/join ", " (map format-tag aspect)) "\n"))
+           (when (seq other)
+             (str/join ", " (map format-tag other)))))))
 
 (defn format-sessions [facts]
   (when (seq facts)
@@ -143,7 +153,7 @@
 
       sessions-section
       (let [session-group (first (filter
-                                   (fn [r] (= (get-in r [:filter :tags]) ["session" "blob"]))
+                                   (fn [r] (= (get-in r [:filter :tags]) ["session"]))
                                    results))]
         (format-sessions (:facts session-group)))
 

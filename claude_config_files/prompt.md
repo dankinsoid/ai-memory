@@ -12,7 +12,7 @@ memory_remember({
   session_id: "<session-id>",
   project: "<project-name>",
   nodes: [
-    { content: "prefer X over Y for Z", tags: ["pref", "coding-style"] }
+    { content: "prefer X over Y for Z", tags: ["preference", "clojure"] }
   ]
 })
 ```
@@ -62,7 +62,7 @@ memory_reinforce({
 
 ### Fact Quality
 
-Good: self-contained, specific, has rationale, 2-4 tags.
+Good: self-contained, specific, has rationale.
 Bad: restates code/docs, too vague, temporary, trivially obvious.
 
 ### Abstraction Levels
@@ -101,10 +101,14 @@ Combine with tags to scope: `{ tags: ["clj"], query: "async", limit: 10 }`
 
 ## Tags
 
-- Atomic kebab-case strings: `clojure`, `ai-memory`, `pattern`, `coding-style`, `error-handling`
-- One node → many tags (flat set, no hierarchy)
-- Query by intersection: `["ai-memory", "clojure"]` = facts tagged with BOTH
-- `universal` — tag for facts relevant in every session regardless of project (e.g. cross-cutting patterns, tooling, meta-preferences)
-- Browse tags before creating — prefer existing
-- It's allowed to use more detailed tags in order to avoid ambiguity (e.g. `project/claude-memory` instead of just `claude-memory`) but always prefer existing tags if they fit.
+Two kinds:
+
+**Aspect** — fixed vocabulary shown in Memory Context at session start. Describes what kind of knowledge: `architecture`, `pattern`, `decision`, etc. Pick 1-2 per fact.
+**Free-form** — projects, technologies, domains: `datomic`, `swift`, `react`. Add 0-2 per fact. Prefer existing — browse before creating.
+
+**Rules**:
+- Every fact: 1-2 aspect + 0-2 free-form = 2-4 tags total (project tag auto-added by system)
+- `universal` — for facts relevant in every session regardless of project
+- Kebab-case, atomic strings
+- Query by intersection: `["ai-memory", "architecture"]` = facts tagged with BOTH
 <!-- ai-memory:end -->
