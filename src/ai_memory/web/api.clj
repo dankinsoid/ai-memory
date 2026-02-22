@@ -225,11 +225,9 @@
 ;; --- Helpers ---
 
 (defn- link-blob-dir!
-  "Links blob-dir to an existing node and ensures it has the 'blob' tag."
+  "Links blob-dir to an existing node."
   [conn eid blob-dir]
-  (let [blob-ref (tag-resolve/resolve-tag conn "blob")]
-    (node/update-tag-refs conn eid [blob-ref])
-    @(d/transact conn [[:db/add eid :node/blob-dir blob-dir]])))
+  @(d/transact conn [[:db/add eid :node/blob-dir blob-dir]]))
 
 ;; --- Remember (nodes + session summary) ---
 
@@ -315,7 +313,7 @@
                     (:project body)     (assoc :project (:project body))
                     (:path body)        (assoc :source-path (:path body)))]
     (blob-store/write-meta! base blob-dir meta-data)
-    (let [tag-strs (distinct (cons "blob" (:tags body)))
+    (let [tag-strs (distinct (:tags body))
           tag-refs (tag-resolve/resolve-tags conn tag-strs)
           blob-node (node/create-node conn cfg
                       {:content   (:summary body)
@@ -460,7 +458,7 @@
         (if session-eid
           (when-not existing-dir
             (link-blob-dir! conn session-eid blob-dir))
-          (let [tag-strs (cond-> ["session" "blob"]
+          (let [tag-strs (cond-> ["session"]
                            project (conj project))
                 tag-refs (tag-resolve/resolve-tags conn tag-strs)]
             (node/create-node conn cfg

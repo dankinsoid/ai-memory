@@ -58,7 +58,7 @@
 (def fact-filters
   (cond-> [{:tags ["pref"]}
            {:tags ["universal"]}
-           {:tags ["session" "blob"] :sort_by "date" :limit 5}]
+           {:tags ["session"] :sort_by "date" :limit 5}]
     ;; Add project filter if project detected
     project-name (conj {:tags [project-name]})
     ;; Add current session on clear/compact
