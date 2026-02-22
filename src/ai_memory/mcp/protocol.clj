@@ -85,6 +85,18 @@
                                :path    {:type ["string" "null"] :description "Absolute file path (server reads from disk)"}}
                   :required   ["title" "project" "summary" "tags"]}}
 
+   {:name        "memory_reinforce"
+    :description "Reinforce or weaken facts based on their usefulness. Call after completing a task to provide learning signal. Score: -1 (harmful) to 1 (essential). Only include facts that had direct impact — skip irrelevant ones."
+    :inputSchema {:type       "object"
+                  :properties {:reinforcements {:type  "array"
+                                                :items {:type       "object"
+                                                        :properties {:id    {:type "integer" :description "Fact entity ID"}
+                                                                     :score {:type "number" :description "Usefulness: -1 (misleading) to 1 (essential). Don't send 0."}}
+                                                        :required   ["id" "score"]}
+                                                :description "Facts to reinforce with usefulness scores"}
+                               :session_id {:type "string" :description "Session ID for context"}}
+                  :required   ["reinforcements"]}}
+
    {:name        "memory_session"
     :description "Update session metadata. Combine any of: summary (session arc), chunk_title (name current chunk), compact (detailed summary for /save). Call with whichever params are relevant — hook reminders will tell you which."
     :inputSchema {:type       "object"
@@ -187,6 +199,9 @@
                       :type    (:type params)
                       :content (:content params)
                       :path    (:path params)}
+    :reinforce       {:reinforcements (mapv (fn [r] {:id (:id r) :score (:score r)})
+                                            (:reinforcements params))
+                      :session-id     (:session_id params)}
     :session         {:session-id   (:session_id params)
                       :project      (:project params)
                       :summary      (:summary params)
@@ -202,6 +217,7 @@
     :get-facts          (server/handle-get-facts base-url params)
     :remember           (server/handle-remember base-url params)
     :store-file         (server/handle-store-file base-url params)
+    :reinforce          (server/handle-reinforce base-url params)
     :session            (server/handle-session base-url params)))
 
 ;; --- JSON-RPC method handlers ---
@@ -231,6 +247,7 @@
    "memory_get_facts"            :get-facts
    "memory_remember"             :remember
    "memory_store_file"           :store-file
+   "memory_reinforce"            :reinforce
    "memory_session"              :session})
 
 (defn- format-result [handler-key result]

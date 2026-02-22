@@ -128,6 +128,18 @@
     (when-not (skip-embedding? {:tag-refs (:node/tag-refs node)})
       (embed-async! cfg eid new-content))))
 
+(defn reinforce-weight
+  "Adjusts node weight by delta, updates cycle. No content change, no re-embed.
+   Weight floored at 0.1 to prevent zeroing out."
+  [conn eid delta current-cycle]
+  (let [db (d/db conn)
+        current-weight (or (:node/weight (d/pull db [:node/weight] eid)) 1.0)
+        new-weight (max 0.1 (+ current-weight delta))]
+    @(d/transact conn
+       [[:db/add eid :node/weight     new-weight]
+        [:db/add eid :node/cycle      current-cycle]
+        [:db/add eid :node/updated-at (now)]])))
+
 (defn find-recent
   "Returns entity IDs with cycle >= min-tick."
   [db min-tick]

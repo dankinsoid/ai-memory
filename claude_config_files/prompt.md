@@ -38,6 +38,28 @@ ai-memory stores facts in datomic with tag-based retrieval
 explored dedup strategies → chose normalized prose → designed prompt
 ```
 
+## Reinforcing
+
+After completing a task where retrieved facts influenced your work, call `memory_reinforce` to provide learning signal.
+
+```
+memory_reinforce({
+  reinforcements: [
+    { id: 12345, score: 0.8 },
+    { id: 12346, score: -0.5 }
+  ]
+})
+```
+
+**Score**: -1 (misleading, caused wrong approach) to 1 (essential, directly unblocked task).
+
+**Rules**:
+- Only facts that had **direct impact** on the task outcome. Retrieved but unused = skip.
+- Be selective: if 10 facts were retrieved, typically 1-3 actually mattered.
+- Negative scores: only when a fact actively misled you (wrong approach, outdated info).
+- Don't reinforce with score near 0 — just omit those facts.
+- Fact IDs come from `[id]` prefix in `memory_get_facts` output.
+
 ### Fact Quality
 
 Good: self-contained, specific, has rationale, 2-4 tags.

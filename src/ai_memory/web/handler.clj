@@ -45,6 +45,7 @@
                       ["/nodes" {:get  (fn [req] (api/list-nodes conn req))
                                  :post (fn [req] (api/create-node conn cfg req))}]
                       ["/remember" {:post (fn [req] (api/remember conn cfg req))}]
+                      ["/reinforce" {:post (fn [req] (api/reinforce conn cfg req))}]
                       ["/recall" {:post (fn [req] (api/recall conn cfg req))}]
                       ["/tags" {:get  (fn [req] (api/browse-tags conn cfg req))}]
                       ["/tags/count" {:post (fn [req] (api/count-facts conn cfg req))}]

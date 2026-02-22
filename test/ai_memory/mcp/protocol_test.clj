@@ -82,7 +82,7 @@
     (let [resp  (call "tools/list")
           names (set (map :name (get-in resp [:result :tools])))]
       (is (= #{"memory_explore_tags" "memory_get_facts"
-               "memory_remember"
+               "memory_remember" "memory_reinforce"
                "memory_store_file" "memory_session"}
              names)))))
 

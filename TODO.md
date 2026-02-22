@@ -41,6 +41,8 @@
 ## Graph — Read Pipeline (paused)
 - [x] Spreading activation code (`graph/traverse.clj`) — written, not in use
 - [x] Weight decay model (`decay/core.clj`) — written, not in use
+- [x] `memory_reinforce` MCP tool — explicit fact weight feedback (-1 to 1)
+- [ ] Edge reinforcement via `memory_reinforce` — strengthen/weaken associations when fact reached via edges
 - [ ] Activate graph-based retrieval once enough edge data accumulates
 
 ## Embedding & Vector Search

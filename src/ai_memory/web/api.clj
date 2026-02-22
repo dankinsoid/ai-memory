@@ -205,6 +205,23 @@
                          (tag-query/by-tags db {:tags tags})
                          [])}}))
 
+;; --- Reinforce ---
+
+(defn reinforce [conn cfg req]
+  (let [body           (:body-params req)
+        reinforcements (:reinforcements body)
+        factor         (or (:reinforcement-factor cfg) 0.5)
+        db             (db/db conn)
+        tick           (db/current-tick db)]
+    {:status 200
+     :body   (let [results (mapv (fn [{:keys [id score]}]
+                                   (let [delta (* score factor)]
+                                     (node/reinforce-weight conn id delta tick)
+                                     {:id id :score score :delta delta}))
+                                 reinforcements)]
+               {:reinforced (count results)
+                :details    results})}))
+
 ;; --- Helpers ---
 
 (defn- link-blob-dir!

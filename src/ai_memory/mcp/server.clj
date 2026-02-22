@@ -51,5 +51,8 @@
             :as              :json
             :throw-exceptions false})))
 
+(defn handle-reinforce [base-url params]
+  (api-post base-url "/api/reinforce" params))
+
 (defn handle-session [base-url params]
   (api-post base-url "/api/session" params))

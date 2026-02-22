@@ -41,6 +41,10 @@ Include code snippets, exact error messages, specific function names.>
 - **Don't duplicate meta.edn** — project, summary, date, session-id, turn count are already there.
 - **User requirements** — capture preferences, corrections, and constraints specific to this task. Skip section if there were none.
 
+## 1.5. Reinforce useful facts
+
+If facts retrieved during this session influenced task completion, call `memory_reinforce` before saving. Review facts from `memory_get_facts` calls made during the session — score only those that directly contributed to or hindered progress.
+
 ## 2. Call `memory_session`
 
 ```
