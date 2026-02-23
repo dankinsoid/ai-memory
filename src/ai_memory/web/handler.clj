@@ -50,8 +50,9 @@
                               (second (re-matches #"Bearer\s+(.*)" auth-header)))]
             (if (= token api-token)
               (handler req)
-              {:status 401
-               :body   {:error "Unauthorized"}})))))))
+              {:status  401
+               :headers {"Content-Type" "application/json"}
+               :body    "{\"error\":\"Unauthorized\"}"})))))))
 
 (defn app [conn cfg]
   (let [handler (ring/ring-handler
