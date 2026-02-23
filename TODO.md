@@ -45,6 +45,22 @@
 - [ ] Edge reinforcement via `memory_reinforce` — strengthen/weaken associations when fact reached via edges
 - [ ] Activate graph-based retrieval once enough edge data accumulates
 
+### Graph API & MCP
+- [ ] API endpoint: get related facts for a given fact (follow edges, return neighbors with weights)
+- [ ] MCP tool: `memory_related` — fetch facts connected by edges (1-hop, configurable depth)
+- [ ] Edge strengthen/weaken API — explicit feedback on edge usefulness (not just node reinforcement)
+
+### Graph Traversal & Inference
+- [ ] Multi-hop traversal: follow chains of edges to discover indirect connections
+- [ ] Intersection discovery: facts reachable from multiple starting points (convergence = signal)
+- [ ] Spreading activation with configurable decay per hop — surface non-obvious patterns
+- [ ] Cluster detection: find tightly connected subgraphs (implicit topics/themes)
+
+### Recall-Based Refreshing (memory reconsolidation)
+- [ ] When fact retrieved via implicit path (graph traversal, not direct tag/search) — reset decay timestamp
+- [ ] Slight weight boost on implicit retrieval (simulates "remembering refreshes the memory")
+- [ ] Track retrieval source (direct vs graph-inferred) for analytics
+
 ## Embedding & Vector Search
 - [x] TEI client: embed, embed-batch (`embedding/core.clj`)
 - [x] Qdrant client: upsert, search, delete (`embedding/vector_store.clj`)
@@ -114,6 +130,12 @@
 - [x] Datomic Pro transactor Docker setup
 - [x] Prometheus config
 - [ ] Grafana dashboards (provisioning configured, no dashboards)
+
+## Auto-Retrieval (mid-conversation context injection)
+- [ ] Semantic search on user message → inject relevant facts into context
+- [ ] Hook on UserPromptSubmit: embed user message, query Qdrant, filter by score threshold
+- [ ] Project-scoped filtering (current project tag + universal)
+- [ ] Relevance threshold tuning to avoid noise
 
 ## Prompt Engineering (prompt.md)
 - [ ] Add short memory nudge to `session-reminder.bb` (3-5 tags, max 15 words, skip implementation details)
