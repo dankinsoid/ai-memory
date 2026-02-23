@@ -164,25 +164,36 @@
 (defn- sort-by-date [facts]
   (sort-by :node/updated-at #(compare %2 %1) facts))
 
-(defn- sort-by-weight
-  "Sorts facts by effective weight (decayed) desc. Requires current tick from db."
+(defn- compute-effective-weight
+  "Computes effective (decayed) weight for a single fact."
+  [current-tick decay-factor fact]
+  (decay/effective-weight
+    (or (:node/weight fact) 1.0)
+    (or (:node/cycle fact) 0)
+    current-tick
+    decay-factor))
+
+(defn- enrich-effective-weight
+  "Attaches :node/effective-weight to each fact."
   [db facts]
   (let [current-tick (db-core/current-tick db)
         decay-factor decay/default-decay-factor]
-    (sort-by (fn [fact]
-               (decay/effective-weight
-                 (or (:node/weight fact) 1.0)
-                 (or (:node/cycle fact) 0)
-                 current-tick
-                 decay-factor))
-             #(compare %2 %1)
-             facts)))
+    (mapv #(assoc % :node/effective-weight
+                    (compute-effective-weight current-tick decay-factor %))
+          facts)))
+
+(defn- sort-by-weight
+  "Sorts facts by effective weight (decayed) desc. Requires current tick from db."
+  [db facts]
+  (sort-by :node/effective-weight #(compare %2 %1)
+           (enrich-effective-weight db facts)))
 
 (defn- sort-facts
-  "Dispatches sorting: \"date\" → by updated-at, \"weight\" (default) → by effective weight."
+  "Dispatches sorting: \"date\" → by updated-at, \"weight\" (default) → by effective weight.
+   Always enriches facts with :node/effective-weight."
   [db sort-by-param facts]
   (case sort-by-param
-    "date" (sort-by-date facts)
+    "date" (enrich-effective-weight db (sort-by-date facts))
     (sort-by-weight db facts)))
 
 (defn fetch-by-tag-sets
@@ -235,7 +246,9 @@
                       :where [?e :node/session-id ?sid]]
                     db session-id)
           fact (when eid (d/pull db node-pull-spec eid))
-          facts (if (:node/content fact) [fact] [])]
+          facts (if (:node/content fact)
+                  (enrich-effective-weight db [fact])
+                  [])]
       {:filter filter-spec
        :facts  facts
        :total  (count facts)})
@@ -245,7 +258,9 @@
     (let [eid  (cond (number? id) (long id)
                      (string? id) (parse-long id))
           fact (when eid (d/pull db node-pull-spec eid))
-          facts (if (:node/content fact) [fact] [])]
+          facts (if (:node/content fact)
+                  (enrich-effective-weight db [fact])
+                  [])]
       {:filter filter-spec
        :facts  facts
        :total  (count facts)})
@@ -264,7 +279,8 @@
                           since-d (filter (partial in-date-range? since-d nil))
                           until-d (filter (partial in-date-range? nil until-d)))
           total         (count (vec filtered))
-          page          (->> filtered (drop (or offset 0)) (take default-limit) vec)]
+          page          (->> filtered (drop (or offset 0)) (take default-limit)
+                             vec (enrich-effective-weight db))]
       {:filter filter-spec
        :facts  page
        :total  total})

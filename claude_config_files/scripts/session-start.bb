@@ -100,7 +100,9 @@
                              (when blob-dir
                                (str " [blob: " blob-dir "]"))
                              (when (seq tags)
-                               (str " {" (str/join ", " tags) "}")))))
+                               (str " {" (str/join ", " tags) "}"))
+                             (when-let [ew (get f (keyword "node/effective-weight"))]
+                               (str " w:" (format "%.2f" (double ew)))))))
                     facts)))))))
 
 (defn format-tag [t]
