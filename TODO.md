@@ -129,7 +129,7 @@
 - [x] Dockerfile (multi-stage build)
 - [x] Datomic Pro transactor Docker setup
 - [x] Prometheus config
-- [ ] Grafana dashboards (provisioning configured, no dashboards)
+- [x] Grafana dashboards: Overview, Write Pipeline, Read Pipeline (provisioned via JSON)
 
 ## Auto-Retrieval (mid-conversation context injection)
 - [ ] Semantic search on user message → inject relevant facts into context

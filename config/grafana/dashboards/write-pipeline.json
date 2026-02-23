@@ -3,7 +3,10 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
-  "links": [],
+  "links": [
+    { "title": "Overview", "url": "/d/overview", "type": "link" },
+    { "title": "Read Pipeline", "url": "/d/read-pipeline", "type": "link" }
+  ],
   "panels": [
     {
       "title": "Write Duration by Phase (p95)",
