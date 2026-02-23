@@ -3,10 +3,6 @@
 
 services:
   datomic:
-    ports:
-      - "127.0.0.1:4334:4334"
-      - "127.0.0.1:4335:4335"
-      - "127.0.0.1:4336:4336"
     restart: unless-stopped
     environment:
       - JAVA_TOOL_OPTIONS=-Xms256m -Xmx512m
@@ -17,8 +13,6 @@ services:
         max-file: "3"
 
   app:
-    ports:
-      - "0.0.0.0:8080:8080"
     restart: unless-stopped
     environment:
       - DATOMIC_URI=datomic:dev://datomic:4334/ai-memory
@@ -34,8 +28,6 @@ services:
         max-file: "3"
 
   embedding:
-    ports:
-      - "127.0.0.1:8090:80"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -44,9 +36,6 @@ services:
         max-file: "3"
 
   qdrant:
-    ports:
-      - "127.0.0.1:6333:6333"
-      - "127.0.0.1:6334:6334"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -55,13 +44,9 @@ services:
         max-file: "3"
 
   prometheus:
-    ports:
-      - "127.0.0.1:9090:9090"
     restart: unless-stopped
 
   grafana:
-    ports:
-      - "127.0.0.1:3000:3000"
     restart: unless-stopped
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-admin}
