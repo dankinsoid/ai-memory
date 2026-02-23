@@ -93,7 +93,7 @@
 (defn- process-node
   "Dedup check + create or reinforce. Resolves tags to entity refs.
    Returns {:id entity-id :status :created/:reinforced}."
-  [conn cfg node-data tick opts]
+  [conn cfg node-data opts]
   (let [db         (db/db conn)
         tag-refs   (when (seq (:tags node-data))
                      (tag-resolve/resolve-tags conn (:tags node-data)))
@@ -102,26 +102,25 @@
       (let [eid (:db/id duplicate)]
         (node/reinforce-node conn cfg eid
                              (:content node-data)
-                             (:reinforcement-delta opts)
-                             tick)
+                             (:reinforcement-delta opts))
         (node/update-tag-refs conn eid tag-refs)
         {:id eid :status :reinforced})
       (let [result (node/create-node conn cfg
                      (-> node-data
                          (dissoc :tags :node-type)
-                         (assoc :tick tick :tag-refs tag-refs)))]
+                         (assoc :tag-refs tag-refs)))]
         {:id (:node-eid result) :status :created}))))
 
 (defn- create-batch-edges
   "Creates bidirectional edges between all nodes in the batch (weight=1.0).
    Returns {:edges N :pairs N :db-ops N}."
-  [conn node-ids tick]
+  [conn node-ids]
   (let [pairs (for [i (range (count node-ids))
                     j (range (inc i) (count node-ids))]
                 [(nth node-ids i) (nth node-ids j)])]
     (doseq [[a b] pairs]
-      (edge/find-or-create-edge conn a b 1.0 tick)
-      (edge/find-or-create-edge conn b a 1.0 tick))
+      (edge/find-or-create-edge conn a b 1.0)
+      (edge/find-or-create-edge conn b a 1.0))
     (let [edge-count (* 2 (count pairs))]
       {:edges   edge-count
        :pairs   (count pairs)
@@ -131,7 +130,7 @@
   "Creates unidirectional edges from new nodes to previous context nodes.
    Weight = association-factor ^ Δseq (Δseq = distance in entries).
    Returns {:edges N :candidates N :prev-batches N :db-ops N}."
-  [conn entries current-seq node-ids tick opts]
+  [conn entries current-seq node-ids opts]
   (let [{:keys [association-factor min-association-weight]} opts
         node-id-set   (set node-ids)
         prev-node-ids (into #{} (comp (mapcat identity) (remove node-id-set)) entries)
@@ -143,7 +142,7 @@
             new-id  node-ids
             prev-id batch-ids
             :when (not (node-id-set prev-id))]
-      (edge/find-or-create-edge conn new-id prev-id w tick)
+      (edge/find-or-create-edge conn new-id prev-id w)
       (swap! cnt inc))
     (let [edges @cnt]
       {:edges        edges
@@ -155,11 +154,12 @@
   "Creates unidirectional edges from new nodes to all recent nodes in DB.
    Weight = association-factor ^ (current_tick - node.cycle).
    Returns {:edges N :candidates N :recent-count N :db-ops N :tick-window N}."
-  [conn tick node-ids opts]
+  [conn node-ids opts]
   (let [{:keys [association-factor min-association-weight]} opts
+        db          (db/db conn)
+        tick        (db/current-tick db)
         md          (max-delta association-factor min-association-weight)
         min-tick    (max 0 (- tick md))
-        db          (db/db conn)
         recent-ids  (node/find-recent db min-tick)
         node-id-set (set node-ids)
         recent-ext  (remove node-id-set recent-ids)
@@ -170,7 +170,7 @@
                   delta     (- tick (:node/cycle prev-node 0))
                   w         (association-weight association-factor delta)]
             :when (>= w min-association-weight)]
-      (edge/find-or-create-edge conn new-id prev-id w tick)
+      (edge/find-or-create-edge conn new-id prev-id w)
       (swap! cnt inc))
     (let [edges       @cnt
           recent-cnt  (count (seq recent-ext))]
@@ -188,7 +188,7 @@
 
 (defn remember
   "Writes memory nodes with automatic associations.
-   Increments global tick on each call.
+   Tick auto-increments on every DB write.
    `params`:
      :nodes      — vec of {:content, :tags}
      :context-id — string: session-scoped linking (RAM cache)
@@ -198,13 +198,12 @@
   (let [registry   (:metrics cfg)
         opts       (merge defaults cfg)
         start-ns   (System/nanoTime)
-        tick       (db/increment-tick! conn)
         context-id (:context-id params)
 
         ;; Phase: nodes
         results
         (metrics/timed registry metrics/write-duration {:phase "nodes"}
-          (mapv #(process-node conn cfg % tick opts) (:nodes params)))
+          (mapv #(process-node conn cfg % opts) (:nodes params)))
 
         node-ids (mapv :id results)
 
@@ -212,7 +211,7 @@
         batch-stats
         (metrics/timed registry metrics/write-duration {:phase "batch_edges"}
           (if (> (count node-ids) 1)
-            (create-batch-edges conn node-ids tick)
+            (create-batch-edges conn node-ids)
             empty-edge-stats))
 
         ;; Phase: context edges
@@ -220,14 +219,14 @@
         (metrics/timed registry metrics/write-duration {:phase "context_edges"}
           (cond
             (= :global context-id)
-            (create-global-edges conn tick node-ids opts)
+            (create-global-edges conn node-ids opts)
 
             (string? context-id)
             (let [ctx          (get-context context-id)
                   prev-entries (or (:entries ctx) [])
                   current-seq  (count prev-entries)]
               (if (seq prev-entries)
-                (create-context-edges conn prev-entries current-seq node-ids tick opts)
+                (create-context-edges conn prev-entries current-seq node-ids opts)
                 empty-edge-stats))
 
             :else empty-edge-stats))]
@@ -252,7 +251,7 @@
         (metrics/observe-duration! registry "total" elapsed)))
 
     {:nodes         results
-     :tick          tick
+     :tick          (db/current-tick (db/db conn))
      :batch-edges   batch-stats
      :context-edges context-stats
      :edges-created (+ (edges-count batch-stats)

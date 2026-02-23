@@ -161,18 +161,22 @@
           text (get-in resp [:result :content 0 :text])
           lines (str/split-lines text)]
       (is (nil? (:error resp)))
-      (is (= 2 (count lines)))
+      ;; Includes user tags + seeded aspect tags
+      (is (> (count lines) 2))
       (is (every? #(re-matches #"\S+ \d+" %) lines))
       ;; Sorted by count desc: clj 2 first
       (is (str/starts-with? (first lines) "clj")))))
 
 (deftest explore-tags-empty-test
-  (testing "memory_explore_tags with no tags returns (no tags)"
+  (testing "memory_explore_tags with no user tags returns seeded aspect tags"
     (let [resp (call "tools/call"
                  :params {:name "memory_explore_tags"
                           :arguments {}})
-          text (get-in resp [:result :content 0 :text])]
-      (is (= "(no tags)" text)))))
+          text (get-in resp [:result :content 0 :text])
+          lines (str/split-lines text)]
+      ;; Aspect tags are seeded, so not empty
+      (is (pos? (count lines)))
+      (is (every? #(str/ends-with? % " 0") lines)))))
 
 (deftest explore-tags-count-test
   (testing "memory_explore_tags with tag_sets returns text counts"

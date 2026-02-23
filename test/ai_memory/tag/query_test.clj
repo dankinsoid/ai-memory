@@ -82,17 +82,22 @@
                                      {:tags ["clj" "python"]})]
       (is (= 2 (count results))))))
 
+(def aspect-tag-count (count db/aspect-tags))
+
 (deftest browse-with-counts-test
   (testing "browse returns tags with materialized node counts sorted by count desc"
     (create-tagged-node! *conn* "Fact 1" ["clj"])
     (create-tagged-node! *conn* "Fact 2" ["clj"])
     (create-tagged-node! *conn* "Fact 3" ["python"])
-    (let [results (query/browse (d/db *conn*) {})]
-      (is (= 2 (count results)))
-      (let [first-tag (first results)]
+    (let [results (query/browse (d/db *conn*) {})
+          with-nodes (filterv #(pos? (or (:tag/node-count %) 0)) results)]
+      ;; Total includes aspect tags, but only 2 have nodes
+      (is (= (+ 2 aspect-tag-count) (count results)))
+      (is (= 2 (count with-nodes)))
+      (let [first-tag (first with-nodes)]
         (is (= "clj" (:tag/name first-tag)))
         (is (= 2 (:tag/node-count first-tag))))
-      (let [second-tag (second results)]
+      (let [second-tag (second with-nodes)]
         (is (= "python" (:tag/name second-tag)))
         (is (= 1 (:tag/node-count second-tag)))))))
 
@@ -102,14 +107,17 @@
     (create-tagged-node! *conn* "A" ["clj"])
     (create-tagged-node! *conn* "B" ["python"])
     (create-tagged-node! *conn* "C" ["rust"])
-    (let [page1 (query/browse (d/db *conn*) {:limit 2 :offset 0})
-          page2 (query/browse (d/db *conn*) {:limit 2 :offset 2})]
+    (let [total   (+ 3 aspect-tag-count)
+          page1   (query/browse (d/db *conn*) {:limit 2 :offset 0})
+          page2   (query/browse (d/db *conn*) {:limit 2 :offset 2})
+          page-last (query/browse (d/db *conn*) {:limit 50 :offset (- total 1)})]
       (is (= 2 (count page1)))
-      (is (= 1 (count page2))))))
+      (is (= 2 (count page2)))
+      (is (= 1 (count page-last))))))
 
-(deftest browse-empty-test
-  (testing "browse returns empty when no tags"
-    (is (empty? (query/browse (d/db *conn*) {})))))
+(deftest browse-only-aspect-tags-test
+  (testing "browse returns seeded aspect tags when no user tags created"
+    (is (= aspect-tag-count (count (query/browse (d/db *conn*) {}))))))
 
 (deftest node-tags-test
   (testing "returns all tag names for a node"

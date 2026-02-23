@@ -3,6 +3,7 @@
 
 (ns ai-memory.graph.node
   (:require [datomic.api :as d]
+            [ai-memory.db.core :as db]
             [ai-memory.embedding.core :as embedding]
             [ai-memory.embedding.vector-store :as vs]
             [clojure.tools.logging :as log])
@@ -40,13 +41,14 @@
    `cfg` — {:embedding-url, :qdrant-url}.
    `tag-refs` — vec of lookup refs like [[:tag/name \"clj\"]].
    Optional keys: :blob-dir (string), :sources (set of strings)."
-  [conn cfg {:keys [content tag-refs tick blob-dir sources session-id]}]
-  (let [tempid       (d/tempid :db.part/user)
+  [conn cfg {:keys [content tag-refs blob-dir sources session-id]}]
+  (let [tick         (db/next-tick (d/db conn))
+        tempid       (d/tempid :db.part/user)
         ts           (now)
         base-tx      (cond-> {:db/id           tempid
                                :node/content    content
                                :node/weight     1.0
-                               :node/cycle      (or tick 0)
+                               :node/cycle      tick
                                :node/created-at ts
                                :node/updated-at ts}
                        (seq tag-refs) (assoc :node/tag-refs tag-refs)
@@ -54,7 +56,7 @@
                        (seq sources)  (assoc :node/sources sources)
                        session-id     (assoc :node/session-id session-id))
         count-txs    (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
-        tx-result    @(d/transact conn (into [base-tx] count-txs))
+        tx-result    (db/transact! conn (into [base-tx] count-txs) tick)
         eid          (d/resolve-tempid (:db-after tx-result) (:tempids tx-result) tempid)]
     (when-not (skip-embedding? {:tag-refs tag-refs})
       (embed-async! cfg eid content))
@@ -107,7 +109,7 @@
   [conn cfg eid new-content]
   (let [db   (d/db conn)
         node (d/pull db [{:node/tag-refs [:tag/name]}] eid)]
-    @(d/transact conn
+    (db/transact! conn
        [[:db/add eid :node/content    new-content]
         [:db/add eid :node/updated-at (now)]])
     (when-not (skip-embedding? {:tag-refs (:node/tag-refs node)})
@@ -115,30 +117,34 @@
 
 (defn reinforce-node
   "Reinforces existing node: bumps weight, cycle, updated-at. Re-embeds unless entity."
-  [conn cfg eid new-content delta current-cycle]
+  [conn cfg eid new-content delta]
   (let [db   (d/db conn)
+        tick (db/next-tick db)
         node (d/pull db [:node/weight :node/blob-dir {:node/tag-refs [:tag/name]}] eid)
         current-weight (or (:node/weight node) 1.0)
         new-weight     (+ current-weight delta)]
-    @(d/transact conn
+    (db/transact! conn
        [[:db/add eid :node/content    new-content]
         [:db/add eid :node/weight     new-weight]
-        [:db/add eid :node/cycle      current-cycle]
-        [:db/add eid :node/updated-at (now)]])
+        [:db/add eid :node/cycle      tick]
+        [:db/add eid :node/updated-at (now)]]
+       tick)
     (when-not (skip-embedding? {:tag-refs (:node/tag-refs node)})
       (embed-async! cfg eid new-content))))
 
 (defn reinforce-weight
   "Adjusts node weight by delta, updates cycle. No content change, no re-embed.
    Weight floored at 0.1 to prevent zeroing out."
-  [conn eid delta current-cycle]
+  [conn eid delta]
   (let [db (d/db conn)
+        tick (db/next-tick db)
         current-weight (or (:node/weight (d/pull db [:node/weight] eid)) 1.0)
         new-weight (max 0.1 (+ current-weight delta))]
-    @(d/transact conn
+    (db/transact! conn
        [[:db/add eid :node/weight     new-weight]
-        [:db/add eid :node/cycle      current-cycle]
-        [:db/add eid :node/updated-at (now)]])))
+        [:db/add eid :node/cycle      tick]
+        [:db/add eid :node/updated-at (now)]]
+       tick)))
 
 (defn find-recent
   "Returns entity IDs with cycle >= min-tick."
@@ -165,7 +171,7 @@
                              db eid))
           new-refs (remove #(existing (second %)) tag-refs)
           count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) new-refs)]
-      @(d/transact conn
+      (db/transact! conn
          (into [{:db/id           eid
                  :node/tag-refs   tag-refs
                  :node/updated-at (now)}]

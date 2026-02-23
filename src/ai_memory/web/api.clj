@@ -210,13 +210,11 @@
 (defn reinforce [conn cfg req]
   (let [body           (:body-params req)
         reinforcements (:reinforcements body)
-        factor         (or (:reinforcement-factor cfg) 0.5)
-        db             (db/db conn)
-        tick           (db/current-tick db)]
+        factor         (or (:reinforcement-factor cfg) 0.5)]
     {:status 200
      :body   (let [results (mapv (fn [{:keys [id score]}]
                                    (let [delta (* score factor)]
-                                     (node/reinforce-weight conn id delta tick)
+                                     (node/reinforce-weight conn id delta)
                                      {:id id :score score :delta delta}))
                                  reinforcements)]
                {:reinforced (count results)
@@ -227,7 +225,7 @@
 (defn- link-blob-dir!
   "Links blob-dir to an existing node."
   [conn eid blob-dir]
-  @(d/transact conn [[:db/add eid :node/blob-dir blob-dir]]))
+  (db/transact! conn [[:db/add eid :node/blob-dir blob-dir]]))
 
 ;; --- Remember (nodes + session summary) ---
 
@@ -252,12 +250,10 @@
               (node/update-tag-refs conn eid tag-refs))))
       (let [tag-strs (cond-> ["session"]
                        project (conj project))
-            tag-refs (tag-resolve/resolve-tags conn tag-strs)
-            tick     (db/current-tick db)]
+            tag-refs (tag-resolve/resolve-tags conn tag-strs)]
         (node/create-node conn cfg
           {:content    session-summary
            :tag-refs   tag-refs
-           :tick       tick
            :session-id session-id})))))
 
 (defn remember [conn cfg req]
@@ -321,7 +317,6 @@
           blob-node (node/create-node conn cfg
                       {:content   (:summary body)
                        :tag-refs  tag-refs
-                       :tick      (db/current-tick (db/db conn))
                        :blob-dir  blob-dir})]
       {:status 201
        :body   {:blob-dir blob-dir
@@ -469,7 +464,6 @@
                                (extract-first-user-prompt messages)
                                "Session conversation")
                :tag-refs   tag-refs
-               :tick       (db/current-tick db)
                :blob-dir   blob-dir
                :session-id session-id})))
 
@@ -571,10 +565,9 @@
                              (str "continuation of " prev-session-id) project))
                 new-db   (db/db conn)
                 new-eid  (find-session-fact new-db session-id)
-                tick     (db/current-tick new-db)
                 prev-dir (:node/blob-dir (d/pull new-db [:node/blob-dir] prev-eid))]
             ;; Create typed continuation edge: new → prev
-            (edge/find-or-create-edge conn new-eid prev-eid 0.5 tick
+            (edge/find-or-create-edge conn new-eid prev-eid 0.5
               {:type :continuation})
             {:status 200
              :body   (cond-> {:status "linked" :edge-created true}
@@ -615,8 +608,7 @@
           (let [chain (traverse-continuation-chain db eid 10)]
             ;; Strengthen first edge in chain to max weight
             (when (and strengthen (seq chain))
-              (let [{:keys [edge-id]} (first chain)
-                    tick (db/current-tick db)]
-                (edge/strengthen conn edge-id 10.0 tick)))
+              (let [{:keys [edge-id]} (first chain)]
+                (edge/strengthen conn edge-id 10.0)))
             {:status 200
              :body   {:chain (mapv #(dissoc % :eid) chain)}}))))))

@@ -56,7 +56,7 @@
     (let [a (create-test-node! *conn* "Clojure is a Lisp")
           b (create-test-node! *conn* "Clojure runs on JVM")
           c (create-test-node! *conn* "Clojure has immutable data")]
-      (#'write/create-batch-edges *conn* [a b c] 1)
+      (#'write/create-batch-edges *conn* [a b c])
       (let [edges (all-edges *conn*)]
         (is (= 6 (count edges)))
         (is (some? (edges-between *conn* a b)))
@@ -69,7 +69,7 @@
 (deftest batch-edges-single-node-test
   (testing "single node creates no edges"
     (let [a (create-test-node! *conn* "Solo node")]
-      (#'write/create-batch-edges *conn* [a] 1)
+      (#'write/create-batch-edges *conn* [a])
       (is (= 0 (count (all-edges *conn*)))))))
 
 (deftest context-edges-test
@@ -79,7 +79,7 @@
           c (create-test-node! *conn* "Third fact")
           entries [[a] [b]]
           opts {:association-factor 0.7 :min-association-weight 0.05}
-          cnt (#'write/create-context-edges *conn* entries 2 [c] 3 opts)]
+          cnt (#'write/create-context-edges *conn* entries 2 [c] opts)]
       (is (= 2 (:edges cnt)))
       (is (some? (edges-between *conn* c b)))
       (is (some? (edges-between *conn* c a)))
@@ -92,7 +92,7 @@
           c    (create-test-node! *conn* "New fact")
           entries [[a] [] [] [] []]
           opts {:association-factor 0.7 :min-association-weight 0.05}]
-      (#'write/create-context-edges *conn* entries 5 [c] 6 opts)
+      (#'write/create-context-edges *conn* entries 5 [c] opts)
       (let [db       (d/db *conn*)
             edge-id  (edge/find-edge-between db c a)
             edge-ent (d/pull db [:edge/weight] [:edge/id edge-id])]
@@ -106,7 +106,7 @@
           c (create-test-node! *conn* "Recent fact")
           entries (vec (cons [a] (repeat 19 [])))
           opts {:association-factor 0.7 :min-association-weight 0.05}]
-      (#'write/create-context-edges *conn* entries 20 [c] 21 opts)
+      (#'write/create-context-edges *conn* entries 20 [c] opts)
       (is (= 0 (count (all-edges *conn*)))))))
 
 (deftest different-contexts-no-edges-test
@@ -114,15 +114,15 @@
     (let [_a (create-test-node! *conn* "Context A fact")
           b  (create-test-node! *conn* "Context B fact")
           opts {:association-factor 0.7 :min-association-weight 0.05}]
-      (#'write/create-context-edges *conn* [] 0 [b] 1 opts)
+      (#'write/create-context-edges *conn* [] 0 [b] opts)
       (is (= 0 (count (all-edges *conn*)))))))
 
 (deftest edge-dedup-strengthens-test
   (testing "find-or-create-edge strengthens existing edge instead of duplicating"
     (let [a (create-test-node! *conn* "Node A")
           b (create-test-node! *conn* "Node B")]
-      (edge/find-or-create-edge *conn* a b 0.5 1)
-      (edge/find-or-create-edge *conn* a b 0.3 2)
+      (edge/find-or-create-edge *conn* a b 0.5)
+      (edge/find-or-create-edge *conn* a b 0.3)
       (let [edges (all-edges *conn*)]
         (is (= 1 (count edges)))
         (is (== 0.8 (:edge/weight (first edges))))))))
@@ -135,32 +135,35 @@
       (let [ctx       (#'write/get-context "test-ctx")
             entries   (:entries ctx)
             opts      {:association-factor 0.7 :min-association-weight 0.05}
-            cnt       (#'write/create-context-edges *conn* entries 1 [b] 2 opts)]
+            cnt       (#'write/create-context-edges *conn* entries 1 [b] opts)]
         (is (= 1 (:edges cnt)))
         (is (some? (edges-between *conn* b a)))
         (is (nil? (edges-between *conn* a b)))))))
 
-(deftest tick-increments-test
-  (testing "global tick increments on each call"
+(deftest tick-increments-on-transact-test
+  (testing "global tick increments on every db/transact!"
     (is (= 0 (db/current-tick (d/db *conn*))))
-    (let [t1 (db/increment-tick! *conn*)
-          t2 (db/increment-tick! *conn*)
-          t3 (db/increment-tick! *conn*)]
-      (is (= 1 t1))
-      (is (= 2 t2))
-      (is (= 3 t3))
-      (is (= 3 (db/current-tick (d/db *conn*)))))))
+    (db/transact! *conn* [])
+    (is (= 1 (db/current-tick (d/db *conn*))))
+    (db/transact! *conn* [])
+    (db/transact! *conn* [])
+    (is (= 3 (db/current-tick (d/db *conn*))))))
 
 ;; --- Global context tests ---
+
+(defn- set-tick!
+  "Sets global tick to a specific value (for test setup)."
+  [conn value]
+  @(d/transact conn [{:db/id :tick/singleton :tick/value value}]))
 
 (deftest global-edges-link-to-recent-nodes-test
   (testing ":global creates unidirectional edges to recent nodes from DB"
     (let [a    (create-test-node! *conn* "Old fact" 8)
           b    (create-test-node! *conn* "Another old fact" 9)
           c    (create-test-node! *conn* "New fact")
-          tick 10
+          _    (set-tick! *conn* 10)
           opts {:association-factor 0.7 :min-association-weight 0.05}
-          cnt  (#'write/create-global-edges *conn* tick [c] opts)]
+          cnt  (#'write/create-global-edges *conn* [c] opts)]
       ;; c→a (Δ=2, w=0.49) and c→b (Δ=1, w=0.7)
       (is (= 2 (:edges cnt)))
       (is (some? (edges-between *conn* c a)))
@@ -174,9 +177,9 @@
     (let [a    (create-test-node! *conn* "Distant fact" 5)
           b    (create-test-node! *conn* "Close fact" 9)
           c    (create-test-node! *conn* "New fact")
-          tick 10
+          _    (set-tick! *conn* 10)
           opts {:association-factor 0.7 :min-association-weight 0.05}]
-      (#'write/create-global-edges *conn* tick [c] opts)
+      (#'write/create-global-edges *conn* [c] opts)
       (let [db      (d/db *conn*)
             edge-ca (d/pull db [:edge/weight] [:edge/id (edges-between *conn* c a)])
             edge-cb (d/pull db [:edge/weight] [:edge/id (edges-between *conn* c b)])]
@@ -192,9 +195,9 @@
     (let [;; max-delta for factor=0.7, min=0.05 is floor(log(0.05)/log(0.7)) = 8
           old  (create-test-node! *conn* "Very old fact" 0)
           c    (create-test-node! *conn* "New fact")
-          tick 10
+          _    (set-tick! *conn* 10)
           opts {:association-factor 0.7 :min-association-weight 0.05}
-          cnt  (#'write/create-global-edges *conn* tick [c] opts)]
+          cnt  (#'write/create-global-edges *conn* [c] opts)]
       ;; Δ=10, 0.7^10 ≈ 0.028 < 0.05 → no edge
       (is (= 0 (:edges cnt)))
       (is (nil? (edges-between *conn* c old))))))
@@ -203,10 +206,10 @@
   (testing ":global does not create self-edges"
     (let [a    (create-test-node! *conn* "Existing fact" 9)
           c    (create-test-node! *conn* "New fact" 10)
-          tick 10
+          _    (set-tick! *conn* 10)
           opts {:association-factor 0.7 :min-association-weight 0.05}]
       ;; c is in node-ids AND in recent (cycle=10 >= min-tick)
-      (#'write/create-global-edges *conn* tick [c] opts)
+      (#'write/create-global-edges *conn* [c] opts)
       ;; should only have c→a, not c→c
       (is (some? (edges-between *conn* c a)))
       (is (nil? (edges-between *conn* c c))))))
@@ -258,10 +261,10 @@
     (let [;; First write: entity "user" + fact, linked by batch edges
           e1 (create-entity-node! *conn* "user" 1)
           f1 (create-test-node! *conn* "user prefers functional style" 1)
-          _ (#'write/create-batch-edges *conn* [e1 f1] 1)
+          _ (#'write/create-batch-edges *conn* [e1 f1])
           ;; Second write: same entity (reused via dedup) + new fact
           f2 (create-test-node! *conn* "user is 31 years old" 2)
-          _ (#'write/create-batch-edges *conn* [e1 f2] 2)]
+          _ (#'write/create-batch-edges *conn* [e1 f2])]
       ;; e1 is hub: connected to both facts
       (is (some? (edges-between *conn* e1 f1)))
       (is (some? (edges-between *conn* f1 e1)))

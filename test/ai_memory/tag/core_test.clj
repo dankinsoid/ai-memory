@@ -32,23 +32,26 @@
       (is (some? e))
       (is (= "clj" (:tag/name e))))))
 
+(def aspect-tag-count (count db/aspect-tags))
+
 (deftest ensure-tag-idempotent-test
   (testing "calling ensure-tag! twice returns same name, no duplicates"
     (let [n1 (tag/ensure-tag! *conn* "clj")
           n2 (tag/ensure-tag! *conn* "clj")]
       (is (= n1 n2))
-      (is (= 1 (count (tag/all-tags (d/db *conn*))))))))
+      (is (= (+ 1 aspect-tag-count)
+             (count (tag/all-tags (d/db *conn*))))))))
 
 (deftest all-tags-test
-  (testing "all-tags returns all created tags"
+  (testing "all-tags returns all created tags (plus seeded aspect tags)"
     (tag/ensure-tag! *conn* "clj")
     (tag/ensure-tag! *conn* "python")
     (tag/ensure-tag! *conn* "pref")
-    (let [tags (tag/all-tags (d/db *conn*))]
-      (is (= 3 (count tags)))
-      (is (= #{"clj" "python" "pref"}
-             (set (map :tag/name tags)))))))
+    (let [tags     (tag/all-tags (d/db *conn*))
+          names    (set (map :tag/name tags))]
+      (is (= (+ 3 aspect-tag-count) (count tags)))
+      (is (every? names ["clj" "python" "pref"])))))
 
-(deftest all-tags-empty-test
-  (testing "all-tags returns empty when no tags exist"
-    (is (empty? (tag/all-tags (d/db *conn*))))))
+(deftest all-tags-only-aspect-test
+  (testing "all-tags returns seeded aspect tags when no user tags created"
+    (is (= aspect-tag-count (count (tag/all-tags (d/db *conn*)))))))

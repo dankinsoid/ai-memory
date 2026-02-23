@@ -334,7 +334,7 @@
                                   [:db/add [:tag/name name] :tag/node-count expected]))))
                       all-names)]
     (when (seq tx-data)
-      @(d/transact conn tx-data))
+      (db-core/transact! conn tx-data))
     {:tags-updated (count tx-data)
      :duration-ms  (/ (double (- (System/nanoTime) start)) 1e6)}))
 

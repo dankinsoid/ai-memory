@@ -3,22 +3,25 @@
 ;; Current read path uses tag taxonomy only (see ADR-009).
 
 (ns ai-memory.graph.edge
-  (:require [datomic.api :as d]))
+  (:require [datomic.api :as d]
+            [ai-memory.db.core :as db]))
 
 (def ^:private max-weight 5.0)
 
 (defn create-edge
   "Creates a weighted edge between two nodes (by entity ID).
    Optional :type for typed edges (e.g. :continuation)."
-  [conn {:keys [from to weight cycle type]}]
-  @(d/transact conn
-     [(cond-> {:db/id       (d/tempid :db.part/user)
-               :edge/id     (d/squuid)
-               :edge/from   from
-               :edge/to     to
-               :edge/weight (or weight 1.0)
-               :edge/cycle  (or cycle 0)}
-        type (assoc :edge/type type))]))
+  [conn {:keys [from to weight type]}]
+  (let [tick (db/next-tick (d/db conn))]
+    (db/transact! conn
+       [(cond-> {:db/id       (d/tempid :db.part/user)
+                 :edge/id     (d/squuid)
+                 :edge/from   from
+                 :edge/to     to
+                 :edge/weight (or weight 1.0)
+                 :edge/cycle  tick}
+          type (assoc :edge/type type))]
+       tick)))
 
 (defn find-edges-from [db from-eid]
   (d/q '[:find [(pull ?e [* {:edge/to [:db/id :node/content]}]) ...]
@@ -57,24 +60,26 @@
 
 (defn strengthen
   "Adds `delta` to edge weight (capped at max-weight) and updates cycle."
-  [conn edge-id delta current-cycle]
+  [conn edge-id delta]
   (let [db (d/db conn)
+        tick (db/next-tick db)
         current-weight (or (:edge/weight (d/pull db [:edge/weight] [:edge/id edge-id])) 0.0)
         new-weight (min (+ current-weight delta) max-weight)]
-    @(d/transact conn
+    (db/transact! conn
        [{:edge/id     edge-id
          :edge/weight new-weight
-         :edge/cycle  current-cycle}])))
+         :edge/cycle  tick}]
+       tick)))
 
 (defn find-or-create-edge
   "Creates edge if not exists, strengthens if it does.
    Optional opts: {:type :continuation} for typed edges."
-  ([conn from-eid to-eid weight current-cycle]
-   (find-or-create-edge conn from-eid to-eid weight current-cycle nil))
-  ([conn from-eid to-eid weight current-cycle opts]
+  ([conn from-eid to-eid weight]
+   (find-or-create-edge conn from-eid to-eid weight nil))
+  ([conn from-eid to-eid weight opts]
    (let [db       (d/db conn)
          existing (find-edge-between db from-eid to-eid)]
      (if existing
-       (strengthen conn existing weight current-cycle)
-       (create-edge conn (cond-> {:from from-eid :to to-eid :weight weight :cycle current-cycle}
+       (strengthen conn existing weight)
+       (create-edge conn (cond-> {:from from-eid :to to-eid :weight weight}
                            (:type opts) (assoc :type (:type opts))))))))

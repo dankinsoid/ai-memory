@@ -44,10 +44,17 @@
 (defn current-tick [db]
   (or (:tick/value (d/pull db [:tick/value] :tick/singleton)) 0))
 
-(defn increment-tick!
-  "Atomically increments global tick. Returns new tick value."
-  [conn]
-  (let [db   (d/db conn)
-        tick (inc (current-tick db))]
-    @(d/transact conn [{:db/id :tick/singleton :tick/value tick}])
-    tick))
+(defn next-tick
+  "Returns current-tick + 1 without writing. Use with transact!."
+  [db]
+  (inc (current-tick db)))
+
+(defn transact!
+  "Wraps d/transact with atomic tick increment.
+   Auto-computes next tick unless provided.
+   Returns deref'd tx-result."
+  ([conn tx-data]
+   (transact! conn tx-data (next-tick (d/db conn))))
+  ([conn tx-data new-tick]
+   @(d/transact conn (conj (vec tx-data)
+                            {:db/id :tick/singleton :tick/value new-tick}))))
