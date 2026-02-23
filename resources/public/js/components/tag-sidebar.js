@@ -9,7 +9,7 @@ function TagItem({ name, count }) {
   return html`
     <div class="tag-item ${isSelected ? 'selected' : ''}"
          onClick=${() => toggleTag(name)}>
-      <div class="tag-checkbox" style="border-color: ${tagColor(name)}">
+      <div class="tag-checkbox" style="border-color: ${tagColor(name)}${isSelected ? `; background: ${tagColor(name)}` : ''}">
         ${CHECK_ICON}
       </div>
       <span class="tag-name" style="color: ${tagColor(name)}">${name}</span>

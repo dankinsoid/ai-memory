@@ -3,6 +3,7 @@ import { useRef, useEffect, useCallback } from 'preact/hooks'
 import { graphLoading, graphFocusNode, graphLayoutRunning, selectedFact, selectFact } from '../lib/store.js'
 import { fetchTopNodes, fetchNeighborhood } from '../lib/api.js'
 import { typeColor, weightColor, truncate } from '../lib/utils.js'
+import { FactDetail } from '../components/fact-detail.js'
 
 // Dynamic imports for graph libraries
 let Graph, Sigma, forceAtlas2, FA2Layout
@@ -96,7 +97,8 @@ export function GraphView() {
         labelColor: { color: '#8b949e' },
         defaultEdgeColor: '#30363d',
         defaultEdgeType: 'line',
-        stagePadding: 40
+        stagePadding: 40,
+        drawNodeHover: () => {}
       })
       sigmaRef.current = sigma
 
@@ -274,6 +276,7 @@ export function GraphView() {
 
   return html`
     <div class="main-layout">
+      <${FactDetail} />
       <div class="graph-container">
         <div ref=${containerRef} class="graph-canvas" />
         <div ref=${tooltipRef} class="graph-tooltip" />
