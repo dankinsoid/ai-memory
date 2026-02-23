@@ -579,3 +579,44 @@
             {:status 200
              :body   (cond-> {:status "linked" :edge-created true}
                        prev-dir (assoc :prev-blob-dir prev-dir))}))))))
+
+(defn- traverse-continuation-chain
+  "Follows :continuation edges backward from session-eid, returns vec of
+   {:eid :session-id :blob-dir :content} in order (immediate prev first)."
+  [db start-eid max-depth]
+  (loop [eid   start-eid
+         chain []
+         depth 0]
+    (if (>= depth max-depth)
+      chain
+      (if-let [edge-data (edge/find-typed-edge-from db eid :continuation)]
+        (let [prev      (:edge/to edge-data)
+              prev-eid  (:db/id prev)]
+          (recur prev-eid
+                 (conj chain {:eid        prev-eid
+                              :session-id (:node/session-id prev)
+                              :blob-dir   (:node/blob-dir prev)
+                              :content    (:node/content prev)
+                              :edge-id    (:edge/id edge-data)
+                              :edge-weight (:edge/weight edge-data)})
+                 (inc depth)))
+        chain))))
+
+(defn session-chain [conn _cfg req]
+  (let [body       (:body-params req)
+        session-id (:session-id body)
+        strengthen (:strengthen body)]
+    (if-not session-id
+      {:status 400 :body {:error "session-id required"}}
+      (let [db  (db/db conn)
+            eid (find-session-fact db session-id)]
+        (if-not eid
+          {:status 200 :body {:chain []}}
+          (let [chain (traverse-continuation-chain db eid 10)]
+            ;; Strengthen first edge in chain to max weight
+            (when (and strengthen (seq chain))
+              (let [{:keys [edge-id]} (first chain)
+                    tick (db/current-tick db)]
+                (edge/strengthen conn edge-id 10.0 tick)))
+            {:status 200
+             :body   {:chain (mapv #(dissoc % :eid) chain)}}))))))

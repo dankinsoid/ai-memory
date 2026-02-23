@@ -38,6 +38,16 @@
          [?e :edge/id ?eid]]
        db from-eid to-eid))
 
+(defn find-typed-edge-from
+  "Finds edge of given type from `from-eid`. Returns {:edge/id, :edge/to {:db/id}, :edge/weight}."
+  [db from-eid edge-type]
+  (d/q '[:find (pull ?e [:edge/id :edge/weight {:edge/to [:db/id :node/content :node/blob-dir :node/session-id]}]) .
+         :in $ ?from-eid ?etype
+         :where
+         [?e :edge/from ?from-eid]
+         [?e :edge/type ?etype]]
+       db from-eid edge-type))
+
 (defn find-all [db]
   (d/q '[:find [(pull ?e [:edge/id :edge/weight :edge/cycle
                           {:edge/from [:db/id]}

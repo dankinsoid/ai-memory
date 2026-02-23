@@ -17,16 +17,29 @@ memory_get_facts({ filters: [{ session_id: "<session-id>" }] })
 
 Extract `[blob: /path/to/dir]` from the fact.
 
-## 2. Read the blob
+## 2. Discover continuation chain
+
+Run the chain discovery script with the **current** session ID (from the SessionStart hook):
+
+```bash
+bb ~/.claude/skills/load/load-chain.bb <current-session-id>
+```
+
+This does two things:
+- **Traverses continuation edges** backward to find all linked previous sessions
+- **Strengthens the edge** to the immediate predecessor (expressing intent to continue)
+
+If a chain is found, read `compact.md` from each previous session blob (newest first). Earlier sessions have progressively less detail — this is by design (compression gradient).
+
+## 3. Read the blob
 
 Read blob directory with Read/Glob:
 
-1. **`meta.edn`** — session metadata and summary.
-2. **`compact.md`** — primary source. Usually sufficient on its own.
-3. **`_current.md`** — last session state. Useful if no compact or need most recent info.
-4. **Named chunks** (`0001-*.md`) — only for detail beyond what compact provides.
+1. **`compact.md`** — primary source. Usually sufficient on its own.
+2. **`_current.md`** — last session state. Useful if no compact or need most recent info.
+3. **Named chunks** (`0001-*.md`) — only for detail beyond what compact provides.
 
-## 3. Resume
+## 4. Resume
 
 - Summarize recovered context, state the source
 - Locate relevant files, proceed with pending work
