@@ -16,7 +16,19 @@
 (def hook-reason (:reason input))
 (def cwd (:cwd input))
 
-;; Only act on clear
+;; Debug log — always write, so we see every invocation
+(let [state-dir (str (System/getenv "HOME") "/.claude/hooks/state")
+      log-file  (str state-dir "/session-end.log")]
+  (fs/create-dirs state-dir)
+  (spit log-file
+        (str (java.time.Instant/now)
+             " | reason=" (pr-str hook-reason)
+             " | session=" session-id
+             " | cwd=" cwd
+             "\n")
+        :append true))
+
+;; Only act on clear (matcher should filter, but double-check)
 (when-not (= hook-reason "clear")
   (System/exit 0))
 
@@ -27,8 +39,16 @@
       state-dir (str (System/getenv "HOME") "/.claude/hooks/state")]
   (when project
     (fs/create-dirs state-dir)
-    (spit (str state-dir "/prev-session-" project ".edn")
-          (pr-str {:session-id session-id
-                   :project    project}))))
+    (let [cache-file (str state-dir "/prev-session-" project ".edn")]
+      (spit cache-file
+            (pr-str {:session-id session-id
+                     :project    project}))
+      ;; Log cache write
+      (spit (str state-dir "/session-end.log")
+            (str (java.time.Instant/now)
+                 " | WROTE cache " cache-file
+                 " | " (pr-str {:session-id session-id :project project})
+                 "\n")
+            :append true))))
 
 (System/exit 0)

@@ -3,8 +3,6 @@
 ;;
 ;; Reads JSONL transcript, computes delta since last sync,
 ;; POSTs to /api/session/sync, saves state (last-uuid + chunk-bytes).
-;; Also writes prev-session cache for continuation linking on /clear.
-;; (SessionEnd hook is unreliable — see github.com/anthropics/claude-code/issues/6428)
 ;;
 ;; State file: ~/.claude/hooks/state/{session-id}.edn
 ;;   {:last-uuid "..." :chunk-bytes 12345}
@@ -96,8 +94,8 @@
                     (pr-str {:last-uuid   (:uuid (last messages))
                              :chunk-bytes chunk-bytes}))
 
-              ;; Write continuation cache so SessionStart (clear) can link sessions.
-              ;; Stop fires after every agent turn, so cache is ready before /clear.
+              ;; Write prev-session cache for continuation linking.
+              ;; /load picks this up to know which session was last active.
               (when-let [project (when cwd (last (str/split cwd #"/")))]
                 (spit (str state-dir "/prev-session-" project ".edn")
                       (pr-str {:session-id session-id

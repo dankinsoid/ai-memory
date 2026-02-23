@@ -5,12 +5,14 @@
 ;;   bb load-chain.bb <session-id>          # traverse continuation chain
 ;;   bb load-chain.bb --blob <blob-dir>     # load specific session blob
 ;;
-;; Chain mode: calls /api/session/chain, strengthens first edge,
-;; fetches compact.md from each session blob via /api/blobs/exec.
+;; Chain mode: checks for prev-session cache files (written by SessionEnd
+;; hook on /clear), creates continuation edges via /api/session/continue,
+;; then calls /api/session/chain to traverse the full chain.
 ;; Blob mode: directly reads compact.md from a specific blob dir.
 
 (require '[cheshire.core :as json]
          '[babashka.http-client :as http]
+         '[babashka.fs :as fs]
          '[clojure.string :as str])
 
 (def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
@@ -100,12 +102,28 @@
     ;; Chain traversal (default)
     flag
     (let [session-id flag
+          ;; Check for prev-session cache files from Stop/SessionEnd hooks.
+          ;; If found, create continuation edge before traversing chain.
+          ;; Skip cache files that reference the current session.
+          state-dir  (str (System/getenv "HOME") "/.claude/hooks/state")
+          _          (doseq [f (fs/glob state-dir "prev-session-*.edn")]
+                       (try
+                         (let [cache   (read-string (slurp (str f)))
+                               project (:project cache)
+                               prev-id (:session-id cache)]
+                           (when (and prev-id project
+                                      (not= prev-id session-id))
+                             (api-post "/api/session/continue"
+                               {:prev_session_id prev-id
+                                :session_id      session-id
+                                :project         project})
+                             (fs/delete f)))
+                         (catch Exception _ nil)))
           result     (api-post "/api/session/chain"
                        {:session_id session-id
                         :strengthen true})
           chain      (:chain result)]
-      (if (empty? chain)
-        (println "No continuation chain found for session" session-id)
+      (if (seq chain)
         (do
           (println "# Session Chain Recovery")
           (println)
@@ -119,7 +137,28 @@
             (print-blob-content blob-dir))
           (println)
           (println "---")
-          (println "Continuation edge strengthened."))))
+          (println "Continuation edge strengthened."))
+        ;; Fallback: no chain found — load most recent session blob from memory
+        (let [resp     (api-post "/api/tags/facts"
+                         {:filters [{:tags ["session"] :sort_by "date" :limit 5}]})
+              facts    (:facts (first (:results resp)))
+              ;; Only facts with blob-dir, skip current session
+              ;; blob-dir uses short UUID prefix (first 8 chars)
+              sid-prefix (subs session-id 0 (min 8 (count session-id)))
+              prev     (->> facts
+                            (filter #(get % (keyword "node/blob-dir")))
+                            (remove #(str/includes?
+                                       (get % (keyword "node/blob-dir"))
+                                       sid-prefix))
+                            first)]
+          (if-let [blob-dir (get prev (keyword "node/blob-dir"))]
+            (do
+              (println "# Session Recovery")
+              (println)
+              (println (str "*Loaded from: " blob-dir "*"))
+              (println)
+              (print-blob-content blob-dir))
+            (println "No previous session found.")))))
 
     :else
     (do (println "Usage: bb load-chain.bb <session-id>")

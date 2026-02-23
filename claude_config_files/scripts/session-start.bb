@@ -1,16 +1,15 @@
 #!/usr/bin/env bb
 ;; SessionStart hook: auto-loads memory context into the session.
 ;;
-;; Fires on: startup, clear, compact (skips resume).
+;; Fires on: startup (skips resume).
 ;; Calls ai-memory HTTP API and outputs formatted context to stdout,
 ;; which becomes a system-reminder visible to the agent.
 ;;
 ;; Loads: preferences, universal facts, project facts, tags overview,
-;; recent sessions, current session (on clear/compact), timestamp.
+;; recent sessions, timestamp. Lightweight — /load for deep recovery.
 
 (require '[cheshire.core :as json]
          '[babashka.http-client :as http]
-         '[babashka.fs :as fs]
          '[clojure.string :as str])
 
 (def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
@@ -37,12 +36,10 @@
 ;; --- Read hook input ---
 
 (def input (json/parse-string (slurp *in*) true))
-(def session-id (:session_id input))
-(def hook-source (:source input))
 (def cwd (:cwd input))
 
 ;; Skip on resume — context already in window
-(when (= hook-source "resume")
+(when (= (:source input) "resume")
   (System/exit 0))
 
 ;; --- Detect project from cwd ---
@@ -52,21 +49,6 @@
     (let [parts (str/split cwd #"/")]
       (last parts))))
 
-;; --- Session continuation (on clear) ---
-
-(def continuation-result
-  (when (and (= hook-source "clear") project-name session-id)
-    (let [state-dir  (str (System/getenv "HOME") "/.claude/hooks/state")
-          cache-file (str state-dir "/prev-session-" project-name ".edn")]
-      (when (fs/exists? cache-file)
-        (let [cache  (read-string (slurp cache-file))
-              result (api-post "/api/session/continue"
-                       {:prev_session_id (:session-id cache)
-                        :session_id      session-id
-                        :project         project-name})]
-          (fs/delete cache-file)
-          result)))))
-
 ;; --- Fetch data from API ---
 
 (def tags-data (api-get "/api/tags" {"limit" "50"}))
@@ -75,11 +57,7 @@
   (cond-> [{:tags ["pref"]}
            {:tags ["universal"]}
            {:tags ["session"] :sort_by "date" :limit 5}]
-    ;; Add project filter if project detected
-    project-name (conj {:tags [project-name]})
-    ;; Add current session on clear/compact
-    (and session-id (#{"clear" "compact"} hook-source))
-    (conj {:session_id session-id})))
+    project-name (conj {:tags [project-name]})))
 
 (def facts-data (api-post "/api/tags/facts" {:filters fact-filters}))
 
@@ -163,12 +141,6 @@
           (fn [r] (= (get-in r [:filter :tags]) [project-name]))
           (str "Project: " project-name)))
 
-      session-section
-      (when (#{"clear" "compact"} hook-source)
-        (format-facts results
-          (fn [r] (some? (get-in r [:filter :session-id])))
-          "Current Session (continued)"))
-
       sessions-section
       (let [session-group (first (filter
                                    (fn [r] (= (get-in r [:filter :tags]) ["session"]))
@@ -181,32 +153,9 @@
       blob-section
       "## Blobs\nUse `memory_read_blob` to explore blob contents."
 
-      continuation-section
-      (when-let [prev-dir (:prev-blob-dir continuation-result)]
-        (let [preview (try
-                        (let [resp (api-post "/api/blobs/exec"
-                                    {:blob_dir prev-dir
-                                     :command  "cat compact.md 2>/dev/null"})
-                              content (:stdout resp)]
-                          (when (and resp
-                                     (zero? (or (:exit-code resp) -1))
-                                     (not (str/blank? content)))
-                            (if (<= (count content) 2000)
-                              content
-                              (str (subs content 0 2000)
-                                   "\n... (truncated, /load for full)"))))
-                        (catch Exception _ nil))]
-          (str "## Continuation\n"
-               "This session continues a previous conversation. Previous blob: " prev-dir
-               (when preview
-                 (str "\n\n### Previous Context\n" preview))
-               "\n\nFor full chain recovery: /load")))
-
       sections (remove nil? [pref-section
                              universal-section
                              project-section
-                             continuation-section
-                             session-section
                              sessions-section
                              blob-section
                              tags-section])]

@@ -14,7 +14,7 @@ Parse ARGUMENTS to determine which session to load:
    ```bash
    bb ~/.claude/skills/load/load-chain.bb <current-session-id>
    ```
-   The current session ID is in SessionStart context. The script follows continuation edges backward through the graph (created by SessionStart hook on /clear).
+   The current session ID is in SessionStart context. The script picks up prev-session cache files (written by SessionEnd on /clear), creates continuation edges, then traverses the chain.
 3. **Free text** (e.g. "сессию где чинили save", "последнюю") → semantic search:
    ```
    memory_get_facts with {query: "<user text>", tags: ["session"], limit: 5, sort_by: "date"}
