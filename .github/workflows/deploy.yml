@@ -1,0 +1,50 @@
+name: Deploy to DigitalOcean
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script_stop: true
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+
+            APP_DIR="/opt/ai-memory"
+            COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+
+            cd "$APP_DIR"
+            git fetch origin main
+            git reset --hard origin/main
+
+            $COMPOSE pull embedding qdrant prometheus grafana
+            $COMPOSE build --parallel app datomic
+            $COMPOSE up -d --remove-orphans
+
+            echo "Waiting for app health..."
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:8080/api/health > /dev/null 2>&1; then
+                echo "App healthy!"
+                break
+              fi
+              [ "$i" -eq 30 ] && echo "Health check timeout" && exit 1
+              sleep 5
+            done
+
+            $COMPOSE ps
+            docker image prune -f
