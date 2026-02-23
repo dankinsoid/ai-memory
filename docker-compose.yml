@@ -40,7 +40,9 @@ services:
       - "127.0.0.1:8090:80"
     volumes:
       - embedding-models:/data
-    command: --model-id nomic-ai/modernbert-embed-base
+    environment:
+      - OMP_NUM_THREADS=1
+    command: --model-id nomic-ai/modernbert-embed-base --max-batch-tokens 4096
     healthcheck:
       test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/80"]
       start_period: 180s
