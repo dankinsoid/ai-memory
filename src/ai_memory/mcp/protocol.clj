@@ -226,15 +226,15 @@
 
 ;; --- Handler dispatch ---
 
-(defn- call-tool [base-url handler-key params]
+(defn- call-tool [cfg handler-key params]
   (case handler-key
-    :explore-tags       (server/handle-explore-tags base-url params)
-    :get-facts          (server/handle-get-facts base-url params)
-    :remember           (server/handle-remember base-url params)
-    :store-file         (server/handle-store-file base-url params)
-    :read-blob          (server/handle-read-blob base-url params)
-    :reinforce          (server/handle-reinforce base-url params)
-    :session            (server/handle-session base-url params)))
+    :explore-tags       (server/handle-explore-tags cfg params)
+    :get-facts          (server/handle-get-facts cfg params)
+    :remember           (server/handle-remember cfg params)
+    :store-file         (server/handle-store-file cfg params)
+    :read-blob          (server/handle-read-blob cfg params)
+    :reinforce          (server/handle-reinforce cfg params)
+    :session            (server/handle-session cfg params)))
 
 ;; --- JSON-RPC method handlers ---
 
@@ -281,12 +281,12 @@
                           (str "\n[exit code: " exit-code "]"))))
     (json/generate-string result)))
 
-(defn- handle-tools-call [base-url id params]
+(defn- handle-tools-call [cfg id params]
   (let [tool-name (:name params)
         arguments (or (:arguments params) {})]
     (if-let [handler-key (get handler-keys tool-name)]
       (let [converted (convert-params handler-key arguments)
-            result    (call-tool base-url handler-key converted)]
+            result    (call-tool cfg handler-key converted)]
         {:jsonrpc "2.0"
          :id      id
          :result  {:content [{:type "text"
@@ -299,15 +299,15 @@
 ;; --- Top-level dispatch ---
 
 (defn make-handler
-  "Returns a request→response fn closed over base-url."
-  [base-url]
+  "Returns a request→response fn closed over cfg {:base-url ... :api-token ...}."
+  [cfg]
   (fn [{:keys [id method params]}]
     (log/debug "MCP request:" method)
     (case method
       "initialize"                (handle-initialize id)
       "notifications/initialized" nil
       "tools/list"                (handle-tools-list id)
-      "tools/call"                (handle-tools-call base-url id params)
+      "tools/call"                (handle-tools-call cfg id params)
       "ping"                      (handle-ping id)
       ;; Unknown method
       (if id

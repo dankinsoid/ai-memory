@@ -4,24 +4,15 @@
             [cheshire.core :as json]
             [clojure.tools.logging :as log]))
 
-(defn- api-get
-  "GET request, returns parsed JSON body."
-  [base-url path query-params]
-  (let [resp (http/get (str base-url path)
-               {:query-params  query-params
-                :as            :json
-                :throw-exceptions false})]
-    (if (<= 200 (:status resp) 299)
-      (:body resp)
-      (do (log/warn "API error" path (:status resp) (:body resp))
-          {:error (str "HTTP " (:status resp))}))))
+(defn- auth-headers [api-token]
+  (when api-token
+    {"Authorization" (str "Bearer " api-token)}))
 
-(defn- api-post
-  "POST request with JSON body, returns parsed JSON body."
-  [base-url path body]
-  (let [resp (http/post (str base-url path)
-               {:content-type    :json
-                :body            (json/generate-string body)
+(defn- api-get
+  [base-url path query-params api-token]
+  (let [resp (http/get (str base-url path)
+               {:query-params    query-params
+                :headers         (auth-headers api-token)
                 :as              :json
                 :throw-exceptions false})]
     (if (<= 200 (:status resp) 299)
@@ -29,33 +20,48 @@
       (do (log/warn "API error" path (:status resp) (:body resp))
           {:error (str "HTTP " (:status resp))}))))
 
-;; --- Tool handlers (each proxies to one HTTP endpoint) ---
+(defn- api-post
+  [base-url path body api-token]
+  (let [resp (http/post (str base-url path)
+               {:content-type    :json
+                :body            (json/generate-string body)
+                :headers         (auth-headers api-token)
+                :as              :json
+                :throw-exceptions false})]
+    (if (<= 200 (:status resp) 299)
+      (:body resp)
+      (do (log/warn "API error" path (:status resp) (:body resp))
+          {:error (str "HTTP " (:status resp))}))))
 
-(defn handle-explore-tags [base-url {:keys [tag-sets limit offset] :or {limit 50 offset 0}}]
+;; --- Tool handlers ---
+;; Each takes {:base-url ... :api-token ...} config map
+
+(defn handle-explore-tags [{:keys [base-url api-token]} {:keys [tag-sets limit offset] :or {limit 50 offset 0}}]
   (if (seq tag-sets)
     {:mode :count
-     :data (:counts (api-post base-url "/api/tags/count" {:tag-sets tag-sets}))}
+     :data (:counts (api-post base-url "/api/tags/count" {:tag-sets tag-sets} api-token))}
     {:mode :browse
-     :data (api-get base-url "/api/tags" {:limit limit :offset offset})}))
+     :data (api-get base-url "/api/tags" {:limit limit :offset offset} api-token)}))
 
-(defn handle-get-facts [base-url {:keys [filters]}]
-  (:results (api-post base-url "/api/tags/facts" {:filters filters})))
+(defn handle-get-facts [{:keys [base-url api-token]} {:keys [filters]}]
+  (:results (api-post base-url "/api/tags/facts" {:filters filters} api-token)))
 
-(defn handle-remember [base-url params]
-  (api-post base-url "/api/remember" params))
+(defn handle-remember [{:keys [base-url api-token]} params]
+  (api-post base-url "/api/remember" params api-token))
 
-(defn handle-store-file [base-url params]
+(defn handle-store-file [{:keys [base-url api-token]} params]
   (:body (http/post (str base-url "/api/blobs/file")
            {:content-type    :json
             :body            (json/generate-string params)
+            :headers         (auth-headers api-token)
             :as              :json
             :throw-exceptions false})))
 
-(defn handle-read-blob [base-url params]
-  (api-post base-url "/api/blobs/exec" params))
+(defn handle-read-blob [{:keys [base-url api-token]} params]
+  (api-post base-url "/api/blobs/exec" params api-token))
 
-(defn handle-reinforce [base-url params]
-  (api-post base-url "/api/reinforce" params))
+(defn handle-reinforce [{:keys [base-url api-token]} params]
+  (api-post base-url "/api/reinforce" params api-token))
 
-(defn handle-session [base-url params]
-  (api-post base-url "/api/session" params))
+(defn handle-session [{:keys [base-url api-token]} params]
+  (api-post base-url "/api/session" params api-token))

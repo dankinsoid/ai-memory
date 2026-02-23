@@ -38,6 +38,7 @@ ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp
 ufw allow 8080/tcp
+ufw allow 3000/tcp
 ufw --force enable
 echo "Firewall:"
 ufw status verbose
@@ -54,10 +55,11 @@ ENV_FILE="$APP_DIR/.env"
 if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" << 'EOF'
 GF_ADMIN_PASSWORD=CHANGE_ME
+API_TOKEN=CHANGE_ME
 EOF
   chown deploy:deploy "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  echo ">>> Edit $ENV_FILE and set GF_ADMIN_PASSWORD"
+  echo ">>> Edit $ENV_FILE and set GF_ADMIN_PASSWORD and API_TOKEN"
 fi
 
 # 8. Swap (2GB safety net)
@@ -84,6 +86,6 @@ echo "First boot takes ~3 min (embedding model download)."
 echo "Check: ssh deploy@$(hostname -I | awk '{print $1}') 'cd /opt/ai-memory && docker compose ps'"
 echo ""
 echo "NEXT STEPS:"
-echo "  1. Edit /opt/ai-memory/.env — set GF_ADMIN_PASSWORD"
+echo "  1. Edit /opt/ai-memory/.env — set GF_ADMIN_PASSWORD and API_TOKEN"
 echo "  2. GitHub secrets: DO_HOST, DO_USER=deploy, DO_SSH_KEY"
 echo "  3. Push to main → auto deploy"

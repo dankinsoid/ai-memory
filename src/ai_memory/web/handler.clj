@@ -7,7 +7,8 @@
             [iapetos.collector.ring :as ring-collector]
             [clojure.walk :as walk]
             [clojure.string :as str]
-            [ai-memory.web.api :as api]))
+            [ai-memory.web.api :as api]
+            [ai-memory.web.mcp :as mcp]))
 
 (defn- normalize-key [k]
   (if (keyword? k)
@@ -31,6 +32,26 @@
                                 x))
                             bp)))
                (handler req))))})
+
+(defn wrap-bearer-auth
+  "Middleware: checks Authorization: Bearer <token>.
+   Skips auth for /api/health and /metrics.
+   When api-token is nil/blank, auth is disabled."
+  [handler api-token]
+  (if (str/blank? api-token)
+    handler
+    (fn [req]
+      (let [path (:uri req)]
+        (if (or (= path "/api/health")
+                (str/starts-with? path "/metrics"))
+          (handler req)
+          (let [auth-header (get-in req [:headers "authorization"])
+                token       (when auth-header
+                              (second (re-matches #"Bearer\s+(.*)" auth-header)))]
+            (if (= token api-token)
+              (handler req)
+              {:status 401
+               :body   {:error "Unauthorized"}})))))))
 
 (defn app [conn cfg]
   (let [handler (ring/ring-handler
@@ -57,7 +78,11 @@
                       ["/session/sync" {:post (fn [req] (api/session-sync conn cfg req))}]
                       ["/session/continue" {:post (fn [req] (api/session-continue conn cfg req))}]
                       ["/session/chain" {:post (fn [req] (api/session-chain conn cfg req))}]
-                      ["/session" {:post (fn [req] (api/session-update conn cfg req))}]]]
+                      ["/session" {:post (fn [req] (api/session-update conn cfg req))}]]
+                     ["/mcp"
+                      ["/sse"     {:get  (mcp/sse-handler {:base-url  (str "http://localhost:" (:port cfg))
+                                                           :api-token (:api-token cfg)})}]
+                      ["/message" {:post (mcp/message-handler)}]]]
                     {:data {:muuntaja   m/instance
                             :middleware [parameters/parameters-middleware
                                     muuntaja/format-middleware
@@ -65,9 +90,9 @@
                   (ring/routes
                     (ring/create-resource-handler {:path "/"})
                     (ring/create-default-handler)))]
-    (if-let [registry (:metrics cfg)]
-      (ring-collector/wrap-metrics handler registry {:path "/metrics"})
-      handler)))
+    (cond-> handler
+      (:metrics cfg)    (ring-collector/wrap-metrics (:metrics cfg) {:path "/metrics"})
+      (:api-token cfg)  (wrap-bearer-auth (:api-token cfg)))))
 
 (defn start [{:keys [port conn cfg]}]
   (jetty/run-jetty (app conn cfg) {:port port :join? false}))

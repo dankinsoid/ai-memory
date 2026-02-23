@@ -21,4 +21,5 @@
      :qdrant-url     (or (System/getenv "QDRANT_URL")
                          "http://localhost:6333")
      :blob-path      (ensure-blob-dir! blob-path)
-     :project-path   (System/getenv "PROJECT_PATH")}))
+     :project-path   (System/getenv "PROJECT_PATH")
+     :api-token      (System/getenv "API_TOKEN")}))
