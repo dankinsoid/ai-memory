@@ -115,6 +115,10 @@
 - [x] Prometheus config
 - [ ] Grafana dashboards (provisioning configured, no dashboards)
 
+## Prompt Engineering (prompt.md)
+- [ ] Add short memory nudge to `session-reminder.bb` (3-5 tags, max 15 words, skip implementation details)
+- [ ] Add targeted CAPS emphasis for 1-2 most violated rules in prompt.md
+
 ## Dev & Build
 - [x] REPL helpers: start/stop/restart (`dev/user.clj`)
 - [x] deps.edn: dev, test, build aliases
