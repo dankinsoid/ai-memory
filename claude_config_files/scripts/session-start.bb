@@ -183,7 +183,24 @@
 
       continuation-section
       (when-let [prev-dir (:prev-blob-dir continuation-result)]
-        (str "## Continuation\nThis session continues a previous conversation. Previous blob: " prev-dir))
+        (let [preview (try
+                        (let [resp (api-post "/api/blobs/exec"
+                                    {:blob_dir prev-dir
+                                     :command  "cat compact.md 2>/dev/null"})
+                              content (:stdout resp)]
+                          (when (and resp
+                                     (zero? (or (:exit-code resp) -1))
+                                     (not (str/blank? content)))
+                            (if (<= (count content) 2000)
+                              content
+                              (str (subs content 0 2000)
+                                   "\n... (truncated, /load for full)"))))
+                        (catch Exception _ nil))]
+          (str "## Continuation\n"
+               "This session continues a previous conversation. Previous blob: " prev-dir
+               (when preview
+                 (str "\n\n### Previous Context\n" preview))
+               "\n\nFor full chain recovery: /load")))
 
       sections (remove nil? [pref-section
                              universal-section

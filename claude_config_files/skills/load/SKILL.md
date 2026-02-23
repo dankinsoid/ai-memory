@@ -5,43 +5,33 @@ description: Deep recovery from a previous session — read blob content and res
 
 # Load Session
 
-## 1. Find the session
+## Resolve target session
 
-SessionStart context already has "Recent Sessions" with `[blob: dir-name]` — check there first.
+Parse ARGUMENTS to determine which session to load:
 
-If not in context (older session, different project):
+1. **Blob dir** (matches `*_session-*`) → use directly
+2. **No args / "latest" / "последн"** → pick first `[blob: ...]` from "Recent Sessions" in SessionStart context
+3. **Free text** (e.g. "сессию где чинили save") → semantic search:
+   ```
+   memory_get_facts with {query: "<user text>", tags: ["session"], limit: 5, sort_by: "date"}
+   ```
+   Pick best match, extract its `[blob: dir-name]`.
 
-```
-memory_get_facts({ filters: [{ session_id: "<session-id>" }] })
-```
-
-Extract `[blob: dir-name]` from the fact.
-
-## 2. Discover continuation chain
-
-Run the chain discovery script with the **current** session ID (from the SessionStart hook):
+## Load content
 
 ```bash
-bb ~/.claude/skills/load/load-chain.bb <current-session-id>
+bb ~/.claude/skills/load/load-chain.bb --blob <blob-dir>
 ```
 
-This does two things:
-- **Traverses continuation edges** backward to find all linked previous sessions
-- **Strengthens the edge** to the immediate predecessor (expressing intent to continue)
+Script outputs: compact summary + last conversation turns.
 
-If a chain is found, read `compact.md` from each previous session blob (newest first). Earlier sessions have progressively less detail — this is by design (compression gradient).
+## After loading
 
-## 3. Read the blob
+**Do NOT announce what you loaded.** Do not say "here's what I recovered" or "what should we do next?".
 
-Use `memory_read_blob` to read blob contents:
-
-1. **`memory_read_blob({blob_dir: "...", command: "cat compact.md"})`** — primary source. Usually sufficient on its own.
-2. **`memory_read_blob({blob_dir: "...", command: "cat _current.md"})`** — last session state. Useful if no compact or need most recent info.
-3. **`memory_read_blob({blob_dir: "...", command: "ls *.md"})`** — discover available chunks.
-4. **Named chunks** (`0001-*.md`) — only for detail beyond what compact provides. Read with `cat`.
-
-## 4. Resume
-
-- Summarize recovered context, state the source
-- Locate relevant files, proceed with pending work
-- If essential info missing — ask one focused question
+Instead:
+- Read the output silently
+- Understand where the previous conversation left off
+- Continue naturally — as if picking up mid-conversation
+- If the previous session ended with a pending task or question, address it directly
+- If context is insufficient to continue, ask one focused question about the specific gap

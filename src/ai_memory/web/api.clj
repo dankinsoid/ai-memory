@@ -568,9 +568,13 @@
     (if-not (and prev-session-id session-id)
       {:status 400 :body {:error "prev-session-id and session-id required"}}
       (let [db       (db/db conn)
-            prev-eid (find-session-fact db prev-session-id)]
+            prev-eid (or (find-session-fact db prev-session-id)
+                         ;; Self-heal: create prev session if Stop hook hasn't synced yet
+                         (do (upsert-session-fact! conn cfg prev-session-id
+                               (str "session " (subs prev-session-id 0 8)) project)
+                             (find-session-fact (db/db conn) prev-session-id)))]
         (if-not prev-eid
-          {:status 200 :body {:status "prev-not-found"}}
+          {:status 500 :body {:error "failed to create prev session fact"}}
           (let [;; Create new session fact if it doesn't exist yet
                 _        (when-not (find-session-fact db session-id)
                            (upsert-session-fact! conn cfg session-id

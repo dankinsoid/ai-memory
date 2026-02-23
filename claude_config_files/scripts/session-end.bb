@@ -13,11 +13,11 @@
 
 (def input (json/parse-string (slurp *in*) true))
 (def session-id (:session_id input))
-(def hook-source (:source input))
+(def hook-reason (:reason input))
 (def cwd (:cwd input))
 
 ;; Only act on clear
-(when-not (= hook-source "clear")
+(when-not (= hook-reason "clear")
   (System/exit 0))
 
 (when-not session-id
