@@ -5,7 +5,7 @@
             [clojure.string :as str]
             [clojure.tools.logging :as log]))
 
-(def protocol-version "2024-11-05")
+(def protocol-version "2025-03-26")
 
 (def server-info
   {:name    "ai-memory"

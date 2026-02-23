@@ -88,10 +88,9 @@
                       ["/session/continue" {:post (fn [req] (api/session-continue conn cfg req))}]
                       ["/session/chain" {:post (fn [req] (api/session-chain conn cfg req))}]
                       ["/session" {:post (fn [req] (api/session-update conn cfg req))}]]
-                     ["/mcp"
-                      ["/sse"     {:get  (mcp/sse-handler {:base-url  (str "http://localhost:" (:port cfg))
-                                                           :api-token (:api-token cfg)})}]
-                      ["/message" {:post (mcp/message-handler)}]]]
+                     ["/mcp" {:handler (mcp/streamable-handler
+                                          {:base-url  (str "http://localhost:" (:port cfg))
+                                           :api-token (:api-token cfg)})}]]
                     {:data {:muuntaja   m/instance
                             :middleware [parameters/parameters-middleware
                                     muuntaja/format-middleware
