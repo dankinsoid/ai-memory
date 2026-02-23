@@ -10,8 +10,12 @@ description: Deep recovery from a previous session — read blob content and res
 Parse ARGUMENTS to determine which session to load:
 
 1. **Blob dir** (matches `*_session-*`) → use directly
-2. **No args / "latest" / "последн"** → pick first `[blob: ...]` from "Recent Sessions" in SessionStart context
-3. **Free text** (e.g. "сессию где чинили save") → semantic search:
+2. **No args** → traverse continuation chain from current session:
+   ```bash
+   bb ~/.claude/skills/load/load-chain.bb <current-session-id>
+   ```
+   The current session ID is in SessionStart context. The script follows continuation edges backward through the graph (created by SessionStart hook on /clear).
+3. **Free text** (e.g. "сессию где чинили save", "последнюю") → semantic search:
    ```
    memory_get_facts with {query: "<user text>", tags: ["session"], limit: 5, sort_by: "date"}
    ```
@@ -19,8 +23,14 @@ Parse ARGUMENTS to determine which session to load:
 
 ## Load content
 
+For specific blob:
 ```bash
 bb ~/.claude/skills/load/load-chain.bb --blob <blob-dir>
+```
+
+For continuation chain (no args):
+```bash
+bb ~/.claude/skills/load/load-chain.bb <current-session-id>
 ```
 
 Script outputs: compact summary + last conversation turns.
