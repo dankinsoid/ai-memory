@@ -178,15 +178,8 @@
       tags-section    (format-tags tags-data)
       timestamp       (format-timestamp)
 
-      blob-location
-      (let [home     (System/getenv "HOME")
-            settings (try (json/parse-string (slurp (str home "/.claude/settings.json")) true)
-                          (catch Exception _ nil))
-            mcp-env  (get-in settings [:mcpServers :ai-memory :env])
-            mount    (or (:AI_MEMORY_BLOB_MOUNT mcp-env)
-                        (System/getenv "AI_MEMORY_BLOB_MOUNT"))]
-        (str "## Blobs\nAll blob directories are under `"
-             (or mount "~/.ai-memory/blobs") "/`"))
+      blob-section
+      "## Blobs\nUse `memory_read_blob` to explore blob contents."
 
       continuation-section
       (when-let [prev-dir (:prev-blob-dir continuation-result)]
@@ -198,7 +191,7 @@
                              continuation-section
                              session-section
                              sessions-section
-                             blob-location
+                             blob-section
                              tags-section])]
 
   (when (seq sections)

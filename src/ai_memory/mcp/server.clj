@@ -51,6 +51,9 @@
             :as              :json
             :throw-exceptions false})))
 
+(defn handle-read-blob [base-url params]
+  (api-post base-url "/api/blobs/exec" params))
+
 (defn handle-reinforce [base-url params]
   (api-post base-url "/api/reinforce" params))
 

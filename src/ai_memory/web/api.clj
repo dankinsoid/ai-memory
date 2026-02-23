@@ -7,6 +7,7 @@
             [ai-memory.tag.resolve :as tag-resolve]
             [ai-memory.decay.core :as decay]
             [ai-memory.blob.store :as blob-store]
+            [ai-memory.blob.exec :as blob-exec]
             [datomic.api :as d]
             [clojure.string :as str])
   (:import [java.util Date UUID]
@@ -284,6 +285,17 @@
       (if-let [meta (blob-store/read-meta base blob-dir)]
         {:status 200 :body meta}
         {:status 404 :body {:error (str "Blob not found: " blob-dir)}}))))
+
+(defn exec-blob [_conn cfg req]
+  (let [body     (:body-params req)
+        blob-dir (:blob-dir body)
+        command  (:command body)]
+    (if-not (and blob-dir command)
+      {:status 400 :body {:error "blob_dir and command required"}}
+      (try
+        {:status 200 :body (blob-exec/exec-blob cfg blob-dir command)}
+        (catch Exception e
+          {:status 400 :body {:error (.getMessage e)}})))))
 
 (defn store-file [conn cfg req]
   (let [body     (:body-params req)

@@ -11,7 +11,6 @@
          '[babashka.http-client :as http])
 
 (def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
-(def blob-mount (or (System/getenv "AI_MEMORY_BLOB_MOUNT") "~/.ai-memory/blobs"))
 
 (defn api-post [path body]
   (try
@@ -50,7 +49,7 @@
         (println)
         (doseq [{:keys [blob-dir]} chain
                 :when blob-dir]
-          (println (str "- " blob-mount "/" blob-dir "/compact.md")))
+          (println (str "- memory_read_blob({blob_dir: \"" blob-dir "\", command: \"cat compact.md\"})")))
         (println)
         (println "Edge to immediate predecessor strengthened to max weight.")))))
 

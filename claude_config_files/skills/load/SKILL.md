@@ -7,7 +7,7 @@ description: Deep recovery from a previous session — read blob content and res
 
 ## 1. Find the session
 
-SessionStart context already has "Recent Sessions" with `[blob: /path]` — check there first.
+SessionStart context already has "Recent Sessions" with `[blob: dir-name]` — check there first.
 
 If not in context (older session, different project):
 
@@ -15,7 +15,7 @@ If not in context (older session, different project):
 memory_get_facts({ filters: [{ session_id: "<session-id>" }] })
 ```
 
-Extract `[blob: /path/to/dir]` from the fact.
+Extract `[blob: dir-name]` from the fact.
 
 ## 2. Discover continuation chain
 
@@ -33,11 +33,12 @@ If a chain is found, read `compact.md` from each previous session blob (newest f
 
 ## 3. Read the blob
 
-Read blob directory with Read/Glob:
+Use `memory_read_blob` to read blob contents:
 
-1. **`compact.md`** — primary source. Usually sufficient on its own.
-2. **`_current.md`** — last session state. Useful if no compact or need most recent info.
-3. **Named chunks** (`0001-*.md`) — only for detail beyond what compact provides.
+1. **`memory_read_blob({blob_dir: "...", command: "cat compact.md"})`** — primary source. Usually sufficient on its own.
+2. **`memory_read_blob({blob_dir: "...", command: "cat _current.md"})`** — last session state. Useful if no compact or need most recent info.
+3. **`memory_read_blob({blob_dir: "...", command: "ls *.md"})`** — discover available chunks.
+4. **Named chunks** (`0001-*.md`) — only for detail beyond what compact provides. Read with `cat`.
 
 ## 4. Resume
 

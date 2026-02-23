@@ -82,6 +82,8 @@
 - [x] Compact text renderers for blob list and meta
 - [x] Source indicator in fact rendering (`[src: ...]`)
 - [x] Tests (12 tests, 25 assertions)
+- [x] `memory_read_blob` MCP tool — execute bash in blob dir via ProcessBuilder
+- [x] Removed SSHFS preflight hook and direct blob path exposure
 
 ## Project Identity
 - [ ] Stable project ID via git root commit hash (`git rev-list --max-parents=0 HEAD`)

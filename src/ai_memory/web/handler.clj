@@ -52,6 +52,7 @@
                       ["/tags/facts" {:post (fn [req] (api/get-facts conn cfg req))}]
                       ["/blobs" {:get (fn [req] (api/list-blobs conn cfg req))}]
                       ["/blobs/read" {:post (fn [req] (api/read-blob conn cfg req))}]
+                      ["/blobs/exec" {:post (fn [req] (api/exec-blob conn cfg req))}]
                       ["/blobs/file" {:post (fn [req] (api/store-file conn cfg req))}]
                       ["/session/sync" {:post (fn [req] (api/session-sync conn cfg req))}]
                       ["/session/continue" {:post (fn [req] (api/session-continue conn cfg req))}]

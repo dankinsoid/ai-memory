@@ -84,7 +84,11 @@ Bad: `explored dedup strategies → chose normalized prose → designed prompt �
 
 ## Blobs (detailed content)
 
-Facts with `[blob: dir-name]` reference blob directories. Full path: `{blobs-location}/{dir-name}`
+Facts with `[blob: dir-name]` reference blob directories. Read with `memory_read_blob`:
+
+`memory_read_blob({ blob_dir: "dir-name", command: "cat compact.md" })`
+
+Common: `ls` (list files), `cat compact.md` (summary), `cat _current.md` (latest), `head -50 0001-*.md` (preview).
 
 ## Mid-Session Retrieval
 

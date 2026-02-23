@@ -85,6 +85,15 @@
                                :path    {:type ["string" "null"] :description "Absolute file path (server reads from disk)"}}
                   :required   ["title" "project" "summary" "tags"]}}
 
+   {:name        "memory_read_blob"
+    :description "Execute a bash command inside a blob directory. Use to read blob contents (ls, cat, head, grep). Returns stdout, stderr, and exit code."
+    :inputSchema {:type       "object"
+                  :properties {:blob_dir {:type "string"
+                                          :description "Blob directory name (from [blob: dir-name] in facts)"}
+                               :command  {:type "string"
+                                          :description "Bash command to execute (e.g. 'cat compact.md', 'ls -la', 'head -20 _current.md')"}}
+                  :required   ["blob_dir" "command"]}}
+
    {:name        "memory_reinforce"
     :description "Reinforce or weaken facts based on their usefulness. Call after completing a task to provide learning signal. Score: -1 (harmful) to 1 (essential). Only include facts that had direct impact — skip irrelevant ones."
     :inputSchema {:type       "object"
@@ -203,6 +212,8 @@
                       :type    (:type params)
                       :content (:content params)
                       :path    (:path params)}
+    :read-blob       {:blob-dir (:blob_dir params)
+                      :command  (:command params)}
     :reinforce       {:reinforcements (mapv (fn [r] {:id (:id r) :score (:score r)})
                                             (:reinforcements params))
                       :session-id     (:session_id params)}
@@ -221,6 +232,7 @@
     :get-facts          (server/handle-get-facts base-url params)
     :remember           (server/handle-remember base-url params)
     :store-file         (server/handle-store-file base-url params)
+    :read-blob          (server/handle-read-blob base-url params)
     :reinforce          (server/handle-reinforce base-url params)
     :session            (server/handle-session base-url params)))
 
@@ -251,6 +263,7 @@
    "memory_get_facts"            :get-facts
    "memory_remember"             :remember
    "memory_store_file"           :store-file
+   "memory_read_blob"            :read-blob
    "memory_reinforce"            :reinforce
    "memory_session"              :session})
 
@@ -260,6 +273,12 @@
                     :browse (render-tag-list (:data result))
                     :count  (render-counts (:data result)))
     :get-facts   (render-filter-results result)
+    :read-blob   (let [{:keys [exit-code stdout stderr]} result]
+                   (str (when (and stderr (not (str/blank? stderr)))
+                          (str "STDERR:\n" stderr "\n"))
+                        (or stdout "")
+                        (when (and exit-code (not= 0 exit-code))
+                          (str "\n[exit code: " exit-code "]"))))
     (json/generate-string result)))
 
 (defn- handle-tools-call [base-url id params]
