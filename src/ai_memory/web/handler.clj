@@ -48,7 +48,9 @@
           (let [auth-header (get-in req [:headers "authorization"])
                 bearer      (when auth-header
                               (second (re-matches #"Bearer\s+(.*)" auth-header)))
-                query-token (get-in req [:query-params "token"])
+                query-token (some->> (:query-string req)
+                                    (re-find #"(?:^|&)token=([^&]+)")
+                                    second)
                 token       (or bearer query-token)]
             (if (= token api-token)
               (handler req)
