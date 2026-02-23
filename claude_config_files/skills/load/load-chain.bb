@@ -16,12 +16,14 @@
          '[clojure.string :as str])
 
 (def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
+(def api-token (System/getenv "AI_MEMORY_TOKEN"))
 
 (defn api-post [path body]
   (try
     (let [resp (http/post (str base-url path)
-                {:headers {"Content-Type" "application/json"
-                           "Accept"       "application/json"}
+                {:headers (cond-> {"Content-Type" "application/json"
+                                   "Accept"       "application/json"}
+                            api-token (assoc "Authorization" (str "Bearer " api-token)))
                  :body    (json/generate-string body)})]
       (json/parse-string (:body resp) true))
     (catch Exception e

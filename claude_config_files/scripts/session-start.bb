@@ -13,13 +13,18 @@
          '[clojure.string :as str])
 
 (def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
+(def api-token (System/getenv "AI_MEMORY_TOKEN"))
+
+(defn- auth-headers []
+  (cond-> {"Accept" "application/json"}
+    api-token (assoc "Authorization" (str "Bearer " api-token))))
 
 ;; --- HTTP helpers ---
 
 (defn api-get [path & [params]]
   (try
     (let [resp (http/get (str base-url path)
-                 (cond-> {:headers {"Accept" "application/json"}}
+                 (cond-> {:headers (auth-headers)}
                    params (assoc :query-params params)))]
       (json/parse-string (:body resp) true))
     (catch Exception _ nil)))
@@ -27,8 +32,8 @@
 (defn api-post [path body]
   (try
     (let [resp (http/post (str base-url path)
-                 {:headers {"Content-Type" "application/json"
-                            "Accept"       "application/json"}
+                 {:headers (merge (auth-headers)
+                                  {"Content-Type" "application/json"})
                   :body    (json/generate-string body)})]
       (json/parse-string (:body resp) true))
     (catch Exception _ nil)))

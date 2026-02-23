@@ -51,6 +51,8 @@
         (extract-messages entries)))
     (extract-messages entries)))
 
+(def api-token (System/getenv "AI_MEMORY_TOKEN"))
+
 (let [input      (json/parse-string (slurp *in*) true)
       session-id (:session_id input)
       cwd        (:cwd input)
@@ -71,7 +73,8 @@
             (let [response
                   (try
                     (http/post (str base-url "/api/session/sync")
-                               {:headers {"Content-Type" "application/json"}
+                               {:headers (cond-> {"Content-Type" "application/json"}
+                                           api-token (assoc "Authorization" (str "Bearer " api-token)))
                                 :body    (json/generate-string
                                            {:session_id session-id
                                             :cwd        cwd
