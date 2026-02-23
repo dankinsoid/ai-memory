@@ -43,7 +43,9 @@
     (fn [req]
       (let [path (:uri req)]
         (if (or (= path "/api/health")
-                (str/starts-with? path "/metrics"))
+                (str/starts-with? path "/metrics")
+                (not (or (str/starts-with? path "/api/")
+                         (str/starts-with? path "/mcp/"))))
           (handler req)
           (let [auth-header (get-in req [:headers "authorization"])
                 token       (when auth-header
