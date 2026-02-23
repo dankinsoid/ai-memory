@@ -65,7 +65,7 @@
                   (ring/router
                     [["/" {:get (fn [_] (-> (resp/resource-response "public/index.html")
                                          (resp/content-type "text/html")))}]
-                     ["/api"
+                     ["/api" {:middleware [wrap-normalize-keys]}
                       ["/health" {:get (fn [_] {:status 200 :body {:status "ok"}})}]
                       ["/stats" {:get (fn [req] (api/get-stats conn req))}]
                       ["/graph" {:get (fn [req] (api/get-graph conn req))}]
@@ -94,8 +94,7 @@
                       ["/message" {:post (mcp/message-handler)}]]]
                     {:data {:muuntaja   m/instance
                             :middleware [parameters/parameters-middleware
-                                    muuntaja/format-middleware
-                                    wrap-normalize-keys]}})
+                                        muuntaja/format-middleware]}})
                   (ring/routes
                     (ring/create-resource-handler {:path "/"})
                     (ring/create-default-handler)))]
