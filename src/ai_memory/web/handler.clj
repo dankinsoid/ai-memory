@@ -8,7 +8,8 @@
             [clojure.walk :as walk]
             [clojure.string :as str]
             [ai-memory.web.api :as api]
-            [ai-memory.web.mcp :as mcp]))
+            [ai-memory.web.mcp :as mcp]
+            [ring.util.response :as resp]))
 
 (defn- normalize-key [k]
   (if (keyword? k)
@@ -61,7 +62,9 @@
 (defn app [conn cfg]
   (let [handler (ring/ring-handler
                   (ring/router
-                    [["/api"
+                    [["/" {:get (fn [_] (-> (resp/resource-response "public/index.html")
+                                         (resp/content-type "text/html")))}]
+                     ["/api"
                       ["/health" {:get (fn [_] {:status 200 :body {:status "ok"}})}]
                       ["/stats" {:get (fn [req] (api/get-stats conn req))}]
                       ["/graph" {:get (fn [req] (api/get-graph conn req))}]
