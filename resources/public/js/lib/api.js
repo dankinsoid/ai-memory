@@ -1,7 +1,14 @@
 const BASE = '/api'
+const TOKEN = new URLSearchParams(window.location.search).get('token')
+
+function authHeaders() {
+  const h = {}
+  if (TOKEN) h['Authorization'] = `Bearer ${TOKEN}`
+  return h
+}
 
 async function get(path) {
-  const res = await fetch(BASE + path)
+  const res = await fetch(BASE + path, { headers: authHeaders() })
   if (!res.ok) throw new Error(`GET ${path}: ${res.status}`)
   return res.json()
 }
@@ -9,7 +16,7 @@ async function get(path) {
 async function post(path, body) {
   const res = await fetch(BASE + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body)
   })
   if (!res.ok) throw new Error(`POST ${path}: ${res.status}`)

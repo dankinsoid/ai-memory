@@ -6,7 +6,7 @@ grafana:
 	open http://$(HOST):3000
 
 app:
-	open http://$(HOST):8080
+	open "http://$(HOST):8080?token=$(TOKEN)"
 
 prometheus:
 	ssh -f -N -L 9090:localhost:9090 -i $(SSH_KEY) root@$(HOST)

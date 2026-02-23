@@ -43,13 +43,13 @@
     (fn [req]
       (let [path (:uri req)]
         (if (or (= path "/api/health")
-                (str/starts-with? path "/metrics")
-                (not (or (str/starts-with? path "/api/")
-                         (str/starts-with? path "/mcp/"))))
+                (str/starts-with? path "/metrics"))
           (handler req)
           (let [auth-header (get-in req [:headers "authorization"])
-                token       (when auth-header
-                              (second (re-matches #"Bearer\s+(.*)" auth-header)))]
+                bearer      (when auth-header
+                              (second (re-matches #"Bearer\s+(.*)" auth-header)))
+                query-token (get-in req [:query-params "token"])
+                token       (or bearer query-token)]
             (if (= token api-token)
               (handler req)
               {:status  401
