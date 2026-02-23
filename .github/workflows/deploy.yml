@@ -37,12 +37,13 @@ jobs:
             $COMPOSE up -d --remove-orphans
 
             echo "Waiting for app health..."
-            for i in $(seq 1 30); do
+            sleep 15
+            for i in $(seq 1 36); do
               if curl -sf http://localhost:8080/api/health > /dev/null 2>&1; then
-                echo "App healthy!"
+                echo "App healthy after ~$((15 + i * 5))s!"
                 break
               fi
-              [ "$i" -eq 30 ] && echo "Health check timeout" && exit 1
+              [ "$i" -eq 36 ] && echo "Health check timeout" && exit 1
               sleep 5
             done
 
