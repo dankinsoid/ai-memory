@@ -144,21 +144,21 @@
 - [ ] Register in `settings.json` alongside existing `session-reminder.bb`
 
 ## memory-scribe Sub-Agent
-- [ ] Create `claude_config_files/agents/memory-scribe.md` — receives raw candidate observation + brief context
-- [ ] Agent applies 4-filter algorithm: future-agent test, code test, generalization test, moment-of-insight test
-- [ ] Agent formats: sentence ≤15 words, lowercase, imperative if actionable
-- [ ] Agent picks tags: aspect first (pitfall/preference/decision/insight/pattern), then project, then technical
-- [ ] Agent calls `memory_remember`, returns what was saved (or "skipped: reason")
-- [ ] Simplify main agent prompt: "when you notice something non-obvious → pass candidate to memory-scribe"
-- [ ] Add `agents/` to `deploy.bb` copy targets alongside `skills/` and `scripts/`
+- [x] Create `claude_config_files/agents/memory-scribe.md` — receives raw candidate observation + brief context
+- [x] Agent applies 4-filter algorithm: future-agent test, code test, generalization test, moment-of-insight test
+- [x] Agent formats: sentence ≤15 words, lowercase, imperative if actionable
+- [x] Agent picks tags: aspect first (pitfall/preference/decision/insight/pattern), then project, then technical
+- [x] Agent calls `memory_remember`, returns what was saved (or "skipped: reason")
+- [x] Simplify main agent prompt: "when you notice something non-obvious → pass candidate to memory-scribe"
+- [x] Add `agents/` to `deploy.bb` copy targets alongside `skills/` and `scripts/`
 
 ## Prompt Engineering (prompt.md)
-- [ ] Reframe "fact" → "note": rewrite intro as "what's worth telling your future self"
-- [ ] Replace "When to Remember" triggers with 4-filter decision algorithm (future-agent / code / generalization / moment-of-insight tests)
-- [ ] Add save timing rule: "save at moment of insight, not at session end — one note per observation"
-- [ ] Replace "Abstraction Levels" (concrete/pattern/meta) with explicit aspect tag vocabulary: pitfall, preference, decision, insight, pattern — with one example each
-- [ ] Strengthen project-tag: make it step 0 before any tagging, add bad example (project-specific note without project tag)
-- [ ] Expand "Mid-Session Retrieval" triggers: add "before starting a significant subtask" and "when encountering an error" to cover autonomous tool-call chains
+- [x] Reframe "fact" → "note": rewrite intro as "what's worth telling your future self"
+- [x] Replace "When to Remember" triggers with 4-filter decision algorithm (future-agent / code / generalization / moment-of-insight tests)
+- [x] Add save timing rule: "save at moment of insight, not at session end — one note per observation"
+- [x] Replace "Abstraction Levels" (concrete/pattern/meta) with explicit aspect tag vocabulary: pitfall, preference, decision, insight, pattern — with one example each
+- [x] Strengthen project-tag: make it step 0 before any tagging, add bad example (project-specific note without project tag)
+- [x] Expand "Mid-Session Retrieval" triggers: add "before starting a significant subtask" and "when encountering an error" to cover autonomous tool-call chains
 
 ## Dev & Build
 - [x] REPL helpers: start/stop/restart (`dev/user.clj`)

@@ -16,7 +16,7 @@
   "Tier 2 (aspect) tags — fixed vocabulary for knowledge categorization."
   ["architecture" "pattern" "idea" "decision" "preference"
    "debugging" "pitfall" "api" "data-model" "tooling"
-   "workflow" "performance" "comparison" "testing"])
+   "workflow" "performance" "comparison" "testing" "insight"])
 
 (defn ensure-schema [conn]
   @(d/transact conn (load-schema))
