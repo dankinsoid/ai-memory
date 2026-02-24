@@ -8,7 +8,8 @@ Notes to your future self — things worth knowing in a different session months
 When you think *I should remember this for next time* (a correction, error, discovery, or conclusion) — pass to `memory-scribe`.
 
 ```
-Task(subagent_type="memory-scribe", prompt="observation: <what happened>\ncontext: project=<name>, <1 sentence of situation>")
+Task(subagent_type="memory-scribe", run_in_background=true,
+     prompt="observation: <what happened>\ncontext: project=<name>, <1 sentence of situation>")
 ```
 
 Save **at the moment** — not at session end. One note per observation.
@@ -20,8 +21,7 @@ Do NOT call `memory_remember` directly — always delegate to memory-scribe.
 
 Each tag is a retrieval dimension.
 
-**Aspect** — fixed vocabulary (memory-scribe picks these):
-`pitfall`, `preference`, `decision`, `insight`, `pattern`
+**Aspect** — fixed vocabulary, use `memory_explore_tags` to discover. Pick 1-2 per fact.
 
 **Free-form** — projects, technologies, domains: `ai-memory`, `clojure`, `datomic`, `async`.
 `universal` — for facts relevant across all projects.
