@@ -4,6 +4,7 @@
 ;; - prompt.md       → ~/.claude/CLAUDE.md (replace section between markers)
 ;; - scripts/*.bb    → ~/.claude/hooks/ (overwrite)
 ;; - skills/*/       → ~/.claude/skills/*/ (overwrite matching only)
+;; - agents/*.md     → ~/.claude/agents/*.md (overwrite matching only)
 ;; - settings.json   → ~/.claude/settings.json (merge, no duplicates)
 
 (require '[cheshire.core :as json]
@@ -71,7 +72,18 @@
             (fs/copy f dest {:replace-existing true})
             (log (str f) "→" dest)))))))
 
-;; --- 4. settings.json (merge) ---
+;; --- 4. agents (overwrite matching, leave others) ---
+
+(println "\n[agents]")
+(let [agents-src  (str src-dir "/agents")
+      agents-dest (str claude-dir "/agents")]
+  (fs/create-dirs agents-dest)
+  (doseq [f (fs/glob agents-src "*.md")]
+    (let [dest (str agents-dest "/" (fs/file-name f))]
+      (fs/copy f dest {:replace-existing true})
+      (log (str f) "→" dest))))
+
+;; --- 5. settings.json (merge) ---
 
 (println "\n[settings]")
 
