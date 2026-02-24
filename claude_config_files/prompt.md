@@ -5,14 +5,19 @@ Notes to your future self — things worth knowing in a different session months
 
 ## When to Save
 
-When you notice something **non-obvious, surprising, or non-recoverable from code**:
-→ Pass the observation to the `memory-scribe` sub-agent with brief context.
+Pass to `memory-scribe` when any of these happen:
+
+- **User corrects or gives feedback** — "I prefer X", "don't do Y", "that's wrong"
+- **You made an error** — what failed, why, what to avoid next time
+- **Approach conclusion** — tried X, it worked/failed because Y
+- **Non-obvious discovery** — something that contradicted your expectations
+- **Inferred preference** — you noticed a pattern in how the user reacts
 
 ```
-Task(subagent_type="memory-scribe", prompt="observation: <what you noticed>\ncontext: project=<name>, <1 sentence of what was happening>")
+Task(subagent_type="memory-scribe", prompt="observation: <what happened>\ncontext: project=<name>, <1 sentence of situation>")
 ```
 
-Save **at the moment of insight** — not at session end. One note per observation.
+Save **at the moment** — not at session end. One note per observation.
 **project** — always include in context. **language** — always English.
 
 Do NOT call `memory_remember` directly — always delegate to memory-scribe.
