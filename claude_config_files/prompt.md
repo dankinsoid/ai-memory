@@ -5,7 +5,7 @@ Notes to your future self — things worth knowing in a different session months
 
 ## When to Save
 
-When you **learned** something during this task (from a correction, error, surprising result, or approach outcome) — pass to `memory-scribe`.
+When you think *I should remember this for next time* (a correction, error, discovery, or conclusion) — pass to `memory-scribe`.
 
 ```
 Task(subagent_type="memory-scribe", prompt="observation: <what happened>\ncontext: project=<name>, <1 sentence of situation>")
