@@ -5,7 +5,7 @@ Notes to your future self — things worth knowing in a different session months
 
 ## When to Save
 
-When you think *I should remember this for next time* (a correction, error, discovery, or conclusion) — pass to `memory-scribe`.
+When you think *I should remember this for next time* — especially user requirements and reactions — pass to `memory-scribe`.
 
 ```
 Task(subagent_type="memory-scribe", run_in_background=true,
