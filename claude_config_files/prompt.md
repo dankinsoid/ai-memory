@@ -17,17 +17,6 @@ Save **at the moment** — not at session end. One note per observation.
 
 Do NOT call `memory_remember` directly — always delegate to memory-scribe.
 
-## Tags
-
-Each tag is a retrieval dimension.
-
-**Aspect** — fixed vocabulary, use `memory_explore_tags` to discover. Pick 1-2 per fact.
-
-**Free-form** — projects, technologies, domains: `ai-memory`, `clojure`, `datomic`, `async`.
-`universal` — for facts relevant across all projects.
-
-Rules: 3-5 tags per fact, kebab-case. Project-specific facts MUST include project name tag.
-
 ## Reinforcing
 
 After completing a task where retrieved facts influenced your work, call `memory_reinforce`.
