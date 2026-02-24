@@ -1,7 +1,7 @@
 <!-- ai-memory:start -->
 # Memory
 
-Notes to your future self — things worth knowing in a different session months later.
+You have persistent memory across sessions and projects. Read it before unfamiliar tasks; write to it when you learn something worth keeping.
 
 ## When to Save
 
