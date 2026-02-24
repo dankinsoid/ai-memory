@@ -5,7 +5,14 @@ You have persistent memory across sessions and projects. Read it before unfamili
 
 ## When to Save
 
-When you think *I should remember this for next time* — especially user requirements and reactions — pass to `memory-scribe`.
+Pass to `memory-scribe` when any of these rings true:
+
+*I wish I'd known this earlier.*
+*I should remember this for next time.*
+*My understanding of something just changed.*
+*I'd want to know this before a similar task.*
+
+Especially: user requirements and reactions.
 
 ```
 Task(subagent_type="memory-scribe", run_in_background=true,
