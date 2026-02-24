@@ -132,14 +132,33 @@
 - [x] Grafana dashboards: Overview, Write Pipeline, Read Pipeline (provisioned via JSON)
 
 ## Auto-Retrieval (mid-conversation context injection)
-- [ ] Semantic search on user message → inject relevant facts into context
-- [ ] Hook on UserPromptSubmit: embed user message, query Qdrant, filter by score threshold
-- [ ] Project-scoped filtering (current project tag + universal)
-- [ ] Relevance threshold tuning to avoid noise
+- [ ] Tag-based injection hook: extract technical terms from user message (rule-based, no LLM), query `memory_get_facts` by tags, inject top-5 facts as system-reminder
+- [ ] Tag extractor: match known tags against message text using substring/regex (cheap, deterministic)
+- [ ] Project-scoped filtering: current project tag + `universal`
+- [ ] Use semantic search (Qdrant) as complementary filter when tag extraction yields few hits
+
+## Stochastic Save Reminder
+- [ ] New hook `memory-nudge.bb`: fires with ~30% probability on UserPromptSubmit
+- [ ] Short reminder to agent: "did this exchange surprise you or change your understanding?"
+- [ ] Does NOT ask to review whole session — prevents predictable batch saves
+- [ ] Register in `settings.json` alongside existing `session-reminder.bb`
+
+## memory-scribe Sub-Agent
+- [ ] Create `claude_config_files/agents/memory-scribe.md` — receives raw candidate observation + brief context
+- [ ] Agent applies 4-filter algorithm: future-agent test, code test, generalization test, moment-of-insight test
+- [ ] Agent formats: sentence ≤15 words, lowercase, imperative if actionable
+- [ ] Agent picks tags: aspect first (pitfall/preference/decision/insight/pattern), then project, then technical
+- [ ] Agent calls `memory_remember`, returns what was saved (or "skipped: reason")
+- [ ] Simplify main agent prompt: "when you notice something non-obvious → pass candidate to memory-scribe"
+- [ ] Add `agents/` to `deploy.bb` copy targets alongside `skills/` and `scripts/`
 
 ## Prompt Engineering (prompt.md)
-- [ ] Add short memory nudge to `session-reminder.bb` (3-5 tags, max 15 words, skip implementation details)
-- [ ] Add targeted CAPS emphasis for 1-2 most violated rules in prompt.md
+- [ ] Reframe "fact" → "note": rewrite intro as "what's worth telling your future self"
+- [ ] Replace "When to Remember" triggers with 4-filter decision algorithm (future-agent / code / generalization / moment-of-insight tests)
+- [ ] Add save timing rule: "save at moment of insight, not at session end — one note per observation"
+- [ ] Replace "Abstraction Levels" (concrete/pattern/meta) with explicit aspect tag vocabulary: pitfall, preference, decision, insight, pattern — with one example each
+- [ ] Strengthen project-tag: make it step 0 before any tagging, add bad example (project-specific note without project tag)
+- [ ] Expand "Mid-Session Retrieval" triggers: add "before starting a significant subtask" and "when encountering an error" to cover autonomous tool-call chains
 
 ## Dev & Build
 - [x] REPL helpers: start/stop/restart (`dev/user.clj`)
