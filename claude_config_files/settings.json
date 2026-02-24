@@ -22,6 +22,15 @@
             "timeout": 5000
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bb ~/.claude/hooks/memory-nudge.bb",
+            "timeout": 5000
+          }
+        ]
       }
     ],
     "Stop": [
