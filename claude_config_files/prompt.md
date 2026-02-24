@@ -5,13 +5,7 @@ Notes to your future self — things worth knowing in a different session months
 
 ## When to Save
 
-Pass to `memory-scribe` when any of these happen:
-
-- **User corrects or gives feedback** — "I prefer X", "don't do Y", "that's wrong"
-- **You made an error** — what failed, why, what to avoid next time
-- **Approach conclusion** — tried X, it worked/failed because Y
-- **Non-obvious discovery** — something that contradicted your expectations
-- **Inferred preference** — you noticed a pattern in how the user reacts
+When you **learned** something during this task (from a correction, error, surprising result, or approach outcome) — pass to `memory-scribe`.
 
 ```
 Task(subagent_type="memory-scribe", prompt="observation: <what happened>\ncontext: project=<name>, <1 sentence of situation>")
