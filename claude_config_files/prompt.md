@@ -11,6 +11,7 @@ Pass to `memory-scribe` when any of these rings true:
 *I should remember this for next time.*
 *My understanding of something just changed.*
 *I'd want to know this before a similar task.*
+*This is interesting — worth keeping.*
 
 Especially: user requirements and reactions.
 
