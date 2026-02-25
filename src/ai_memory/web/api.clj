@@ -390,12 +390,22 @@
                    (str "**" (or role "unknown") "**\n" text)))))
        (str/join "\n\n")))
 
+(defn- strip-injected-tags
+  "Strips injected XML-style context blocks from message text.
+   Covers tags with hyphens or underscores in the name, e.g.:
+   <system_instruction>, <system-reminder>, <ide_selection>, etc."
+  [s]
+  (when s
+    (-> s
+        (str/replace #"(?s)<[a-zA-Z][a-zA-Z0-9]*[-_][^>]*>.*?</[a-zA-Z][a-zA-Z0-9]*[-_][^>]*>" "")
+        str/trim)))
+
 (defn- extract-first-user-prompt
   "Extracts a truncated first user message as a fallback session summary.
    Returns nil if no user text found."
   [messages]
   (when-let [first-user (first (filter has-user-text? messages))]
-    (let [text (extract-text (:content first-user))
+    (let [text (strip-injected-tags (extract-text (:content first-user)))
           max-len 120]
       (when-not (str/blank? text)
         (if (<= (count text) max-len)
