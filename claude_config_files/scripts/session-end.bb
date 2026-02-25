@@ -9,7 +9,23 @@
 
 (require '[cheshire.core :as json]
          '[babashka.fs :as fs]
+         '[babashka.process :as process]
          '[clojure.string :as str])
+
+(defn git-project-name [cwd]
+  (when cwd
+    (try
+      (let [result (process/sh "git" "-C" cwd "remote" "get-url" "origin")]
+        (when (zero? (:exit result))
+          (-> (str/trim (:out result))
+              (str/replace #"\.git$" "")
+              (str/split #"[/:]")
+              last)))
+      (catch Exception _ nil))))
+
+(defn derive-project [cwd]
+  (or (git-project-name cwd)
+      (when cwd (last (str/split cwd #"/")))))
 
 (def input (json/parse-string (slurp *in*) true))
 (def session-id (:session_id input))
@@ -35,7 +51,7 @@
 (when-not session-id
   (System/exit 0))
 
-(let [project   (when cwd (last (str/split cwd #"/")))
+(let [project   (derive-project cwd)
       state-dir (str (System/getenv "HOME") "/.claude/hooks/state")]
   (when project
     (fs/create-dirs state-dir)

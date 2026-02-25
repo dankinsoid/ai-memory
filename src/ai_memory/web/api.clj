@@ -415,7 +415,7 @@
       {:status 400 :body {:error "session_id required"}}
       (let [base    (:blob-path cfg)
             db      (db/db conn)
-            project (derive-project cwd)
+            project (or (:project body) (derive-project cwd))
             turns   (group-into-turns messages)
 
             session-eid  (find-session-fact db session-id)
@@ -460,14 +460,20 @@
                                      :session-id session-id}
                               project (assoc :project project)))
                         {:turn-count total-turns}
+                        (when (and project (not (:project existing-meta)))
+                          {:project project})
                         (when session-summary
                           {:session-summary session-summary}))]
         (blob-store/write-meta! base blob-dir meta-data)
 
         ;; Create or link Datomic session node
         (if session-eid
-          (when-not existing-dir
-            (link-blob-dir! conn session-eid blob-dir))
+          (do
+            (when-not existing-dir
+              (link-blob-dir! conn session-eid blob-dir))
+            (when project
+              (let [tag-refs (tag-resolve/resolve-tags conn [project])]
+                (node/update-tag-refs conn session-eid tag-refs))))
           (let [tag-strs (cond-> ["session"]
                            project (conj project))
                 tag-refs (tag-resolve/resolve-tags conn tag-strs)]
