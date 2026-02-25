@@ -10,8 +10,24 @@
 (require '[cheshire.core :as json]
          '[babashka.http-client :as http]
          '[babashka.fs :as fs]
+         '[babashka.process :as process]
          '[clojure.java.io :as io]
          '[clojure.string :as str])
+
+(defn git-project-name [cwd]
+  (when cwd
+    (try
+      (let [result (process/sh "git" "-C" cwd "remote" "get-url" "origin")]
+        (when (zero? (:exit result))
+          (-> (str/trim (:out result))
+              (str/replace #"\.git$" "")
+              (str/split #"[/:]")
+              last)))
+      (catch Exception _ nil))))
+
+(defn derive-project [cwd]
+  (or (git-project-name cwd)
+      (when cwd (last (str/split cwd #"/")))))
 
 (defn find-transcript
   "Finds the JSONL transcript file for a session."
@@ -67,7 +83,8 @@
         (let [last-uuid (when (fs/exists? state-file)
                           (:last-uuid (read-string (slurp state-file))))
               entries   (parse-jsonl transcript)
-              messages  (delta-messages entries last-uuid)]
+              messages  (delta-messages entries last-uuid)
+              project   (derive-project cwd)]
 
           (when (seq messages)
             (let [response
@@ -76,9 +93,10 @@
                                {:headers (cond-> {"Content-Type" "application/json"}
                                            api-token (assoc "Authorization" (str "Bearer " api-token)))
                                 :body    (json/generate-string
-                                           {:session_id session-id
-                                            :cwd        cwd
-                                            :messages   messages})})
+                                           (cond-> {:session_id session-id
+                                                    :cwd        cwd
+                                                    :messages   messages}
+                                             project (assoc :project project)))})
                     (catch Exception e
                       (binding [*out* *err*]
                         (println "session-sync: POST failed:" (.getMessage e)))
@@ -99,7 +117,7 @@
 
               ;; Write prev-session cache for continuation linking.
               ;; /load picks this up to know which session was last active.
-              (when-let [project (when cwd (last (str/split cwd #"/")))]
+              (when project
                 (spit (str state-dir "/prev-session-" project ".edn")
                       (pr-str {:session-id session-id
                                :project    project}))))))))))

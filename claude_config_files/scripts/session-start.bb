@@ -10,7 +10,23 @@
 
 (require '[cheshire.core :as json]
          '[babashka.http-client :as http]
+         '[babashka.process :as process]
          '[clojure.string :as str])
+
+(defn git-project-name [cwd]
+  (when cwd
+    (try
+      (let [result (process/sh "git" "-C" cwd "remote" "get-url" "origin")]
+        (when (zero? (:exit result))
+          (-> (str/trim (:out result))
+              (str/replace #"\.git$" "")
+              (str/split #"[/:]")
+              last)))
+      (catch Exception _ nil))))
+
+(defn derive-project [cwd]
+  (or (git-project-name cwd)
+      (when cwd (last (str/split cwd #"/")))))
 
 (def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
 (def api-token (System/getenv "AI_MEMORY_TOKEN"))
@@ -49,10 +65,7 @@
 
 ;; --- Detect project from cwd ---
 
-(def project-name
-  (when cwd
-    (let [parts (str/split cwd #"/")]
-      (last parts))))
+(def project-name (derive-project cwd))
 
 ;; --- Fetch data from API ---
 
