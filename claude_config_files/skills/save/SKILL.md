@@ -56,10 +56,10 @@ memory_session({
 })
 ```
 
-`summary` follows Fact Format — single lowercase sentence, no articles, arrow → for sequences:
+`summary` — 2-5 words, what this session was about, no articles:
 
 ```
-updated load/save skills → compressed for tokens → verified against current api
+updated load/save skills
 ```
 
 ## 3. Confirm to user
