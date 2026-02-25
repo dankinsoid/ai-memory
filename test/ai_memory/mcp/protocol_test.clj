@@ -54,7 +54,7 @@
        (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
 
 (defn- handler []
-  (protocol/make-handler *base-url*))
+  (protocol/make-handler {:base-url *base-url*}))
 
 (defn- call [method & {:keys [id params] :or {id 1 params {}}}]
   ((handler) {:jsonrpc "2.0" :id id :method method :params params}))
