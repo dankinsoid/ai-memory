@@ -2,12 +2,14 @@
 ;; Load skill script: discovers session chain and outputs combined context.
 ;;
 ;; Usage:
-;;   bb load-chain.bb <session-id>          # traverse continuation chain
-;;   bb load-chain.bb --blob <blob-dir>     # load specific session blob
+;;   bb load-chain.bb <session-id> [project]  # traverse continuation chain
+;;   bb load-chain.bb --blob <blob-dir>        # load specific session blob
 ;;
 ;; Chain mode: checks for prev-session cache files (written by SessionEnd
 ;; hook on /clear), creates continuation edges via /api/session/continue,
 ;; then calls /api/session/chain to traverse the full chain.
+;; When [project] is provided, only processes cache files for that project
+;; and filters the fallback session query by project tag.
 ;; Blob mode: directly reads compact.md from a specific blob dir.
 
 (require '[cheshire.core :as json]
@@ -104,21 +106,27 @@
     ;; Chain traversal (default)
     flag
     (let [session-id flag
+          project    value  ;; optional 2nd arg: project name for isolation
           ;; Check for prev-session cache files from Stop/SessionEnd hooks.
           ;; If found, create continuation edge before traversing chain.
           ;; Skip cache files that reference the current session.
+          ;; When project is provided, only process that project's cache file.
           state-dir  (str (System/getenv "HOME") "/.claude/hooks/state")
-          _          (doseq [f (fs/glob state-dir "prev-session-*.edn")]
+          cache-files (if project
+                        (let [f (fs/path state-dir (str "prev-session-" project ".edn"))]
+                          (when (fs/exists? f) [f]))
+                        (fs/glob state-dir "prev-session-*.edn"))
+          _          (doseq [f cache-files]
                        (try
                          (let [cache   (read-string (slurp (str f)))
-                               project (:project cache)
+                               proj    (:project cache)
                                prev-id (:session-id cache)]
-                           (when (and prev-id project
+                           (when (and prev-id proj
                                       (not= prev-id session-id))
                              (api-post "/api/session/continue"
                                {:prev_session_id prev-id
                                 :session_id      session-id
-                                :project         project})
+                                :project         proj})
                              (fs/delete f)))
                          (catch Exception _ nil)))
           result     (api-post "/api/session/chain"
@@ -141,8 +149,10 @@
           (println "---")
           (println "Continuation edge strengthened."))
         ;; Fallback: no chain found — load most recent session blob from memory
+        ;; Filter by project tag if provided, to avoid cross-project contamination.
         (let [resp     (api-post "/api/tags/facts"
-                         {:filters [{:tags ["session"] :sort_by "date" :limit 5}]})
+                         {:filters [{:tags    (cond-> ["session"] project (conj project))
+                                     :sort_by "date" :limit 5}]})
               facts    (:facts (first (:results resp)))
               ;; Only facts with blob-dir, skip current session
               ;; blob-dir uses short UUID prefix (first 8 chars)
@@ -163,7 +173,7 @@
             (println "No previous session found.")))))
 
     :else
-    (do (println "Usage: bb load-chain.bb <session-id>")
+    (do (println "Usage: bb load-chain.bb <session-id> [project]")
         (println "       bb load-chain.bb --blob <blob-dir>")
         (System/exit 1))))
 
