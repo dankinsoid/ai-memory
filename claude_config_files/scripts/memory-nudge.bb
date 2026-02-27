@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
-;; UserPromptSubmit hook: stochastic memory nudge (~30% probability).
-;; Reminds the agent to check if this exchange produced anything memory-worthy.
+;; UserPromptSubmit hook: memory nudge (fires every turn).
+;; Prompts the agent to extract and save memory-worthy facts from the last exchange.
 ;;
 ;; Env-var toggles (set any to disable):
 ;;   AI_MEMORY_DISABLED=1     — master switch (all hooks)
@@ -16,7 +16,7 @@
 
 (let [input      (json/parse-string (slurp *in*) true)
       session-id (:session_id input)]
-  (when (and session-id (< (rand) 0.30))
-    (println "Memory nudge: did the last exchange ring any of the 5 triggers? (I wish I'd known / should remember / understanding changed / user preference / interesting) → memory-scribe.")))
+  (when session-id
+    (println "Memory nudge: scan the last exchange and identify 1-3 things worth saving — user preferences, discoveries, pitfalls, patterns, what the user is currently focused on/exploring. Delegate each to memory-scribe in background (one call per fact). If genuinely nothing worth saving, skip.")))
 
 (System/exit 0)
