@@ -41,7 +41,18 @@ Include code snippets, exact error messages, specific function names.>
 - **Don't duplicate meta.edn** — project, summary, date, session-id, turn count are already there.
 - **User requirements** — capture preferences, corrections, and constraints specific to this task. Skip section if there were none.
 
-## 1.5. Reinforce useful facts
+## 1.5. Harvest facts from this session
+
+Scan the full conversation and identify 3-8 facts that weren't explicitly saved but are worth keeping — user preferences revealed, patterns discovered, pitfalls hit, what the user is focused on. For each, delegate to memory-scribe in background:
+
+```
+Task(subagent_type="memory-scribe", run_in_background=true,
+     prompt="observation: <fact>\ncontext: project=<name>, session harvest")
+```
+
+Call once per fact. Skip facts already explicitly saved earlier in the session.
+
+## 1.6. Reinforce useful facts
 
 If facts retrieved during this session influenced task completion, call `memory_reinforce` before saving. Review facts from `memory_get_facts` calls made during the session — score only those that directly contributed to or hindered progress.
 

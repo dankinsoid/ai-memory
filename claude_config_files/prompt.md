@@ -12,15 +12,16 @@ Pass to `memory-scribe` when any of these rings true:
 *My understanding of something just changed.*
 *I'd want to know this before a similar task.*
 *This is interesting — worth keeping.*
+*What is the user currently focused on or exploring?*
 
-Especially: user requirements and reactions.
+Especially: user requirements, reactions, and current interests.
 
 ```
 Task(subagent_type="memory-scribe", run_in_background=true,
      prompt="observation: <what happened>\ncontext: project=<name>, <1 sentence of situation>")
 ```
 
-Save **at the moment** — not at session end. One note per observation.
+Save **at the moment** — not at session end. **1-3 facts per exchange** — call memory-scribe once per fact.
 **project** — always include in context. **language** — always English.
 
 Do NOT call `memory_remember` directly — always delegate to memory-scribe.

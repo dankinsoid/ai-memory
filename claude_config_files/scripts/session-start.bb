@@ -72,7 +72,8 @@
 (def tags-data (api-get "/api/tags" {"limit" "50"}))
 
 (def fact-filters
-  (cond-> [{:tags ["pref"]}
+  (cond-> [{:tags ["interest"] :sort_by "date" :limit 5}
+           {:tags ["pref"]}
            {:tags ["universal"]}
            {:tags ["session"] :sort_by "date" :limit 5}]
     project-name (conj {:tags [project-name]})))
@@ -143,6 +144,11 @@
 
 (let [results (:results facts-data)
 
+      interests-section
+      (format-facts results
+        (fn [r] (= (get-in r [:filter :tags]) ["interest"]))
+        "Current Interests")
+
       pref-section
       (format-facts results
         (fn [r] (= (get-in r [:filter :tags]) ["pref"]))
@@ -171,7 +177,8 @@
       blob-section
       "## Blobs\nUse `memory_read_blob` to explore blob contents."
 
-      sections (remove nil? [pref-section
+      sections (remove nil? [interests-section
+                             pref-section
                              universal-section
                              project-section
                              sessions-section
