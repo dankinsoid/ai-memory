@@ -65,7 +65,7 @@
   (testing "returns protocol version and capabilities"
     (let [resp (call "initialize")]
       (is (= 1 (:id resp)))
-      (is (= "2024-11-05" (get-in resp [:result :protocolVersion])))
+      (is (= "2025-03-26" (get-in resp [:result :protocolVersion])))
       (is (= "ai-memory" (get-in resp [:result :serverInfo :name])))
       (is (some? (get-in resp [:result :capabilities :tools]))))))
 

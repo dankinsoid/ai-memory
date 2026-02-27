@@ -71,7 +71,9 @@
                       ["/graph" {:get (fn [req] (api/get-graph conn req))}]
                       ["/graph/top-nodes" {:get (fn [req] (api/get-top-nodes conn cfg req))}]
                       ["/graph/neighborhood" {:get (fn [req] (api/get-graph-neighborhood conn cfg req))}]
-                      ["/facts/:id" {:get (fn [req] (api/get-fact-detail conn cfg req))}]
+                      ["/facts/:id" {:get    (fn [req] (api/get-fact-detail conn cfg req))
+                                     :delete (fn [req] (api/delete-fact conn cfg req))}]
+                      ["/admin/reset" {:post (fn [req] (api/reset-db conn cfg req))}]
                       ["/nodes" {:get  (fn [req] (api/list-nodes conn req))
                                  :post (fn [req] (api/create-node conn cfg req))}]
                       ["/remember" {:post (fn [req] (api/remember conn cfg req))}]

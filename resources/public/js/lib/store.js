@@ -92,6 +92,11 @@ export function closeFact() {
   detailData.value = null
 }
 
+export function removeFact(id) {
+  facts.value = facts.value.filter(f => (f['db/id'] || f.id) !== id)
+  factsTotal.value = Math.max(0, factsTotal.value - 1)
+}
+
 export function setView(view) {
   activeView.value = view
 }

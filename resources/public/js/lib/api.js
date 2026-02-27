@@ -23,6 +23,12 @@ async function post(path, body) {
   return res.json()
 }
 
+async function del(path) {
+  const res = await fetch(BASE + path, { method: 'DELETE', headers: authHeaders() })
+  if (!res.ok) throw new Error(`DELETE ${path}: ${res.status}`)
+  return res.json()
+}
+
 // --- Stats ---
 
 export async function fetchStats() {
@@ -66,4 +72,14 @@ export async function fetchNeighborhood(nodeId, depth = 1, limit = 50) {
 
 export async function fetchTagCounts(tagSets) {
   return post('/tags/count', { tag_sets: tagSets })
+}
+
+// --- Admin ---
+
+export async function deleteFact(id) {
+  return del(`/facts/${id}`)
+}
+
+export async function resetDb() {
+  return post('/admin/reset', {})
 }
