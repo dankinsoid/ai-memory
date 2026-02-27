@@ -31,6 +31,14 @@
    :weight  (:node/weight n)
    :tags    (mapv :tag/name (:node/tag-refs n))})
 
+(defn- node->d3-with-ew [tick n]
+  (assoc (node->d3 n)
+    :effective-weight (decay/effective-weight
+                        (or (:node/weight n) 1.0)
+                        (or (:node/cycle n) 0)
+                        tick
+                        decay/default-decay-factor)))
+
 (defn- edge->d3 [e]
   {:source (str (get-in e [:edge/from :db/id]))
    :target (str (get-in e [:edge/to :db/id]))
@@ -97,7 +105,7 @@
 
 (defn- bfs-neighborhood
   "BFS traversal from center node, collecting nodes and edges up to `depth` hops."
-  [db center-eid depth limit]
+  [db center-eid depth limit tick]
   (loop [frontier #{center-eid}
          visited  #{center-eid}
          nodes    []
@@ -115,7 +123,7 @@
             edges-d3    (mapv edge->d3 new-edges)]
         (recur (set neighbor-ids)
                (into visited neighbor-ids)
-               (into nodes (mapv node->d3 new-nodes))
+               (into nodes (mapv (partial node->d3-with-ew tick) new-nodes))
                (into edges edges-d3)
                (inc d))))))
 
@@ -128,11 +136,12 @@
         limit   (min 200 (or (some-> (get-in req [:query-params "limit"]) parse-long) 50))]
     (if-not node-id
       {:status 400 :body {:error "node_id required"}}
-      (let [center (d/pull db node-pull-spec-full node-id)
-            result (bfs-neighborhood db node-id depth limit)]
+      (let [tick   (db/current-tick db)
+            center (d/pull db node-pull-spec-full node-id)
+            result (bfs-neighborhood db node-id depth limit tick)]
         (if (:node/content center)
           {:status 200
-           :body   (assoc result :center (node->d3 center))}
+           :body   (assoc result :center (node->d3-with-ew tick center))}
           {:status 404 :body {:error "Node not found"}})))))
 
 ;; --- Fact detail ---

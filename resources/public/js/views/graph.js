@@ -112,7 +112,7 @@ export function GraphView() {
           tooltipRef.current.innerHTML = `
             <strong>${attrs.nodeType}</strong> #${node}<br/>
             ${attrs.content || ''}<br/>
-            <span style="color: #8b949e">w: ${attrs.weight?.toFixed(2) || '?'} · ${attrs.edgeCount} edges</span>
+            <span style="color: #8b949e">w: ${(attrs.effectiveWeight ?? attrs.weight)?.toFixed(2) || '?'} · ${attrs.edgeCount} edges</span>
           `
           tooltipRef.current.classList.add('visible')
         }
@@ -144,11 +144,12 @@ export function GraphView() {
                   label: truncate(n.content, 40),
                   x: centerAttrs.x + (Math.random() - 0.5) * 50,
                   y: centerAttrs.y + (Math.random() - 0.5) * 50,
-                  size: weightToSize(n.weight),
+                  size: weightToSize(n['effective-weight'] ?? n.weight),
                   color: TYPE_COLORS[n.nodeType || n.type] || TYPE_COLORS.fact,
                   nodeType: n.type,
                   content: n.content,
                   weight: n.weight,
+                  effectiveWeight: n['effective-weight'],
                   edgeCount: 0,
                   tags: n.tags || []
                 })
@@ -185,11 +186,12 @@ export function GraphView() {
                 label: truncate(nn.content, 40),
                 x: graph.getNodeAttribute(n.id, 'x') + (Math.random() - 0.5) * 80,
                 y: graph.getNodeAttribute(n.id, 'y') + (Math.random() - 0.5) * 80,
-                size: weightToSize(nn.weight),
+                size: weightToSize(nn['effective-weight'] ?? nn.weight),
                 color: TYPE_COLORS[nn.type] || TYPE_COLORS.fact,
                 type: nn.type,
                 content: nn.content,
                 weight: nn.weight,
+                effectiveWeight: nn['effective-weight'],
                 edgeCount: 0,
                 tags: nn.tags || []
               })

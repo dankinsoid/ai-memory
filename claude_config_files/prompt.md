@@ -38,7 +38,7 @@ Only facts with **direct impact**. Retrieved but unused = skip. Score near 0 = s
 
 Hook reminders tell you when to call and which params to include.
 
-`summary` — answer "what was this session about?" in 2-5 words. Each call replaces previous, so include full arc.
+`summary` — answer "what was this session about?" in 2-5 words. Always English, even if the conversation was in another language. Each call replaces previous, so include full arc.
 Good: `blob storage architecture`
 Good: `prompt rewrite and tag system`
 Bad: `explored dedup strategies → chose normalized prose → designed prompt → committed` (too detailed)
