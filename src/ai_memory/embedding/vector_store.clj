@@ -58,3 +58,12 @@
              {:content-type :json
               :body (json/generate-string
                      {:points [point-id]})}))
+
+(defn delete-all-points!
+  "Drops and recreates the collection — wipes all vectors."
+  [base-url]
+  (try
+    (http/delete (str base-url "/collections/" collection-name)
+                 {:content-type :json})
+    (catch Exception _))
+  (ensure-collection! base-url))

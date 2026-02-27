@@ -950,6 +950,31 @@ body {
   color: var(--text-primary);
 }
 
+.btn-danger {
+  background: transparent;
+  border-color: var(--color-preference);
+  color: var(--color-preference);
+}
+
+.btn-danger:hover {
+  background: rgba(255, 123, 114, 0.12);
+}
+
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.navbar-reset {
+  margin-left: var(--sp-3);
+  flex-shrink: 0;
+}
+
+.detail-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
 /* --- Utility --- */
 
 .sr-only {

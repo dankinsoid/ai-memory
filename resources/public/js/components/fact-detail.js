@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
-import { selectedFact, closeFact, detailData, detailLoading, activeView, graphFocusNode } from '../lib/store.js'
-import { fetchFactDetail } from '../lib/api.js'
+import { useEffect, useState } from 'preact/hooks'
+import { selectedFact, closeFact, detailData, detailLoading, activeView, graphFocusNode, removeFact } from '../lib/store.js'
+import { fetchFactDetail, deleteFact } from '../lib/api.js'
 import { weightColor, timeAgo, tagColor, tagBg } from '../lib/utils.js'
 
 const CLOSE_ICON = html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`
@@ -23,6 +23,7 @@ export function FactDetail() {
   const isOpen = fact != null
   const detail = detailData.value
   const loading = detailLoading.value
+  const [deleting, setDeleting] = useState(false)
 
   // Load detail when fact selected
   useEffect(() => {
@@ -46,6 +47,22 @@ export function FactDetail() {
     graphFocusNode.value = id
     activeView.value = 'graph'
     closeFact()
+  }
+
+  async function handleDelete() {
+    const id = fact['db/id'] || fact.id
+    if (!window.confirm(`Delete fact #${id}? This cannot be undone.`)) return
+    setDeleting(true)
+    try {
+      await deleteFact(id)
+      removeFact(id)
+      closeFact()
+    } catch (e) {
+      console.error('Failed to delete fact:', e)
+      alert('Failed to delete fact: ' + e.message)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const content = fact?.['node/content'] || fact?.content || ''
@@ -133,8 +150,11 @@ export function FactDetail() {
             </div>
           `}
 
-          <div class="detail-section">
+          <div class="detail-section detail-actions">
             <button class="btn" onClick=${showInGraph}>Show in Graph</button>
+            <button class="btn btn-danger" onClick=${handleDelete} disabled=${deleting}>
+              ${deleting ? 'Deleting…' : 'Delete'}
+            </button>
           </div>
         `}
       </div>

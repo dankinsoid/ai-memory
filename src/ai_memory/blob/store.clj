@@ -59,6 +59,26 @@
     (spit file (with-out-str (pp/pprint meta-data)))
     (.getPath file)))
 
+(defn delete-blob-dir!
+  "Recursively deletes blob directory and all its contents."
+  [base-path dir-name]
+  (let [dir (io/file base-path dir-name)]
+    (when (.exists dir)
+      (doseq [f (reverse (file-seq dir))]
+        (.delete f)))))
+
+(defn delete-all-blobs!
+  "Deletes all blob directories under base-path. Returns count deleted."
+  [base-path]
+  (let [root (io/file base-path)]
+    (if-not (.exists root)
+      0
+      (let [dirs (filter #(.isDirectory %) (.listFiles root))]
+        (doseq [dir dirs]
+          (doseq [f (reverse (file-seq dir))]
+            (.delete f)))
+        (count dirs)))))
+
 (defn read-meta
   "Reads and parses meta.edn from a blob directory. Returns nil if not found."
   [base-path dir-name]

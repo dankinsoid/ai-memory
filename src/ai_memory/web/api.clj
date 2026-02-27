@@ -3,6 +3,7 @@
             [ai-memory.graph.node :as node]
             [ai-memory.graph.edge :as edge]
             [ai-memory.graph.write :as write]
+            [ai-memory.graph.delete :as delete]
             [ai-memory.tag.query :as tag-query]
             [ai-memory.tag.resolve :as tag-resolve]
             [ai-memory.decay.core :as decay]
@@ -644,3 +645,21 @@
                 (edge/strengthen conn edge-id 10.0)))
             {:status 200
              :body   {:chain (mapv #(dissoc % :eid) chain)}}))))))
+
+;; --- Admin: deletion ---
+
+(defn delete-fact
+  "DELETE /api/facts/:id — true deletion from Datomic, Qdrant, and filesystem."
+  [conn cfg req]
+  (let [eid (some-> (get-in req [:path-params :id]) parse-long)]
+    (if-not eid
+      {:status 400 :body {:error "Invalid id"}}
+      (try
+        {:status 200 :body (delete/delete-node! conn cfg eid)}
+        (catch Exception e
+          {:status 404 :body {:error (ex-message e)}})))))
+
+(defn reset-db
+  "POST /api/admin/reset — wipe all facts, edges, blobs, and vectors."
+  [conn cfg _req]
+  {:status 200 :body (delete/reset-all! conn cfg)})
