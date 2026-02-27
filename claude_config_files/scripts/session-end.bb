@@ -6,6 +6,16 @@
 ;;
 ;; Cache file: ~/.claude/hooks/state/prev-session-{project}.edn
 ;;   {:session-id "..." :project "..."}
+;;
+;; Env-var toggles (set any to disable):
+;;   AI_MEMORY_DISABLED=1     — master switch (all hooks)
+;;   AI_MEMORY_NO_WRITE=1     — disable all writes
+;;   AI_MEMORY_NO_SESSIONS=1  — disable session-specific features
+
+(when (or (System/getenv "AI_MEMORY_DISABLED")
+          (System/getenv "AI_MEMORY_NO_WRITE")
+          (System/getenv "AI_MEMORY_NO_SESSIONS"))
+  (System/exit 0))
 
 (require '[cheshire.core :as json]
          '[babashka.fs :as fs]

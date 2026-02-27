@@ -7,6 +7,12 @@
 ;;
 ;; Loads: preferences, universal facts, project facts, tags overview,
 ;; recent sessions, timestamp. Lightweight — /load for deep recovery.
+;;
+;; Env-var toggles (set any to disable):
+;;   AI_MEMORY_DISABLED=1     — master switch (all hooks)
+;;   AI_MEMORY_NO_READ=1      — don't inject any context
+;;   AI_MEMORY_NO_SESSIONS=1  — skip recent sessions section
+;;   AI_MEMORY_NO_FACTS=1     — skip facts sections (pref/universal/project)
 
 (require '[cheshire.core :as json]
          '[babashka.http-client :as http]
@@ -30,6 +36,9 @@
 
 (def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
 (def api-token (System/getenv "AI_MEMORY_TOKEN"))
+
+(def no-sessions? (System/getenv "AI_MEMORY_NO_SESSIONS"))
+(def no-facts? (System/getenv "AI_MEMORY_NO_FACTS"))
 
 (defn- auth-headers []
   (cond-> {"Accept" "application/json"}
@@ -61,6 +70,10 @@
 
 ;; Skip on resume — context already in window
 (when (= (:source input) "resume")
+  (System/exit 0))
+
+;; Skip if reads are disabled globally
+(when (or (System/getenv "AI_MEMORY_DISABLED") (System/getenv "AI_MEMORY_NO_READ"))
   (System/exit 0))
 
 ;; --- Detect project from cwd ---
@@ -144,26 +157,29 @@
 (let [results (:results facts-data)
 
       pref-section
-      (format-facts results
-        (fn [r] (= (get-in r [:filter :tags]) ["pref"]))
-        "Preferences")
+      (when-not no-facts?
+        (format-facts results
+          (fn [r] (= (get-in r [:filter :tags]) ["pref"]))
+          "Preferences"))
 
       universal-section
-      (format-facts results
-        (fn [r] (= (get-in r [:filter :tags]) ["universal"]))
-        "Universal")
+      (when-not no-facts?
+        (format-facts results
+          (fn [r] (= (get-in r [:filter :tags]) ["universal"]))
+          "Universal"))
 
       project-section
-      (when project-name
+      (when (and project-name (not no-facts?))
         (format-facts results
           (fn [r] (= (get-in r [:filter :tags]) [project-name]))
           (str "Project: " project-name)))
 
       sessions-section
-      (let [session-group (first (filter
-                                   (fn [r] (= (get-in r [:filter :tags]) ["session"]))
-                                   results))]
-        (format-sessions (:facts session-group)))
+      (when-not no-sessions?
+        (let [session-group (first (filter
+                                     (fn [r] (= (get-in r [:filter :tags]) ["session"]))
+                                     results))]
+          (format-sessions (:facts session-group))))
 
       tags-section    (format-tags tags-data)
       timestamp       (format-timestamp)

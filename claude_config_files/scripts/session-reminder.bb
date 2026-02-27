@@ -8,6 +8,16 @@
 ;; Reads state files per session:
 ;;   - {session-id}-reminder.edn — written here: {:prompt-count N :first-prompt-len N :last-chunk-tokens N}
 ;; Reads transcript JSONL to extract total token usage.
+;;
+;; Env-var toggles (set any to disable):
+;;   AI_MEMORY_DISABLED=1     — master switch (all hooks)
+;;   AI_MEMORY_NO_WRITE=1     — disable all writes/nudges
+;;   AI_MEMORY_NO_SESSIONS=1  — disable session-specific features
+
+(when (or (System/getenv "AI_MEMORY_DISABLED")
+          (System/getenv "AI_MEMORY_NO_WRITE")
+          (System/getenv "AI_MEMORY_NO_SESSIONS"))
+  (System/exit 0))
 
 (require '[cheshire.core :as json]
          '[babashka.fs :as fs]
