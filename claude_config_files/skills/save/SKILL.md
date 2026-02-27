@@ -56,7 +56,7 @@ memory_session({
 })
 ```
 
-`summary` — 2-5 words, what this session was about, no articles:
+`summary` — 2-5 words, what this session was about, no articles, always English:
 
 ```
 updated load/save skills
