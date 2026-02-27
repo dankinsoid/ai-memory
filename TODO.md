@@ -138,10 +138,19 @@
 - [ ] Use semantic search (Qdrant) as complementary filter when tag extraction yields few hits
 
 ## Stochastic Save Reminder
-- [ ] New hook `memory-nudge.bb`: fires with ~30% probability on UserPromptSubmit
-- [ ] Short reminder to agent: "did this exchange surprise you or change your understanding?"
-- [ ] Does NOT ask to review whole session — prevents predictable batch saves
-- [ ] Register in `settings.json` alongside existing `session-reminder.bb`
+- [x] New hook `memory-nudge.bb`: fires with ~30% probability on UserPromptSubmit
+- [x] Short reminder to agent: "did this exchange surprise you or change your understanding?"
+- [x] Does NOT ask to review whole session — prevents predictable batch saves
+- [x] Register in `settings.json` alongside existing `session-reminder.bb`
+
+## Memory Toggle Control (coexistence with Claude's built-in auto-memory)
+- [x] `undeploy.bb` — removes prompt section + hooks from `~/.claude/` (full off switch)
+- [x] `AI_MEMORY_DISABLED=1` — master env var: all hooks exit early
+- [x] `AI_MEMORY_NO_READ=1` — session-start injects no context
+- [x] `AI_MEMORY_NO_WRITE=1` — session-sync/end/reminder/nudge skip writes
+- [x] `AI_MEMORY_NO_SESSIONS=1` — disable session tracking and session context injection
+- [x] `AI_MEMORY_NO_FACTS=1` — disable fact nudges and fact context injection
+- [x] `prompt.md` reframed as "External Memory (ai-memory)" to avoid conflict with built-in memory
 
 ## memory-scribe Sub-Agent
 - [x] Create `claude_config_files/agents/memory-scribe.md` — receives raw candidate observation + brief context

@@ -1,7 +1,9 @@
 <!-- ai-memory:start -->
-# Memory
+# External Memory (ai-memory)
 
-You have persistent memory across sessions and projects. Read it before unfamiliar tasks; write to it when you learn something worth keeping.
+This is a supplemental long-term memory layer beyond Claude's built-in memory. It provides cross-project fact storage, semantic search, session blobs, and session syncing via an external MCP server.
+
+Read it before unfamiliar tasks; write to it when you learn something worth keeping.
 
 ## When to Save
 
