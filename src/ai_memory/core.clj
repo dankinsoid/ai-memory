@@ -1,6 +1,7 @@
 (ns ai-memory.core
   (:require [ai-memory.config :as config]
             [ai-memory.db.core :as db]
+            [ai-memory.embedding.vector-store :as vs]
             [ai-memory.metrics :as metrics]
             [ai-memory.scheduler :as scheduler]
             [ai-memory.web.handler :as web]
@@ -12,6 +13,7 @@
         cfg      (assoc config :metrics registry)
         conn     (db/connect (:datomic-uri cfg))]
     (db/ensure-schema conn)
+    (vs/ensure-collection! (:qdrant-url cfg))
     (let [server (web/start {:port (:port cfg)
                              :conn conn
                              :cfg  cfg})
