@@ -201,6 +201,25 @@
                     :sources          (vec (:node/sources node))}}
           {:status 404 :body {:error "Not found"}})))))
 
+(defn update-fact
+  "PATCH /api/facts/:id — updates content, tags, and/or weight. All fields optional."
+  [conn cfg req]
+  (let [id     (some-> (get-in req [:path-params :id]) parse-long)
+        body   (:body-params req)
+        content (:content body)
+        tags    (:tags body)
+        weight  (:weight body)]
+    (if-not id
+      {:status 400 :body {:error "id required"}}
+      (do
+        (when (and content (not (str/blank? content)))
+          (node/update-content! conn cfg id content))
+        (when (some? tags)
+          (node/replace-tags! conn id tags))
+        (when (some? weight)
+          (node/set-weight! conn id weight))
+        {:status 200 :body {:status "updated"}}))))
+
 ;; --- Nodes ---
 
 (defn list-nodes [_conn _req]
