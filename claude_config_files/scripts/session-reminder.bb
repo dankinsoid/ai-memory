@@ -21,8 +21,13 @@
 
 (require '[cheshire.core :as json]
          '[babashka.fs :as fs]
+         '[babashka.process :as process]
          '[clojure.string :as str]
          '[clojure.java.io :as io])
+
+(def project-remind-interval-days
+  "Remind about project summary at most once every N days per project."
+  3)
 
 (def chunk-token-step
   "Create a new chunk every N tokens of context growth."
@@ -61,10 +66,34 @@
             (+ input cached created))))
       (catch Exception _ nil))))
 
+(defn git-project-name [cwd]
+  (when cwd
+    (try
+      (let [result (process/sh "git" "-C" cwd "remote" "get-url" "origin")]
+        (when (zero? (:exit result))
+          (-> (str/trim (:out result))
+              (str/replace #"\.git$" "")
+              (str/split #"[/:]")
+              last)))
+      (catch Exception _ nil))))
+
+(defn derive-project [cwd]
+  (or (git-project-name cwd)
+      (when cwd (last (str/split cwd #"/")))))
+
+(defn days-since [date-str]
+  (try
+    (let [past  (java.time.LocalDate/parse date-str)
+          today (java.time.LocalDate/now)]
+      (.between java.time.temporal.ChronoUnit/DAYS past today))
+    (catch Exception _ Long/MAX_VALUE)))
+
 (let [input      (json/parse-string (slurp *in*) true)
       session-id (:session_id input)
       prompt     (:prompt input)
       transcript (:transcript_path input)
+      cwd        (:cwd input)
+      project-name (derive-project cwd)
       state-dir  (str (System/getenv "HOME") "/.claude/hooks/state")
       reminder-file (str state-dir "/" session-id "-reminder.edn")]
 
@@ -103,18 +132,38 @@
           ;; Summary reminder on early turns
           need-summary? (or (= prompt-count 1)
                             (and (<= prompt-count summary-remind-turns)
-                                 (< first-prompt-len short-prompt-len)))]
+                                 (< first-prompt-len short-prompt-len)))
+
+          ;; Project summary reminder: once per N days per project
+          project-remind-file (when project-name
+                                 (str state-dir "/project-remind-" project-name ".edn"))
+          project-remind-state (when (and project-remind-file (fs/exists? project-remind-file))
+                                  (try (read-string (slurp project-remind-file))
+                                       (catch Exception _ {})))
+          need-project-remind? (and project-name
+                                    (= prompt-count 1)
+                                    (>= (days-since (:last-reminded project-remind-state ""))
+                                        project-remind-interval-days))]
 
       (fs/create-dirs state-dir)
       (spit reminder-file (pr-str new-state))
+      (when need-project-remind?
+        (spit project-remind-file
+              (pr-str {:last-reminded (str (java.time.LocalDate/now))})))
 
-      (when (or need-summary? need-chunk?)
+      (when (or need-summary? need-chunk? need-project-remind?)
         (println
-         (if need-chunk?
-           (str "Chunk ~" (quot context-tokens 1000) "K tokens. "
-                "Call memory_session with session_id: \"" session-id
-                "\", chunk_title, and summary.")
-           (str "Call memory_session with session_id: \"" session-id
-                "\" and summary.")))))))
+         (str/join " "
+           (cond-> []
+             need-chunk?
+             (conj (str "Chunk ~" (quot context-tokens 1000) "K tokens."
+                        " Call memory_session with session_id: \"" session-id
+                        "\", chunk_title, and summary."))
+             (and need-summary? (not need-chunk?))
+             (conj (str "Call memory_session with session_id: \"" session-id
+                        "\" and summary."))
+             need-project-remind?
+             (conj (str "Call memory_project(project=\"" project-name
+                        "\", summary=\"...\") if the project description has changed or is not yet stored."))))))))
 
 (System/exit 0)

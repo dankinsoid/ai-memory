@@ -88,6 +88,7 @@
   (cond-> [{:tags ["pref"]}
            {:tags ["universal"]}
            {:tags ["session"] :sort_by "date" :limit 5}]
+    project-name (conj {:tags ["project" project-name]})
     project-name (conj {:tags [project-name]})))
 
 (def facts-data (api-post "/api/tags/facts" {:filters fact-filters}))
@@ -168,6 +169,12 @@
           (fn [r] (= (get-in r [:filter :tags]) ["universal"]))
           "Universal"))
 
+      project-summary-section
+      (when (and project-name (not no-facts?))
+        (format-facts results
+          (fn [r] (= (get-in r [:filter :tags]) ["project" project-name]))
+          (str "Project Summary: " project-name)))
+
       project-section
       (when (and project-name (not no-facts?))
         (format-facts results
@@ -189,6 +196,7 @@
 
       sections (remove nil? [pref-section
                              universal-section
+                             project-summary-section
                              project-section
                              sessions-section
                              blob-section

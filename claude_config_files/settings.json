@@ -10,7 +10,8 @@
       "mcp__ai-memory__memory_create_tag",
       "mcp__ai-memory__memory_list_blobs",
       "mcp__ai-memory__memory_reinforce",
-      "mcp__ai-memory__memory_session"
+      "mcp__ai-memory__memory_session",
+      "mcp__ai-memory__memory_project"
     ]
   },
   "hooks": {

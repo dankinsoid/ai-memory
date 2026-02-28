@@ -251,21 +251,47 @@
 
 (defn- upsert-session-fact!
   "Creates or updates the rolling session summary fact."
-  [conn cfg session-id session-summary project]
-  (let [db  (db/db conn)
-        eid (find-session-fact db session-id)]
+  [conn cfg session-id session-summary project tags]
+  (let [db       (db/db conn)
+        eid      (find-session-fact db session-id)
+        tag-strs (distinct (concat ["session"] (when project [project]) tags))]
     (if eid
       (do (node/update-content! conn cfg eid session-summary)
-          (when project
-            (let [tag-refs (tag-resolve/resolve-tags conn [project])]
-              (node/update-tag-refs conn eid tag-refs))))
-      (let [tag-strs (cond-> ["session"]
-                       project (conj project))
-            tag-refs (tag-resolve/resolve-tags conn tag-strs)]
+          (let [tag-refs (tag-resolve/resolve-tags conn tag-strs)]
+            (node/update-tag-refs conn eid tag-refs)))
+      (let [tag-refs (tag-resolve/resolve-tags conn tag-strs)]
         (node/create-node conn cfg
           {:content    session-summary
            :tag-refs   tag-refs
            :session-id session-id})))))
+
+(defn- find-project-fact [db project]
+  (d/q '[:find ?e .
+         :in $ ?pname
+         :where
+         [?t1 :tag/name "project"]
+         [?e :node/tag-refs ?t1]
+         [?t2 :tag/name ?pname]
+         [?e :node/tag-refs ?t2]]
+       db project))
+
+(defn- upsert-project-fact! [conn cfg project summary tags]
+  (let [db       (db/db conn)
+        eid      (find-project-fact db project)
+        tag-strs (distinct (concat ["project"] [project] tags))]
+    (if eid
+      (do (node/update-content! conn cfg eid summary)
+          (node/update-tag-refs conn eid (tag-resolve/resolve-tags conn tag-strs)))
+      (node/create-node conn cfg
+        {:content  summary
+         :tag-refs (tag-resolve/resolve-tags conn tag-strs)}))))
+
+(defn project-update [conn cfg req]
+  (let [{:keys [project summary tags]} (:body-params req)]
+    (if (or (str/blank? project) (str/blank? summary))
+      {:status 400 :body {:error "project and summary are required"}}
+      (do (upsert-project-fact! conn cfg project summary (or tags []))
+          {:status 200 :body {:project project}}))))
 
 (defn remember [conn cfg req]
   (let [body   (:body-params req)
@@ -518,6 +544,7 @@
         session-id  (:session-id body)
         project     (:project body)
         summary     (:summary body)
+        tags        (:tags body)
         chunk-title (:chunk-title body)
         compact     (:compact body)]
     (if-not session-id
@@ -548,7 +575,7 @@
             ;; 1. Update session summary in Datomic + blob meta
             summary-result
             (when summary
-              (let [_ (upsert-session-fact! conn cfg session-id summary project)]
+              (let [_ (upsert-session-fact! conn cfg session-id summary project tags)]
                 ;; If node was just created by upsert, link blob-dir to it
                 (when-not session-eid
                   (when-let [new-eid (find-session-fact (db/db conn) session-id)]

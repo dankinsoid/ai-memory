@@ -42,6 +42,19 @@ Good: `blob storage architecture`
 Good: `prompt rewrite and tag system`
 Bad: `explored dedup strategies → chose normalized prose → designed prompt → committed` (too detailed)
 
+`tags` — topic tags for the session (e.g. `["refactoring", "architecture"]`). Merged with automatic `session` and project tags. Omit if nothing notable.
+
+## Project Summaries — `memory_project`
+
+Call when the project's architecture, tech stack, goals, or structure become clear or change meaningfully:
+- First substantial session on a new project
+- After key architectural decisions (tech choice, data model, design patterns)
+- When project scope or goals shift noticeably
+
+`memory_project(project="my-project", summary="...")`
+
+One fact per project, upserted in-place. Keep summary concise (3-8 sentences): what the project is, its tech stack, current state, key constraints.
+
 ## Blobs
 
 Facts with `[blob: dir-name]` reference blob directories. Read with `memory_read_blob`.
