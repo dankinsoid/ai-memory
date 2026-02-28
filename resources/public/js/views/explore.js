@@ -36,8 +36,8 @@ function FilterBar() {
       <div class="filter-sort">
         <label>sort:</label>
         <select value=${sortBy.value} onChange=${(e) => setSort(e.target.value)}>
-          <option value="weight">weight</option>
           <option value="date">date</option>
+          <option value="weight">weight</option>
         </select>
       </div>
     </div>
