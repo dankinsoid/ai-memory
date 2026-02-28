@@ -65,3 +65,6 @@
 
 (defn handle-session [{:keys [base-url api-token]} params]
   (api-post base-url "/api/session" params api-token))
+
+(defn handle-project [{:keys [base-url api-token]} params]
+  (api-post base-url "/api/project" params api-token))

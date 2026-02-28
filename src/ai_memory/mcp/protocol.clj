@@ -107,14 +107,23 @@
                   :required   ["reinforcements"]}}
 
    {:name        "memory_session"
-    :description "Update session metadata. Combine any of: summary (session arc), chunk_title (name current chunk), compact (detailed summary for /save). Call with whichever params are relevant — hook reminders will tell you which."
+    :description "Update session metadata. Combine any of: summary (session arc), tags (topic tags), chunk_title (name current chunk), compact (detailed summary for /save). Call with whichever params are relevant — hook reminders will tell you which."
     :inputSchema {:type       "object"
                   :properties {:session_id {:type "string" :description "Session ID (same as session_id in memory_remember)"}
                                :project    {:type "string" :description "Project name"}
                                :summary    {:type "string" :description "Session arc summary: main topics in order, 1-3 sentences (e.g. 'Designed blob storage → implemented sync hook → debugged SSHFS mount')"}
+                               :tags       {:type "array" :items {:type "string"} :description "Topic tags for this session (e.g. [\"architecture\", \"refactoring\"]). Merged with automatic 'session' and project tags."}
                                :chunk_title {:type "string" :description "Short title for current conversation chunk (e.g. 'designed-blob-architecture'). Renames _current.md to a numbered file."}
                                :compact    {:type "string" :description "Detailed multi-paragraph session summary for /save. Stored as compact.md in the blob."}}
                   :required   ["session_id"]}}
+
+   {:name        "memory_project"
+    :description "Store or update a persistent project summary. One fact per project, upserted in-place. Call when the project's architecture, tech stack, goals, or structure become clear or change meaningfully."
+    :inputSchema {:type       "object"
+                  :properties {:project {:type "string" :description "Project name"}
+                               :summary {:type "string" :description "Concise project description: what it is, tech stack, current state, key constraints (3-8 sentences)"}
+                               :tags    {:type "array" :items {:type "string"} :description "Optional topic tags"}}
+                  :required   ["project" "summary"]}}
 
 ])
 
@@ -220,8 +229,12 @@
     :session         {:session-id   (:session_id params)
                       :project      (:project params)
                       :summary      (:summary params)
+                      :tags         (:tags params)
                       :chunk-title  (:chunk_title params)
                       :compact      (:compact params)}
+    :project         {:project (:project params)
+                      :summary (:summary params)
+                      :tags    (:tags params)}
     params))
 
 ;; --- Handler dispatch ---
@@ -234,7 +247,8 @@
     :store-file         (server/handle-store-file cfg params)
     :read-blob          (server/handle-read-blob cfg params)
     :reinforce          (server/handle-reinforce cfg params)
-    :session            (server/handle-session cfg params)))
+    :session            (server/handle-session cfg params)
+    :project            (server/handle-project cfg params)))
 
 ;; --- JSON-RPC method handlers ---
 
@@ -265,7 +279,8 @@
    "memory_store_file"           :store-file
    "memory_read_blob"            :read-blob
    "memory_reinforce"            :reinforce
-   "memory_session"              :session})
+   "memory_session"              :session
+   "memory_project"              :project})
 
 (defn- format-result [handler-key result]
   (case handler-key

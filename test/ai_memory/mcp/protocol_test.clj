@@ -84,7 +84,7 @@
       (is (= #{"memory_explore_tags" "memory_get_facts"
                "memory_remember" "memory_reinforce"
                "memory_store_file" "memory_read_blob"
-               "memory_session"}
+               "memory_session" "memory_project"}
              names)))))
 
 (deftest ping-test
