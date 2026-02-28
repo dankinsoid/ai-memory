@@ -181,18 +181,16 @@
   "Re-embeds all non-entity nodes into Qdrant. Synchronous, sequential.
    Returns {:reindexed N :skipped M}."
   [db cfg]
-  (let [nodes (d/q '[:find ?e ?content (pull ?e [{:node/tag-refs [:tag/name]}])
-                     :where
-                     [?e :node/content ?content]]
-                   db)
-        results (reduce (fn [acc [eid content pulled]]
-                          (if (skip-embedding? {:tag-refs (:node/tag-refs pulled)})
-                            (update acc :skipped inc)
-                            (do (embed-async! cfg eid content)
-                                (update acc :reindexed inc))))
-                        {:reindexed 0 :skipped 0}
-                        nodes)]
-    results))
+  (let [nodes (d/q '[:find [(pull ?e [:db/id :node/content {:node/tag-refs [:tag/name]}]) ...]
+                     :where [?e :node/content]]
+                   db)]
+    (reduce (fn [acc node]
+              (if (skip-embedding? {:tag-refs (:node/tag-refs node)})
+                (update acc :skipped inc)
+                (do (embed-async! cfg (:db/id node) (:node/content node))
+                    (update acc :reindexed inc))))
+            {:reindexed 0 :skipped 0}
+            nodes)))
 
 (defn find-blobs
   "Finds blob nodes (have :node/blob-dir) sorted by created-at desc."
