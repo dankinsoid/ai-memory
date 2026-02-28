@@ -30,7 +30,7 @@
   "Embeds content in Qdrant using entity ID as point ID. Logs warning on failure, never throws."
   [cfg eid content]
   (try
-    (let [vector (embedding/embed-document (:embedding-url cfg) content)]
+    (let [vector (embedding/embed-document (:openai-api-key cfg) content)]
       (vs/upsert-point! (:qdrant-url cfg) eid vector {}))
     (catch Exception e
       (log/warn e "Failed to vectorize node" eid))))
@@ -38,7 +38,7 @@
 (defn create-node
   "Creates a memory node in Datomic. Embeds content in Qdrant unless entity.
    Returns {:tx-result ... :node-eid <entity-id>}.
-   `cfg` — {:embedding-url, :qdrant-url}.
+   `cfg` — {:openai-api-key, :qdrant-url}.
    `tag-refs` — vec of lookup refs like [[:tag/name \"clj\"]].
    Optional keys: :blob-dir (string), :sources (set of strings)."
   [conn cfg {:keys [content tag-refs blob-dir sources session-id]}]
@@ -72,7 +72,7 @@
   "Finds nodes semantically similar to `text`.
    Returns nodes from Datomic enriched with :search/score, sorted by score desc."
   [db cfg text top-k]
-  (let [qvec (embedding/embed-query (:embedding-url cfg) text)
+  (let [qvec (embedding/embed-query (:openai-api-key cfg) text)
         hits (vs/search (:qdrant-url cfg) qvec top-k)]
     (->> hits
          (filter #(>= (:score %) min-score))

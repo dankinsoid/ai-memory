@@ -91,7 +91,7 @@
                (and (:reachable? info) test-query)
                (assoc :test-search
                       (try
-                        (let [vec     (embedding/embed-query (:embedding-url cfg) test-query)
+                        (let [vec     (embedding/embed-query (:openai-api-key cfg) test-query)
                               results (vs/search (:qdrant-url cfg) vec 3)]
                           {:ok true :hits (count results)})
                         (catch Exception e
