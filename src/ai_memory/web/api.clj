@@ -9,6 +9,8 @@
             [ai-memory.decay.core :as decay]
             [ai-memory.blob.store :as blob-store]
             [ai-memory.blob.exec :as blob-exec]
+            [ai-memory.embedding.vector-store :as vs]
+            [ai-memory.embedding.core :as embedding]
             [datomic.api :as d]
             [clojure.string :as str])
   (:import [java.util Date UUID]
@@ -67,6 +69,33 @@
               :tag-count  (or (d/q '[:find (count ?t) . :where [?t :tag/name]] db) 0)
               :edge-count (or (d/q '[:find (count ?e) . :where [?e :edge/id]] db) 0)
               :tick       (db/current-tick db)}}))
+
+;; --- Diagnostics ---
+
+(defn get-health
+  "Health check with Qdrant reachability."
+  [cfg _req]
+  (let [info (vs/collection-info (:qdrant-url cfg))]
+    {:status 200
+     :body   {:status "ok"
+              :qdrant (select-keys info [:reachable? :status])}}))
+
+(defn get-diagnostics
+  "Full Qdrant diagnostic: collection info + optional end-to-end test search.
+   Pass ?test-query=<text> to also run embedding + vector search."
+  [cfg req]
+  (let [info       (vs/collection-info (:qdrant-url cfg))
+        test-query (get-in req [:query-params "test-query"])]
+    {:status 200
+     :body   (cond-> {:qdrant info}
+               (and (:reachable? info) test-query)
+               (assoc :test-search
+                      (try
+                        (let [vec     (embedding/embed-query (:embedding-url cfg) test-query)
+                              results (vs/search (:qdrant-url cfg) vec 3)]
+                          {:ok true :hits (count results)})
+                        (catch Exception e
+                          {:ok false :error (.getMessage e)}))))}))
 
 ;; --- Graph: top nodes ---
 
@@ -699,3 +728,8 @@
   "POST /api/admin/reset — wipe all facts, edges, blobs, and vectors."
   [conn cfg _req]
   {:status 200 :body (delete/reset-all! conn cfg)})
+
+(defn reindex-vectors
+  "POST /api/admin/reindex — re-embeds all non-entity nodes into Qdrant."
+  [conn cfg _req]
+  {:status 200 :body (node/reindex-all! (db/db conn) cfg)})

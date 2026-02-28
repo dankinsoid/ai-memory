@@ -67,3 +67,17 @@
                  {:content-type :json})
     (catch Exception _))
   (ensure-collection! base-url))
+
+(defn collection-info
+  "Returns Qdrant collection stats: reachable?, status, vector-count, points-count.
+   On any error returns {:reachable? false :error <message>}."
+  [base-url]
+  (try
+    (let [resp   (http/get (str base-url "/collections/" collection-name) {:as :json})
+          result (get-in resp [:body :result])]
+      {:reachable?   true
+       :status       (:status result)
+       :vector-count (get-in result [:vectors_count])
+       :points-count (get-in result [:points_count])})
+    (catch Exception e
+      {:reachable? false :error (.getMessage e)})))
