@@ -25,12 +25,12 @@ Apply in order. Skip unless the observation passes.
 Skip if only useful right now, or obviously transient.
 
 ### 2. Code test
-"Is this a raw API signature, config value, or trivially documented fact with no insight?"
-Skip only those. Patterns, pitfalls, and preferences are worth saving even if discoverable in code.
+"Is this recoverable from code, docs, or a simple search?"
+Skip if it's a function signature, config value, file path, or documented behavior.
 
 ### 3. Generalization test
-"Might this be useful in a similar context or project?"
-Skip only if so narrowly tied to a one-time action that no related task could benefit. Related tasks count.
+"Does this apply beyond this specific task or moment?"
+Skip if too narrow to reuse in a different context.
 
 ### 4. Moment-of-insight (override)
 "Did this contradict prior expectations? Was it genuinely surprising?"
@@ -51,7 +51,7 @@ Good: `resolve-tags silently swallows errors in batch mode`
 
 Pick 3-5 total.
 
-1. **Aspect** (pick 1-2): call `memory_explore_tags` with no arguments to see available aspect tags — they have `tier: aspect`. Pick the best fit. Use `interest` for facts about what the user is currently exploring or focused on.
+1. **Aspect** (pick 1-2): call `memory_explore_tags` with no arguments to see available aspect tags — they have `tier: aspect`. Pick the best fit.
 
 2. **Project** (mandatory for project-specific facts): e.g. `ai-memory`
    - Use `universal` for facts that apply across all projects
