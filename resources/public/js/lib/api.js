@@ -23,6 +23,16 @@ async function post(path, body) {
   return res.json()
 }
 
+async function patch(path, body) {
+  const res = await fetch(BASE + path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body)
+  })
+  if (!res.ok) throw new Error(`PATCH ${path}: ${res.status}`)
+  return res.json()
+}
+
 async function del(path) {
   const res = await fetch(BASE + path, { method: 'DELETE', headers: authHeaders() })
   if (!res.ok) throw new Error(`DELETE ${path}: ${res.status}`)
@@ -78,6 +88,10 @@ export async function fetchTagCounts(tagSets) {
 
 export async function deleteFact(id) {
   return del(`/facts/${id}`)
+}
+
+export async function updateFact(id, data) {
+  return patch(`/facts/${id}`, data)
 }
 
 export async function resetDb() {

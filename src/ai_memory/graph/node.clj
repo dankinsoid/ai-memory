@@ -4,9 +4,11 @@
 (ns ai-memory.graph.node
   (:require [datomic.api :as d]
             [ai-memory.db.core :as db]
+            [ai-memory.tag.core :as tag]
             [ai-memory.embedding.core :as embedding]
             [ai-memory.embedding.vector-store :as vs]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.tools.logging :as log])
   (:import [java.util Date UUID]))
 
@@ -223,6 +225,38 @@
                  :node/tag-refs   tag-refs
                  :node/updated-at (now)}]
                count-txs)))))
+
+(defn replace-tags!
+  "Replaces all tags on a node with new-tag-names (seq of strings).
+   Decrements counts for removed tags, increments for added. Updates updated-at."
+  [conn eid new-tag-names]
+  (let [db            (d/db conn)
+        current-names (set (d/q '[:find [?name ...]
+                                  :in $ ?eid
+                                  :where
+                                  [?eid :node/tag-refs ?t]
+                                  [?t :tag/name ?name]]
+                                db eid))
+        new-names-set (set (map str/trim new-tag-names))
+        to-add        (remove current-names new-names-set)
+        to-remove     (remove new-names-set current-names)]
+    (doseq [name to-add]
+      (tag/ensure-tag! conn name))
+    (let [retract-txs (mapv (fn [name] [:db/retract eid :node/tag-refs [:tag/name name]]) to-remove)
+          add-txs     (mapv (fn [name] [:db/add eid :node/tag-refs [:tag/name name]]) to-add)
+          dec-txs     (mapv (fn [name] [:fn/inc-tag-count name -1]) to-remove)
+          inc-txs     (mapv (fn [name] [:fn/inc-tag-count name 1]) to-add)]
+      (db/transact! conn
+        (into (concat retract-txs add-txs dec-txs inc-txs)
+              [[:db/add eid :node/updated-at (now)]])))))
+
+(defn set-weight!
+  "Directly sets node base weight, clamped to [0.0, 1.0]. Updates updated-at."
+  [conn eid weight]
+  (let [w (max 0.0 (min 1.0 (double weight)))]
+    (db/transact! conn
+      [[:db/add eid :node/weight     w]
+       [:db/add eid :node/updated-at (now)]])))
 
 (defn reindex-all!
   "Re-embeds all non-entity nodes into Qdrant. Also re-embeds compact.md for blob nodes.
