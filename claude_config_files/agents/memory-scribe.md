@@ -71,8 +71,10 @@ Pick 3-5 total.
 
 1. **Aspect** (pick 1-2): call `memory_explore_tags` with no arguments to see available aspect tags — they have `tier: aspect`. Pick the best fit.
 
-2. **Project** (mandatory for project-specific facts): e.g. `ai-memory`
+2. **Project** (when fact is specific to one project): e.g. `ai-memory`
+   - Add only when the fact is about this project's architecture, decisions, pitfalls, or patterns — not just because it happened while working on it
    - Use `universal` for facts that apply across all projects
+   - Omit if unsure — better no project tag than wrong scope
 
 3. **Technical** (2-3): technology, domain, context — e.g. `clojure`, `datomic`, `async`, `tags`
    Browse `memory_explore_tags` to prefer existing tags over creating new ones.

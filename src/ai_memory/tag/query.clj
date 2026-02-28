@@ -228,6 +228,12 @@
   (let [node-tags (set (map :tag/name (:node/tag-refs node)))]
     (every? node-tags tag-names)))
 
+(defn- has-any-of-tags?
+  "Returns true if node has ANY of the specified tag names."
+  [tag-names node]
+  (let [node-tags (set (map :tag/name (:node/tag-refs node)))]
+    (some node-tags tag-names)))
+
 (defn- in-date-range?
   "Returns true if node's updated-at falls within [since, until)."
   [since until node]
@@ -237,7 +243,7 @@
 
 (defn- execute-filter
   "Executes a single filter. Returns {:filter <input> :facts [...] :total N}."
-  [db cfg registry {:keys [id session-id tags query since until limit offset sort-by] :as filter-spec}]
+  [db cfg registry {:keys [id session-id tags query exclude-tags since until limit offset sort-by] :as filter-spec}]
   (cond
     ;; Direct session-id lookup
     session-id
@@ -275,9 +281,10 @@
                            (if (or tags since until) 5 1))
           hits          (node/search db cfg query search-limit)
           filtered      (cond->> hits
-                          tags    (filter (partial has-all-tags? tags))
-                          since-d (filter (partial in-date-range? since-d nil))
-                          until-d (filter (partial in-date-range? nil until-d)))
+                          tags         (filter (partial has-all-tags? tags))
+                          exclude-tags (remove (partial has-any-of-tags? exclude-tags))
+                          since-d      (filter (partial in-date-range? since-d nil))
+                          until-d      (filter (partial in-date-range? nil until-d)))
           total         (count (vec filtered))
           page          (->> filtered (drop (or offset 0)) (take default-limit)
                              vec (enrich-effective-weight db))]
@@ -295,8 +302,10 @@
                           (or since-d until-d) (by-date-range db {:since since-d :until until-d})
                           :else (all-nodes db))
           sorted        (sort-facts db sort-by results)
-          total         (count sorted)
-          page          (->> sorted (drop (or offset 0)) (take default-limit) vec)]
+          excluded      (cond->> sorted
+                          exclude-tags (remove (partial has-any-of-tags? exclude-tags)))
+          total         (count excluded)
+          page          (->> excluded (drop (or offset 0)) (take default-limit) vec)]
       {:filter filter-spec
        :facts  page
        :total  total})))
