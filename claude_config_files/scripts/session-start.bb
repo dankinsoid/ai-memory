@@ -89,31 +89,39 @@
            {:tags ["universal"]}
            {:tags ["session"] :sort_by "date" :limit 5}]
     project-name (conj {:tags ["project" project-name]})
-    project-name (conj {:tags [project-name]})))
+    project-name (conj {:tags [project-name] :exclude_tags ["session"]})))
 
 (def facts-data (api-post "/api/tags/facts" {:filters fact-filters}))
 
 ;; --- Format output ---
+
+(defn- format-fact [f]
+  (let [content  (get f (keyword "node/content"))
+        blob-dir (get f (keyword "node/blob-dir"))
+        tags     (->> (get f (keyword "node/tag-refs"))
+                      (map #(get % (keyword "tag/name"))))]
+    (str "- " content
+         (when blob-dir (str " [blob: " blob-dir "]"))
+         (when (seq tags) (str " {" (str/join ", " tags) "}"))
+         (when-let [ew (get f (keyword "node/effective-weight"))]
+           (str " w:" (format "%.2f" (double ew)))))))
 
 (defn format-facts [results filter-pred label]
   (when-let [group (first (filter filter-pred results))]
     (let [facts (:facts group)]
       (when (seq facts)
         (str "## " label "\n"
-             (str/join "\n"
-               (map (fn [f]
-                      (let [content  (get f (keyword "node/content"))
-                            blob-dir (get f (keyword "node/blob-dir"))
-                            tags     (->> (get f (keyword "node/tag-refs"))
-                                          (map #(get % (keyword "tag/name"))))]
-                        (str "- " content
-                             (when blob-dir
-                               (str " [blob: " blob-dir "]"))
-                             (when (seq tags)
-                               (str " {" (str/join ", " tags) "}"))
-                             (when-let [ew (get f (keyword "node/effective-weight"))]
-                               (str " w:" (format "%.2f" (double ew)))))))
-                    facts)))))))
+             (str/join "\n" (map format-fact facts)))))))
+
+(defn format-project-section [results project-name]
+  (let [summary-facts (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["project" project-name]) results))) [])
+        project-facts (or (:facts (first (filter #(= (get-in % [:filter :tags]) [project-name]) results))) [])
+        summary-ids   (set (map :db/id summary-facts))
+        other-facts   (remove #(summary-ids (:db/id %)) project-facts)
+        all-facts     (concat summary-facts other-facts)]
+    (when (seq all-facts)
+      (str "## Project: " project-name "\n"
+           (str/join "\n" (map format-fact all-facts))))))
 
 (defn format-tag [t]
   (str (get t (keyword "tag/name"))
@@ -138,13 +146,9 @@
     (str "## Recent Sessions\n"
          (str/join "\n"
            (map (fn [f]
-                  (let [content    (get f (keyword "node/content"))
-                        blob-dir   (get f (keyword "node/blob-dir"))
-                        updated    (get f (keyword "node/updated-at"))
-                        date-str   (when updated
-                                     (subs (str updated) 0 (min 10 (count (str updated)))))]
-                    (str "- " (or date-str "?") ": "
-                         (or content "(no summary)")
+                  (let [content  (get f (keyword "node/content"))
+                        blob-dir (get f (keyword "node/blob-dir"))]
+                    (str "- " (or (some-> content (str/split #"\n") first) "(no summary)")
                          (when blob-dir (str " [blob: " blob-dir "]")))))
                 facts)))))
 
@@ -169,17 +173,9 @@
           (fn [r] (= (get-in r [:filter :tags]) ["universal"]))
           "Universal"))
 
-      project-summary-section
-      (when (and project-name (not no-facts?))
-        (format-facts results
-          (fn [r] (= (get-in r [:filter :tags]) ["project" project-name]))
-          (str "Project Summary: " project-name)))
-
       project-section
       (when (and project-name (not no-facts?))
-        (format-facts results
-          (fn [r] (= (get-in r [:filter :tags]) [project-name]))
-          (str "Project: " project-name)))
+        (format-project-section results project-name))
 
       sessions-section
       (when-not no-sessions?
@@ -196,7 +192,6 @@
 
       sections (remove nil? [pref-section
                              universal-section
-                             project-summary-section
                              project-section
                              sessions-section
                              blob-section
