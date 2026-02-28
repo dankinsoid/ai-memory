@@ -17,21 +17,23 @@
 (defn- post-handler [mcp-cfg request]
   (let [body    (:body-params request)
         sess-id (get-in request [:headers "mcp-session-id"])
-        handler (if sess-id
-                  (.get sessions sess-id)
-                  nil)]
-    ;; For non-initialize requests, require valid session
-    (if (and (not= "initialize" (:method body))
-             (not= "notifications/initialized" (:method body))
-             (or (nil? sess-id) (nil? handler)))
+        handler (when sess-id (.get sessions sess-id))]
+    ;; Reject only when sess-id is completely absent for non-initialize methods.
+    ;; If sess-id is present but session not found (e.g. server restarted), auto-recover below.
+    (if (and (nil? sess-id)
+             (not= "initialize" (:method body))
+             (not= "notifications/initialized" (:method body)))
       {:status 400
        :headers {"Content-Type" "application/json"}
        :body (json/generate-string
                {:jsonrpc "2.0"
                 :error {:code -32600
-                        :message "Bad Request: missing or invalid Mcp-Session-Id"}})}
-      ;; Dispatch
+                        :message "Bad Request: missing Mcp-Session-Id"}})}
+      ;; Dispatch — create handler on demand if session was lost (server restart)
       (let [handler  (or handler (protocol/make-handler mcp-cfg))
+            _        (when (and sess-id (nil? (.get sessions sess-id)))
+                       (log/info "MCP session auto-recovered:" sess-id)
+                       (.put sessions sess-id handler))
             response (try
                        (handler body)
                        (catch Exception e
