@@ -16,12 +16,15 @@ jobs:
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         with:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
           script_stop: true
           command_timeout: 10m
+          envs: OPENAI_API_KEY
           script: |
             set -euo pipefail
 
@@ -32,7 +35,10 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            $COMPOSE pull embedding qdrant prometheus grafana
+            # Ensure OPENAI_API_KEY is in .env
+            grep -q '^OPENAI_API_KEY=' .env 2>/dev/null && sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=${OPENAI_API_KEY}|" .env || echo "OPENAI_API_KEY=${OPENAI_API_KEY}" >> .env
+
+            $COMPOSE pull qdrant prometheus grafana
             $COMPOSE build --parallel app datomic
             $COMPOSE up -d --remove-orphans
 
