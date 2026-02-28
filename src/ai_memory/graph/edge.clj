@@ -6,8 +6,6 @@
   (:require [datomic.api :as d]
             [ai-memory.db.core :as db]))
 
-(def ^:private max-weight 5.0)
-
 (defn create-edge
   "Creates a weighted edge between two nodes (by entity ID).
    Optional :type for typed edges (e.g. :continuation)."
@@ -18,7 +16,7 @@
                  :edge/id     (d/squuid)
                  :edge/from   from
                  :edge/to     to
-                 :edge/weight (or weight 1.0)
+                 :edge/weight (or weight 0.0)
                  :edge/cycle  tick}
           type (assoc :edge/type type))]
        tick)))
@@ -58,13 +56,28 @@
          :where [?e :edge/id]]
        db))
 
+(defn promote-eternal!
+  "Sets edge weight to 1.0, making it eternal (never decays).
+   Cannot be achieved via regular strengthen — explicit promotion only."
+  [conn edge-id]
+  (let [db   (d/db conn)
+        tick (db/next-tick db)]
+    (db/transact! conn
+       [{:edge/id     edge-id
+         :edge/weight 1.0
+         :edge/cycle  tick}]
+       tick)))
+
 (defn strengthen
-  "Adds `delta` to edge weight (capped at max-weight) and updates cycle."
-  [conn edge-id delta]
+  "Adjusts edge base weight toward 1.0 asymptotically (positive score)
+   or linearly (negative score). base ∈ [0.0, 1.0)."
+  [conn edge-id score factor]
   (let [db (d/db conn)
         tick (db/next-tick db)
-        current-weight (or (:edge/weight (d/pull db [:edge/weight] [:edge/id edge-id])) 0.0)
-        new-weight (min (+ current-weight delta) max-weight)]
+        current (or (:edge/weight (d/pull db [:edge/weight] [:edge/id edge-id])) 0.0)
+        new-weight (if (pos? score)
+                     (+ current (* score factor (- 1.0 current)))
+                     (max 0.0 (+ current (* score factor))))]
     (db/transact! conn
        [{:edge/id     edge-id
          :edge/weight new-weight
@@ -73,13 +86,15 @@
 
 (defn find-or-create-edge
   "Creates edge if not exists, strengthens if it does.
+   `initial-weight` used on creation (base ∈ [0.0, 1.0)).
+   On strengthen: score=1.0, factor=initial-weight (closes that fraction of gap).
    Optional opts: {:type :continuation} for typed edges."
-  ([conn from-eid to-eid weight]
-   (find-or-create-edge conn from-eid to-eid weight nil))
-  ([conn from-eid to-eid weight opts]
+  ([conn from-eid to-eid initial-weight]
+   (find-or-create-edge conn from-eid to-eid initial-weight nil))
+  ([conn from-eid to-eid initial-weight opts]
    (let [db       (d/db conn)
          existing (find-edge-between db from-eid to-eid)]
      (if existing
-       (strengthen conn existing weight)
-       (create-edge conn (cond-> {:from from-eid :to to-eid :weight weight}
+       (strengthen conn existing 1.0 initial-weight)
+       (create-edge conn (cond-> {:from from-eid :to to-eid :weight initial-weight}
                            (:type opts) (assoc :type (:type opts))))))))

@@ -36,10 +36,10 @@
 (defn- node->d3-with-ew [tick n]
   (assoc (node->d3 n)
     :effective-weight (decay/effective-weight
-                        (or (:node/weight n) 1.0)
+                        (or (:node/weight n) 0.0)
                         (or (:node/cycle n) 0)
                         tick
-                        decay/default-decay-factor)))
+                        decay/default-decay-k)))
 
 (defn- edge->d3 [e]
   {:source (str (get-in e [:edge/from :db/id]))
@@ -117,10 +117,10 @@
         with-ew (mapv (fn [n]
                          (assoc n ::ew
                            (decay/effective-weight
-                             (or (:node/weight n) 1.0)
+                             (or (:node/weight n) 0.0)
                              (or (:node/cycle n) 0)
                              tick
-                             decay/default-decay-factor)))
+                             decay/default-decay-k)))
                        nodes)
         top-n (->> with-ew (sort-by ::ew >) (take limit))]
     {:status 200
@@ -185,9 +185,9 @@
       (let [node (d/pull db node-pull-spec-full id)
             tick (db/current-tick db)
             eff-w (decay/effective-weight
-                    (or (:node/weight node) 1.0)
+                    (or (:node/weight node) 0.0)
                     (or (:node/cycle node) 0)
-                    tick decay/default-decay-factor)
+                    tick decay/default-decay-k)
             edges (edge/find-edges-from db id)]
         (if (:node/content node)
           {:status 200
@@ -253,12 +253,17 @@
         factor         (or (:reinforcement-factor cfg) 0.5)]
     {:status 200
      :body   (let [results (mapv (fn [{:keys [id score]}]
-                                   (let [delta (* score factor)]
-                                     (node/reinforce-weight conn id delta)
-                                     {:id id :score score :delta delta}))
+                                   (node/reinforce-weight conn id score factor)
+                                   {:id id :score score})
                                  reinforcements)]
                {:reinforced (count results)
                 :details    results})}))
+
+(defn promote-eternal [conn _cfg req]
+  (let [id (:id (:body-params req))]
+    (node/promote-eternal! conn id)
+    {:status 200
+     :body   {:promoted id}}))
 
 ;; --- Helpers ---
 
@@ -664,7 +669,7 @@
                 new-db   (db/db conn)
                 new-eid  (find-session-fact new-db session-id)
                 prev-dir (:node/blob-dir (d/pull new-db [:node/blob-dir] prev-eid))]
-            ;; Create typed continuation edge: new → prev
+            ;; Create typed continuation edge: new → prev (tentative, weight=0.5)
             (edge/find-or-create-edge conn new-eid prev-eid 0.5
               {:type :continuation})
             {:status 200
@@ -704,10 +709,9 @@
         (if-not eid
           {:status 200 :body {:chain []}}
           (let [chain (traverse-continuation-chain db eid 10)]
-            ;; Strengthen first edge in chain to max weight
+            ;; On explicit load: promote first continuation edge to eternal (1.0)
             (when (and strengthen (seq chain))
-              (let [{:keys [edge-id]} (first chain)]
-                (edge/strengthen conn edge-id 10.0)))
+              (edge/promote-eternal! conn (:edge-id (first chain))))
             {:status 200
              :body   {:chain (mapv #(dissoc % :eid) chain)}}))))))
 

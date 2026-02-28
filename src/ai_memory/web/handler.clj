@@ -76,6 +76,7 @@
                                      :delete (fn [req] (api/delete-fact conn cfg req))}]
                       ["/admin/reset" {:post (fn [req] (api/reset-db conn cfg req))}]
                       ["/admin/reindex" {:post (fn [req] (api/reindex-vectors conn cfg req))}]
+                      ["/admin/promote-eternal" {:post (fn [req] (api/promote-eternal conn cfg req))}]
                       ["/nodes" {:get  (fn [req] (api/list-nodes conn req))
                                  :post (fn [req] (api/create-node conn cfg req))}]
                       ["/remember" {:post (fn [req] (api/remember conn cfg req))}]

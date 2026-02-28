@@ -39,7 +39,7 @@
            count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
            node-map  {:db/id           tempid
                       :node/content    content
-                      :node/weight     (or (:weight opts) 1.0)
+                      :node/weight     (or (:weight opts) 0.0)
                       :node/cycle      (or (:cycle opts) 0)
                       :node/tag-refs   tag-refs
                       :node/created-at now
@@ -298,12 +298,12 @@
 (deftest sort-by-weight-default-test
   (testing "default sort (no sort-by param) uses weight"
     (set-tick! *conn* 50)
-    ;; Abandoned fact: weight=1.0, cycle=0 → effective = 1.0 * 0.95^50 ≈ 0.077
+    ;; Abandoned fact: base=0.0, cycle=0 → effective = 51^(-0.2) ≈ 0.56
     (create-tagged-node! *conn* "abandoned" ["clj"]
-                         {:weight 1.0 :cycle 0 :updated-at (days-ago 1)})
-    ;; Active fact: weight=2.0, cycle=49 → effective = 2.0 * 0.95^1 = 1.9
+                         {:weight 0.0 :cycle 0 :updated-at (days-ago 1)})
+    ;; Active fact: base=0.8, cycle=49 → effective = 2^(-0.04) ≈ 0.97
     (create-tagged-node! *conn* "active" ["clj"]
-                         {:weight 2.0 :cycle 49 :updated-at (days-ago 10)})
+                         {:weight 0.8 :cycle 49 :updated-at (days-ago 10)})
     (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
                     [["clj"]]
                     {:limit 50})
