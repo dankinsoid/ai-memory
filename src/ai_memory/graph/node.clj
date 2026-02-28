@@ -7,9 +7,10 @@
             [ai-memory.tag.core :as tag]
             [ai-memory.embedding.core :as embedding]
             [ai-memory.embedding.vector-store :as vs]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.tools.logging :as log])
-  (:import [java.util Date]))
+  (:import [java.util Date UUID]))
 
 (defn- now [] (Date.))
 
@@ -36,6 +37,21 @@
       (vs/upsert-point! (:qdrant-url cfg) eid vector {}))
     (catch Exception e
       (log/warn e "Failed to vectorize node" eid))))
+
+(defn embed-file!
+  "Vectorizes a blob file into Qdrant under a stable UUID point ID derived from blob-dir+file-path.
+   payload contains fact-eid, blob-dir and file-path for reverse lookup.
+   Logs warning on failure, never throws."
+  [cfg fact-eid blob-dir file-path content]
+  (try
+    (let [point-id (str (UUID/nameUUIDFromBytes (.getBytes (str blob-dir "/" file-path) "UTF-8")))
+          vector   (embedding/embed-document (:embedding-url cfg) content)]
+      (vs/upsert-point! (:qdrant-url cfg) point-id vector
+                        {:fact_eid  fact-eid
+                         :blob_dir  blob-dir
+                         :file_path file-path}))
+    (catch Exception e
+      (log/warn e "Failed to vectorize file" blob-dir "/" file-path))))
 
 (defn create-node
   "Creates a memory node in Datomic. Embeds content in Qdrant unless entity.
@@ -69,21 +85,32 @@
   (d/pull db '[*] eid))
 
 (def ^:private min-score 0.2)
+(def ^:private min-file-score 0.15)
 
 (defn search
   "Finds nodes semantically similar to `text`.
+   Searches both fact vectors (long IDs) and blob file vectors (UUID IDs).
+   Deduplicates by entity: if same fact found via both, keeps max score.
    Returns nodes from Datomic enriched with :search/score, sorted by score desc."
   [db cfg text top-k]
   (let [qvec (embedding/embed-query (:openai-api-key cfg) text)
         hits (vs/search (:qdrant-url cfg) qvec top-k)]
     (->> hits
-         (filter #(>= (:score %) min-score))
-         (mapv (fn [{:keys [id score]}]
-                 (let [eid  (if (number? id) (long id) (parse-long (str id)))
-                       node (when eid (d/pull db '[*] eid))]
-                   (when (:node/content node)
-                     (assoc node :search/score score)))))
-         (filterv some?))))
+         (mapv (fn [{:keys [id score payload]}]
+                 (let [file-hit? (string? id)
+                       threshold (if file-hit? min-file-score min-score)]
+                   (when (>= score threshold)
+                     (let [eid  (if file-hit?
+                                  (:fact_eid payload)
+                                  (long id))
+                           node (when eid (d/pull db '[*] eid))]
+                       (when (:node/content node)
+                         (assoc node :search/score score)))))))
+         (filterv some?)
+         ;; Deduplicate: same fact may appear from fact vector + file vector; keep max score
+         (group-by :db/id)
+         vals
+         (mapv #(apply max-key :search/score %)))))
 
 (defn find-duplicate
   "Returns the best semantic match if score >= threshold, or nil."
@@ -232,18 +259,29 @@
        [:db/add eid :node/updated-at (now)]])))
 
 (defn reindex-all!
-  "Re-embeds all non-entity nodes into Qdrant. Synchronous, sequential.
-   Returns {:reindexed N :skipped M}."
+  "Re-embeds all non-entity nodes into Qdrant. Also re-embeds compact.md for blob nodes.
+   Synchronous, sequential. Returns {:reindexed N :skipped M :files-reindexed K}."
   [db cfg]
-  (let [nodes (d/q '[:find [(pull ?e [:db/id :node/content {:node/tag-refs [:tag/name]}]) ...]
+  (let [nodes (d/q '[:find [(pull ?e [:db/id :node/content :node/blob-dir
+                                      {:node/tag-refs [:tag/name]}]) ...]
                      :where [?e :node/content]]
-                   db)]
+                   db)
+        base  (:blob-path cfg)]
     (reduce (fn [acc node]
               (if (skip-embedding? {:tag-refs (:node/tag-refs node)})
                 (update acc :skipped inc)
-                (do (embed-async! cfg (:db/id node) (:node/content node))
-                    (update acc :reindexed inc))))
-            {:reindexed 0 :skipped 0}
+                (do
+                  (embed-async! cfg (:db/id node) (:node/content node))
+                  (let [acc' (update acc :reindexed inc)]
+                    (if-let [blob-dir (:node/blob-dir node)]
+                      (let [compact-file (io/file base blob-dir "compact.md")]
+                        (if (.exists compact-file)
+                          (do (embed-file! cfg (:db/id node) blob-dir "compact.md"
+                                           (slurp compact-file))
+                              (update acc' :files-reindexed inc))
+                          acc'))
+                      acc')))))
+            {:reindexed 0 :skipped 0 :files-reindexed 0}
             nodes)))
 
 (defn find-blobs

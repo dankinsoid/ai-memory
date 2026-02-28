@@ -656,6 +656,7 @@
                 (when meta
                   (blob-store/write-meta! base blob-dir
                     (assoc meta :compact-summary compact))))
+              (node/embed-file! cfg session-eid blob-dir "compact.md" compact)
               "stored")]
 
         {:status 200
