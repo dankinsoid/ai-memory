@@ -43,7 +43,7 @@ export async function fetchTags(limit = 500, offset = 0) {
 
 // --- Facts ---
 
-export async function fetchFacts({ tags = [], query = '', sortBy = 'weight', limit = 50, offset = 0 } = {}) {
+export async function fetchFacts({ tags = [], query = '', sortBy = 'date', limit = 50, offset = 0 } = {}) {
   const filter = { limit, offset, sort_by: sortBy }
   if (tags.length > 0) filter.tags = tags
   if (query) filter.query = query

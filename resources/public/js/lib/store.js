@@ -10,7 +10,7 @@ export const facts = signal([])             // current loaded facts
 export const factsTotal = signal(0)         // total matching
 export const factsLoading = signal(false)
 export const factsOffset = signal(0)        // pagination offset
-export const sortBy = signal('weight')      // "weight" | "date"
+export const sortBy = signal('date')        // "weight" | "date"
 
 // --- Search ---
 export const searchQuery = signal('')       // semantic search text

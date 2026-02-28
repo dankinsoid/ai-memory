@@ -189,12 +189,12 @@
            (enrich-effective-weight db facts)))
 
 (defn- sort-facts
-  "Dispatches sorting: \"date\" → by updated-at, \"weight\" (default) → by effective weight.
+  "Dispatches sorting: \"weight\" → by effective weight, \"date\" (default) → by updated-at.
    Always enriches facts with :node/effective-weight."
   [db sort-by-param facts]
   (case sort-by-param
-    "date" (enrich-effective-weight db (sort-by-date facts))
-    (sort-by-weight db facts)))
+    "weight" (sort-by-weight db facts)
+    (enrich-effective-weight db (sort-by-date facts))))
 
 (defn fetch-by-tag-sets
   "Fetches facts for each tag set (intersection). Per-set limit.
