@@ -51,8 +51,8 @@
                                                                              :description "Max results for this filter (default 50, or 10 if query)"}
                                                                      :sort_by {:type "string"
                                                                                :enum ["weight" "date"]
-                                                                               :description "Sort order: weight (decayed importance, default) or date (newest first)"
-                                                                               :default "weight"}
+                                                                               :description "Sort order: date (newest first, default) or weight (decayed importance)"
+                                                                               :default "date"}
                                                                      :offset {:type "integer"
                                                                               :description "Skip first N results for pagination (default 0)"
                                                                               :default 0}}}
