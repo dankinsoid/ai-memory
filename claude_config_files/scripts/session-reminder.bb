@@ -161,9 +161,9 @@
                         "\", chunk_title, and summary."))
              (and need-summary? (not need-chunk?))
              (conj (str "Call memory_session with session_id: \"" session-id
-                        "\" and summary."))
+                        "\", summary, and tags."))
              need-project-remind?
              (conj (str "Call memory_project(project=\"" project-name
-                        "\", summary=\"...\") if the project description has changed or is not yet stored."))))))))
+                        "\", summary=\"...\") if the project description has changed or is not yet stored.")))))))))
 
 (System/exit 0)
