@@ -294,6 +294,15 @@
                         (or stdout "")
                         (when (and exit-code (not= 0 exit-code))
                           (str "\n[exit code: " exit-code "]"))))
+    :remember    (if (:error result)
+                   (str "error: " (:error result))
+                   (str "ids: " (str/join " " (map :id (:nodes result)))))
+    :store-file  (if (:error result)
+                   (str "error: " (:error result))
+                   (str "blob: " (:blob-dir result)))
+    :reinforce   (if (:error result) (str "error: " (:error result)) "ok")
+    :session     (if (:error result) (str "error: " (:error result)) "ok")
+    :project     (if (:error result) (str "error: " (:error result)) "ok")
     (json/generate-string result)))
 
 (defn- handle-tools-call [cfg id params]
