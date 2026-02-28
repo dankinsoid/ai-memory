@@ -129,10 +129,10 @@
                                                        last-chunk-tokens)}
                            context-tokens (assoc :context-tokens context-tokens))
 
-          ;; Summary reminder on early turns (skip turn 1 — handled by session-init agent hook)
-          need-summary? (and (> prompt-count 1)
-                             (<= prompt-count summary-remind-turns)
-                             (< first-prompt-len short-prompt-len))
+          ;; Summary reminder on early turns
+          need-summary? (or (= prompt-count 1)
+                            (and (<= prompt-count summary-remind-turns)
+                                 (< first-prompt-len short-prompt-len)))
 
           ;; Project summary reminder: once per N days per project
           project-remind-file (when project-name

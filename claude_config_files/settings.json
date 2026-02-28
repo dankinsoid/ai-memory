@@ -2,7 +2,6 @@
   "permissions": {
     "allow": [
       "Bash(bb ~/.claude/skills/**)",
-      "Bash(bb ~/.claude/hooks/session-save.bb *)",
       "mcp__ai-memory__memory_explore_tags",
       "mcp__ai-memory__memory_get_facts",
       "mcp__ai-memory__memory_remember",
@@ -17,16 +16,6 @@
   },
   "hooks": {
     "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "agent",
-            "prompt": "Session initializer. Input: $ARGUMENTS\n\n1. Extract session_id, cwd, and prompt from the input JSON.\n2. Run Bash: test -f ~/.claude/hooks/state/<session_id>-session-init.lock && echo EXISTS\n   (replace <session_id> with the actual value from step 1)\n3. If output is EXISTS: return {\"ok\": true} immediately — nothing else to do.\n4. If NOT exists:\n   a. Generate a concise 2-5 word English summary (lowercase, no articles) of the 'prompt' field. If prompt is too short or vague (e.g. 'hi', 'hello'), use 'new session'.\n   b. Choose 2-4 relevant lowercase tags from: debugging, architecture, feature, sessions, tooling, api, ui, refactoring, performance, testing, docs, config.\n   c. Run: bb ~/.claude/hooks/session-save.bb \"<session_id>\" \"<summary>\" \"<tag1,tag2,...>\" \"<cwd>\"\n      (all args double-quoted to handle spaces)\n5. Always return {\"ok\": true}.",
-            "timeout": 30,
-            "statusMessage": "Saving session metadata..."
-          }
-        ]
-      },
       {
         "hooks": [
           {
