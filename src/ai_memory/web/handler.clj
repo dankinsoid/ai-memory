@@ -66,7 +66,8 @@
                     [["/" {:get (fn [_] (-> (resp/resource-response "public/index.html")
                                          (resp/content-type "text/html")))}]
                      ["/api" {:middleware [wrap-normalize-keys]}
-                      ["/health" {:get (fn [_] {:status 200 :body {:status "ok"}})}]
+                      ["/health" {:get (fn [req] (api/get-health cfg req))}]
+                      ["/diagnostics" {:get (fn [req] (api/get-diagnostics cfg req))}]
                       ["/stats" {:get (fn [req] (api/get-stats conn req))}]
                       ["/graph" {:get (fn [req] (api/get-graph conn req))}]
                       ["/graph/top-nodes" {:get (fn [req] (api/get-top-nodes conn cfg req))}]
@@ -74,6 +75,7 @@
                       ["/facts/:id" {:get    (fn [req] (api/get-fact-detail conn cfg req))
                                      :delete (fn [req] (api/delete-fact conn cfg req))}]
                       ["/admin/reset" {:post (fn [req] (api/reset-db conn cfg req))}]
+                      ["/admin/reindex" {:post (fn [req] (api/reindex-vectors conn cfg req))}]
                       ["/nodes" {:get  (fn [req] (api/list-nodes conn req))
                                  :post (fn [req] (api/create-node conn cfg req))}]
                       ["/remember" {:post (fn [req] (api/remember conn cfg req))}]
