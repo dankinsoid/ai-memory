@@ -7,15 +7,25 @@ Read it before unfamiliar tasks; write to it when you learn something worth keep
 
 ## When to Save
 
-Pass to `memory-scribe` when any of these rings true:
+Pass to `memory-scribe` when any of these occur:
 
-*I wish I'd known this earlier.*
-*I should remember this for next time.*
-*My understanding of something just changed.*
-*I'd want to know this before a similar task.*
-*This is interesting — worth keeping.*
+**Events** — concrete things that happened:
+- Implemented, added, removed, refactored something notable
+- Fixed a bug (what broke, what fixed it)
+- Reverted something (what and why)
+- Tried an approach that didn't work
 
-Especially: user requirements and reactions.
+**Decisions** — choices made with rationale:
+- Tech choices, architecture decisions, design patterns chosen
+- Trade-offs accepted
+
+**Lessons** — things learned:
+- Pitfalls, surprising behaviors, non-obvious constraints
+- Things that contradicted expectations
+
+**Preferences** — user or project preferences:
+- Code style, workflow, tooling choices
+- "Always do X", "never do Y"
 
 ```
 Task(subagent_type="memory-scribe", run_in_background=true,

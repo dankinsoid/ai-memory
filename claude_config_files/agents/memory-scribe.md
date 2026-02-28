@@ -3,6 +3,8 @@ name: memory-scribe
 description: Filter and save a candidate observation to long-term memory. Pass raw observations here — agent applies quality filters, formats, and saves if worth keeping. Never call memory_remember directly in main context; always delegate here.
 tools:
   - mcp__ai-memory__memory_remember
+  - mcp__ai-memory__memory_get_facts
+  - mcp__ai-memory__memory_reinforce
   - mcp__ai-memory__memory_explore_tags
 ---
 
@@ -30,7 +32,7 @@ Skip if it's a function signature, config value, file path, or documented behavi
 
 ### 3. Generalization test
 "Does this apply beyond this specific task or moment?"
-Skip if too narrow to reuse in a different context.
+Skip if too narrow to reuse in a different context — UNLESS it's an Event (project history is always worth recording).
 
 ### 4. Moment-of-insight (override)
 "Did this contradict prior expectations? Was it genuinely surprising?"
@@ -38,14 +40,30 @@ If yes — save even if other filters are borderline. This is the strongest sign
 
 ## Fact Format
 
-One sentence, ≤15 words. Lowercase. No articles (a/an/the).
+≤25 words. Lowercase. No articles (a/an/the).
 
-- **Imperative** for actionable knowledge: `prefer X over Y`, `avoid Z when ...`, `when X do Y`
-- **Declarative** for domain facts: `subject verb object`
+Three types:
+- **Imperative** — actionable knowledge: `prefer X over Y`, `avoid Z when ...`, `when X do Y`
+- **Declarative** — domain facts: `subject verb object`
+- **Event** — project history: `implemented X using Y`, `reverted X because Z`, `fixed Y by doing W`
 
-Bad: `the system uses datomic` (article, too short, no insight)
-Bad: `when refactoring the tag resolution pipeline, watch out for the fact that resolve-tags silently swallows errors in batch mode` (too long)
+Bad: `the system uses datomic` (article, too generic, no insight)
+Bad: (>25 words, padded prose)
 Good: `resolve-tags silently swallows errors in batch mode`
+Good: `reverted SSE transport — claude code CLI requires streamable HTTP, SSE is deprecated`
+Good: `implemented fact dedup via 0.85 semantic similarity threshold; reinforces existing node instead of creating duplicate`
+
+## Check Existing
+
+Before saving, search for related facts:
+
+```
+memory_get_facts(filters=[{query: "<observation>", limit: 5}])
+```
+
+- If a result clearly covers the same ground → `memory_reinforce` it (score 0.3-0.7), skip `memory_remember`
+- If a result is related but new info adds a distinct angle → create new fact, keep it clearly different
+- If nothing relevant → create new fact
 
 ## Tags
 
@@ -61,4 +79,5 @@ Pick 3-5 total.
 
 ## Done
 
-Call `memory_remember` and stop. No output needed.
+Either reinforce an existing fact OR call `memory_remember`. Never both for the same observation.
+No output needed.
