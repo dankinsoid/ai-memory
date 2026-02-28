@@ -1,19 +1,23 @@
 (ns ai-memory.decay.core)
 
-(def default-decay-factor
-  "Per-tick decay factor. 0.95^10 ≈ 0.60, 0.95^50 ≈ 0.08."
-  0.95)
+(def default-decay-k
+  "Power-law decay divisor. Controls how fast facts decay.
+   half-life (ticks) = 2^(k/(1-base)) - 1.
+   At k=5, base=0: half-life ≈ 31 ticks."
+  5)
 
 (defn effective-weight
-  "Computes decayed weight: base * decay_factor ^ (current_cycle - last_cycle)"
-  [base-weight last-cycle current-cycle decay-factor]
-  (let [elapsed (- current-cycle last-cycle)]
-    (if (pos? elapsed)
-      (* base-weight (Math/pow decay-factor elapsed))
-      base-weight)))
+  "Power-law decay: (elapsed+1)^((base-1)/k).
+   base ∈ [0.0, 1.0]. At base=1.0 (eternal) always returns 1.0.
+   At elapsed=0 always returns 1.0 regardless of base."
+  [base last-cycle current-cycle decay-k]
+  (if (>= base 1.0)
+    1.0
+    (let [elapsed (max 0 (- current-cycle last-cycle))]
+      (Math/pow (inc elapsed) (/ (dec base) (double decay-k))))))
 
 (defn should-archive?
   "Returns true if effective weight is below archival threshold."
-  [base-weight last-cycle current-cycle decay-factor threshold]
-  (< (effective-weight base-weight last-cycle current-cycle decay-factor)
+  [base last-cycle current-cycle decay-k threshold]
+  (< (effective-weight base last-cycle current-cycle decay-k)
      threshold))

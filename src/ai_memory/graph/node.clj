@@ -47,7 +47,7 @@
         ts           (now)
         base-tx      (cond-> {:db/id           tempid
                                :node/content    content
-                               :node/weight     1.0
+                               :node/weight     0.0
                                :node/cycle      tick
                                :node/created-at ts
                                :node/updated-at ts}
@@ -115,14 +115,22 @@
     (when-not (skip-embedding? {:tag-refs (:node/tag-refs node)})
       (embed-async! cfg eid new-content))))
 
+(defn- apply-score
+  "Asymptotic approach to 1.0 for positive score; linear decrease for negative.
+   base ∈ [0.0, 1.0). Result never reaches 1.0 via regular reinforce."
+  [current score factor]
+  (if (pos? score)
+    (+ current (* score factor (- 1.0 current)))
+    (max 0.0 (+ current (* score factor)))))
+
 (defn reinforce-node
   "Reinforces existing node: bumps weight, cycle, updated-at. Re-embeds unless entity."
-  [conn cfg eid new-content delta]
+  [conn cfg eid new-content score factor]
   (let [db   (d/db conn)
         tick (db/next-tick db)
         node (d/pull db [:node/weight :node/blob-dir {:node/tag-refs [:tag/name]}] eid)
-        current-weight (or (:node/weight node) 1.0)
-        new-weight     (+ current-weight delta)]
+        current-weight (or (:node/weight node) 0.0)
+        new-weight     (apply-score current-weight score factor)]
     (db/transact! conn
        [[:db/add eid :node/content    new-content]
         [:db/add eid :node/weight     new-weight]
@@ -133,15 +141,27 @@
       (embed-async! cfg eid new-content))))
 
 (defn reinforce-weight
-  "Adjusts node weight by delta, updates cycle. No content change, no re-embed.
-   Weight floored at 0.1 to prevent zeroing out."
-  [conn eid delta]
+  "Adjusts node base weight using score. Positive score: asymptotic toward 1.0.
+   Negative score: linear decrease (floor 0.0). Updates cycle. No content change."
+  [conn eid score factor]
   (let [db (d/db conn)
         tick (db/next-tick db)
-        current-weight (or (:node/weight (d/pull db [:node/weight] eid)) 1.0)
-        new-weight (max 0.1 (+ current-weight delta))]
+        current-weight (or (:node/weight (d/pull db [:node/weight] eid)) 0.0)
+        new-weight (apply-score current-weight score factor)]
     (db/transact! conn
        [[:db/add eid :node/weight     new-weight]
+        [:db/add eid :node/cycle      tick]
+        [:db/add eid :node/updated-at (now)]]
+       tick)))
+
+(defn promote-eternal!
+  "Sets node weight to 1.0, making it eternal (never decays).
+   Cannot be achieved via regular reinforce — admin-only operation."
+  [conn eid]
+  (let [db   (d/db conn)
+        tick (db/next-tick db)]
+    (db/transact! conn
+       [[:db/add eid :node/weight     1.0]
         [:db/add eid :node/cycle      tick]
         [:db/add eid :node/updated-at (now)]]
        tick)))

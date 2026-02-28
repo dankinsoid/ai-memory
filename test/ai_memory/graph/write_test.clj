@@ -122,10 +122,12 @@
     (let [a (create-test-node! *conn* "Node A")
           b (create-test-node! *conn* "Node B")]
       (edge/find-or-create-edge *conn* a b 0.5)
+      ;; Second call: strengthen with score=1.0, factor=0.3
+      ;; new = 0.5 + 1.0 * 0.3 * (1.0 - 0.5) = 0.5 + 0.15 = 0.65
       (edge/find-or-create-edge *conn* a b 0.3)
       (let [edges (all-edges *conn*)]
         (is (= 1 (count edges)))
-        (is (== 0.8 (:edge/weight (first edges))))))))
+        (is (< (Math/abs (- 0.65 (:edge/weight (first edges)))) 1e-9))))))
 
 (deftest context-cache-integration-test
   (testing "remember calls accumulate context in RAM and create cross-request edges"

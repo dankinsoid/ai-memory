@@ -17,12 +17,11 @@
 ;; --- Defaults ---
 
 (def ^:private defaults
-  {:association-factor       0.7
-   :min-association-weight   0.05
-   :dedup-threshold          0.85
-   :reinforcement-delta      0.2
-   :edge-reinforcement-delta 0.1
-   :context-ttl-seconds      7200}) ;; 2 hours
+  {:association-factor     0.7
+   :min-association-weight 0.05
+   :dedup-threshold        0.85
+   :reinforcement-factor   0.5
+   :context-ttl-seconds    7200}) ;; 2 hours
 
 ;; --- Context cache (RAM) ---
 ;; {context-id {:entries [[uuid1 uuid2] [uuid3] ...]
@@ -69,7 +68,8 @@
 ;; --- Core ---
 
 (defn- association-weight [factor delta]
-  (Math/pow factor (double delta)))
+  ;; Clamp to [0.0, 0.9999) — base=1.0 is reserved for eternal facts
+  (min 0.9999 (Math/pow factor (double delta))))
 
 (defn- max-delta
   "Max Δ where factor^Δ >= min-weight. Used to bound DB queries for :global."
@@ -102,7 +102,8 @@
       (let [eid (:db/id duplicate)]
         (node/reinforce-node conn cfg eid
                              (:content node-data)
-                             (:reinforcement-delta opts))
+                             1.0
+                             (:reinforcement-factor opts))
         (node/update-tag-refs conn eid tag-refs)
         {:id eid :status :reinforced})
       (let [result (node/create-node conn cfg
@@ -112,15 +113,15 @@
         {:id (:node-eid result) :status :created}))))
 
 (defn- create-batch-edges
-  "Creates bidirectional edges between all nodes in the batch (weight=1.0).
+  "Creates bidirectional edges between all nodes in the batch (initial-weight=0.9).
    Returns {:edges N :pairs N :db-ops N}."
   [conn node-ids]
   (let [pairs (for [i (range (count node-ids))
                     j (range (inc i) (count node-ids))]
                 [(nth node-ids i) (nth node-ids j)])]
     (doseq [[a b] pairs]
-      (edge/find-or-create-edge conn a b 1.0)
-      (edge/find-or-create-edge conn b a 1.0))
+      (edge/find-or-create-edge conn a b 0.9)
+      (edge/find-or-create-edge conn b a 0.9))
     (let [edge-count (* 2 (count pairs))]
       {:edges   edge-count
        :pairs   (count pairs)

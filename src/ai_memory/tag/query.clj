@@ -166,20 +166,20 @@
 
 (defn- compute-effective-weight
   "Computes effective (decayed) weight for a single fact."
-  [current-tick decay-factor fact]
+  [current-tick decay-k fact]
   (decay/effective-weight
-    (or (:node/weight fact) 1.0)
+    (or (:node/weight fact) 0.0)
     (or (:node/cycle fact) 0)
     current-tick
-    decay-factor))
+    decay-k))
 
 (defn- enrich-effective-weight
   "Attaches :node/effective-weight to each fact."
   [db facts]
   (let [current-tick (db-core/current-tick db)
-        decay-factor decay/default-decay-factor]
+        decay-k      decay/default-decay-k]
     (mapv #(assoc % :node/effective-weight
-                    (compute-effective-weight current-tick decay-factor %))
+                    (compute-effective-weight current-tick decay-k %))
           facts)))
 
 (defn- sort-by-weight
