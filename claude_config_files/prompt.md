@@ -67,8 +67,7 @@ One fact per project, upserted in-place. Keep summary concise (3-8 sentences): w
 
 ## Blobs
 
-Facts with `[blob: dir-name]` reference blob directories. Read with `memory_read_blob`.
-Common commands: `ls`, `cat compact.md`, `cat _current.md`, `head -50 0001-*.md`.
+Facts with `[blob: dir-name]` reference blob directories. `memory_read_blob` runs bash in a blob directory — treat it like any directory on the filesystem.
 
 ## Mid-Session Retrieval
 

@@ -9,31 +9,24 @@ description: Deep recovery from a previous session — read blob content and res
 
 Parse ARGUMENTS to determine which session to load:
 
-1. **Blob dir** (matches `*_session-*`) → use directly
-2. **No args** → traverse continuation chain from current session:
+1. **No args** → traverse continuation chain from current session:
    ```bash
    bb ~/.claude/skills/load/load-chain.bb <current-session-id> <project-name>
    ```
-   The current session ID is in SessionStart context. Determine the project name from the current workspace's CLAUDE.md first-level heading (e.g. `# ai-memory` → `ai-memory`), or from the git repo name. The script picks up prev-session cache files for that project only (written by SessionEnd on /clear), creates continuation edges, then traverses the chain.
-3. **Free text** (e.g. "сессию где чинили save", "последнюю") → semantic search:
-   ```
-   memory_get_facts with {query: "<user text>", tags: ["session"], limit: 5, sort_by: "date"}
-   ```
-   Pick best match, extract its `[blob: dir-name]`.
+   The current session ID is in SessionStart context. Determine the project name from the git repo name. The script picks up prev-session cache files for that project only, creates continuation edges, then traverses the chain.
+2. **Free text** → translate the user's request into `memory_get_facts` filter params.
+   Always include `tags: ["session"]` (+ project tag if known). Use `query` only when the user describes session content — for recency or time ranges, structured params suffice.
+   Pick best match from results (skip current session), extract its `[blob: dir-name]`.
+3. **Blob dir** (matches `*_session-*`) → use directly
 
 ## Load content
 
-For specific blob:
-```bash
-bb ~/.claude/skills/load/load-chain.bb --blob <blob-dir>
-```
-
-For continuation chain (no args):
+For continuation chain (no args), run the script — it traverses chain edges and outputs combined context:
 ```bash
 bb ~/.claude/skills/load/load-chain.bb <current-session-id> <project-name>
 ```
 
-Script outputs: compact summary + last conversation turns.
+For a specific blob dir, use `memory_read_blob` to read its contents.
 
 ## After loading
 
