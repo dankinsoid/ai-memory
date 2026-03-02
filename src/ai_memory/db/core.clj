@@ -1,16 +1,47 @@
 (ns ai-memory.db.core
-  (:require [datomic.api :as d]
-            [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+  (:require [datalevin.core :as d]))
 
-(defn connect [uri]
-  (d/create-database uri)
-  (d/connect uri))
+;; Schema in Datalevin keyword-map format.
+;; Vector attributes configured via :vector-opts at connect time.
+(def ^:private schema
+  {:tag/name        {:db/valueType :db.type/string  :db/cardinality :db.cardinality/one
+                     :db/unique :db.unique/identity}
+   :tag/node-count  {:db/valueType :db.type/long    :db/cardinality :db.cardinality/one}
+   :tag/tier        {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/one}
 
-(defn load-schema []
-  (-> (io/resource "schema.edn")
-      slurp
-      edn/read-string))
+   :node/content    {:db/valueType :db.type/string  :db/cardinality :db.cardinality/one
+                     :db/fulltext true}
+   :node/tag-refs   {:db/valueType :db.type/ref     :db/cardinality :db.cardinality/many}
+   :node/weight     {:db/valueType :db.type/double  :db/cardinality :db.cardinality/one}
+   :node/cycle      {:db/valueType :db.type/long    :db/cardinality :db.cardinality/one}
+   :node/created-at {:db/valueType :db.type/instant :db/cardinality :db.cardinality/one
+                     :db/index true}
+   :node/updated-at {:db/valueType :db.type/instant :db/cardinality :db.cardinality/one
+                     :db/index true}
+   :node/blob-dir   {:db/valueType :db.type/string  :db/cardinality :db.cardinality/one}
+   :node/sources    {:db/valueType :db.type/string  :db/cardinality :db.cardinality/many}
+   :node/session-id {:db/valueType :db.type/string  :db/cardinality :db.cardinality/one
+                     :db/index true}
+   :node/vector     {:db/valueType :db.type/vec}
+
+   :edge/id         {:db/valueType :db.type/uuid    :db/cardinality :db.cardinality/one
+                     :db/unique :db.unique/identity}
+   :edge/from       {:db/valueType :db.type/ref     :db/cardinality :db.cardinality/one}
+   :edge/to         {:db/valueType :db.type/ref     :db/cardinality :db.cardinality/one}
+   :edge/weight     {:db/valueType :db.type/double  :db/cardinality :db.cardinality/one}
+   :edge/cycle      {:db/valueType :db.type/long    :db/cardinality :db.cardinality/one}
+   :edge/type       {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/one}
+
+   ;; Global monotonic tick — :tick/id is the lookup key
+   :tick/id         {:db/valueType :db.type/string  :db/cardinality :db.cardinality/one
+                     :db/unique :db.unique/identity}
+   :tick/value      {:db/valueType :db.type/long    :db/cardinality :db.cardinality/one}
+
+   ;; File-level vectors for blob files (separate from node vectors)
+   :file-vec/fact-ref  {:db/valueType :db.type/ref     :db/cardinality :db.cardinality/one}
+   :file-vec/blob-dir  {:db/valueType :db.type/string  :db/cardinality :db.cardinality/one}
+   :file-vec/file-path {:db/valueType :db.type/string  :db/cardinality :db.cardinality/one}
+   :file-vec/vector    {:db/valueType :db.type/vec}})
 
 (def aspect-tags
   "Tier 2 (aspect) tags — fixed vocabulary for knowledge categorization."
@@ -18,31 +49,24 @@
    "debugging" "pitfall" "api" "data-model" "tooling"
    "workflow" "performance" "comparison" "testing" "insight"])
 
+(defn connect [db-path]
+  (d/get-conn db-path schema {:vector-opts {:dimensions 1536 :metric-type :cosine}}))
+
+(def ^:private tick-lookup [:tick/id "singleton"])
+
 (defn ensure-schema [conn]
-  @(d/transact conn (load-schema))
-  ;; Tick singleton (must be separate tx — attribute must exist first)
-  (when-not (d/entid (d/db conn) :tick/singleton)
-    @(d/transact conn [{:db/ident :tick/singleton :tick/value 0}]))
-  ;; Tx function: atomic tag count increment (runs on transactor)
-  @(d/transact conn
-    [{:db/ident :fn/inc-tag-count
-      :db/fn (d/function
-               {:lang   "clojure"
-                :params '[db tag-name delta]
-                :code   '(let [e       (datomic.api/entity db [:tag/name tag-name])
-                               current (or (:tag/node-count e) 0)]
-                           [[:db/add [:tag/name tag-name]
-                             :tag/node-count (+ current delta)]])})}])
-  ;; Seed aspect tags (tier 2) — idempotent via :tag/name unique identity
-  @(d/transact conn
-    (mapv (fn [name] {:tag/name name :tag/tier :aspect :tag/node-count 0})
+  ;; Tick singleton — idempotent via :tick/id unique identity
+  (d/transact! conn [{:tick/id "singleton" :tick/value 0}])
+  ;; Seed aspect tags — idempotent via :tag/name unique identity
+  (d/transact! conn
+    (mapv (fn [n] {:tag/name n :tag/tier :aspect :tag/node-count 0})
           aspect-tags)))
 
 (defn db [conn]
   (d/db conn))
 
 (defn current-tick [db]
-  (or (:tick/value (d/pull db [:tick/value] :tick/singleton)) 0))
+  (or (:tick/value (d/pull db [:tick/value] tick-lookup)) 0))
 
 (defn next-tick
   "Returns current-tick + 1 without writing. Use with transact!."
@@ -50,11 +74,11 @@
   (inc (current-tick db)))
 
 (defn transact!
-  "Wraps d/transact with atomic tick increment.
+  "Wraps d/transact! with atomic tick increment.
    Auto-computes next tick unless provided.
-   Returns deref'd tx-result."
+   Returns tx-result map."
   ([conn tx-data]
    (transact! conn tx-data (next-tick (d/db conn))))
   ([conn tx-data new-tick]
-   @(d/transact conn (conj (vec tx-data)
-                            {:db/id :tick/singleton :tick/value new-tick}))))
+   (d/transact! conn (conj (vec tx-data)
+                            {:db/id tick-lookup :tick/value new-tick}))))

@@ -1,7 +1,8 @@
 (ns ai-memory.mcp.protocol-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
-            [datomic.api :as d]
+            [clojure.java.io :as io]
+            [datalevin.core :as d]
             [ai-memory.db.core :as db]
             [ai-memory.tag.core :as tag]
             [ai-memory.web.handler :as web]
@@ -11,12 +12,18 @@
 (def ^:dynamic *base-url* nil)
 (def ^:dynamic *server* nil)
 
-(defn- test-uri []
-  (str "datomic:mem://mcp-protocol-test-" (d/squuid)))
+(defn- test-db-path []
+  (str (System/getProperty "java.io.tmpdir") "/ai-memory-mcp-test-" (random-uuid)))
+
+(defn- delete-dir! [path]
+  (let [dir (io/file path)]
+    (when (.exists dir)
+      (doseq [f (reverse (sort (file-seq dir)))]
+        (.delete f)))))
 
 (defn with-server [f]
-  (let [uri  (test-uri)
-        conn (db/connect uri)
+  (let [path (test-db-path)
+        conn (db/connect path)
         _    (db/ensure-schema conn)
         cfg  {:metrics nil :blob-path "/tmp/ai-memory-test-blobs"}
         srv  (web/start {:port 0 :conn conn :cfg cfg})
@@ -28,30 +35,38 @@
         (f)
         (finally
           (.stop srv)
-          (d/delete-database uri))))))
+          (d/close conn)
+          (delete-dir! path))))))
 
 (use-fixtures :each with-server)
 
 ;; --- Helpers ---
 
+(defn- inc-tag-counts! [conn tag-names]
+  (let [db (d/db conn)]
+    (doseq [tag-name tag-names]
+      (let [current (or (:tag/node-count (d/pull db [:tag/node-count] [:tag/name tag-name])) 0)]
+        (d/transact! conn [[:db/add [:tag/name tag-name] :tag/node-count (inc current)]])))))
+
 (defn- create-tagged-node!
   ([conn content tag-names] (create-tagged-node! conn content tag-names nil))
   ([conn content tag-names opts]
    (let [now    (java.util.Date.)
-         tempid (d/tempid :db.part/user)]
+         tempid "new-node"]
      (doseq [n tag-names]
        (tag/ensure-tag! conn n))
-     (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
-           count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
-           node-map  {:db/id           tempid
-                      :node/content    content
-                      :node/weight     1.0
-                      :node/cycle      0
-                      :node/tag-refs   tag-refs
-                      :node/created-at now
-                      :node/updated-at (or (:updated-at opts) now)}
-           tx @(d/transact conn (into [node-map] count-txs))]
-       (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
+     (let [tag-refs (mapv #(vector :tag/name %) tag-names)
+           node-map {:db/id           tempid
+                     :node/content    content
+                     :node/weight     1.0
+                     :node/cycle      0
+                     :node/tag-refs   tag-refs
+                     :node/created-at now
+                     :node/updated-at (or (:updated-at opts) now)}
+           tx       (d/transact! conn [node-map])
+           eid      (get-in tx [:tempids tempid])]
+       (inc-tag-counts! conn tag-names)
+       eid))))
 
 (defn- handler []
   (protocol/make-handler {:base-url *base-url*}))

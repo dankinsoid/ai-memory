@@ -66,8 +66,8 @@
                     [["/" {:get (fn [_] (-> (resp/resource-response "public/index.html")
                                          (resp/content-type "text/html")))}]
                      ["/api" {:middleware [wrap-normalize-keys]}
-                      ["/health" {:get (fn [req] (api/get-health cfg req))}]
-                      ["/diagnostics" {:get (fn [req] (api/get-diagnostics cfg req))}]
+                      ["/health" {:get (fn [req] (api/get-health conn cfg req))}]
+                      ["/diagnostics" {:get (fn [req] (api/get-diagnostics conn cfg req))}]
                       ["/stats" {:get (fn [req] (api/get-stats conn req))}]
                       ["/graph" {:get (fn [req] (api/get-graph conn req))}]
                       ["/graph/top-nodes" {:get (fn [req] (api/get-top-nodes conn cfg req))}]

@@ -3,9 +3,13 @@
 ## Core Infrastructure
 - [x] System startup, entry point (`core.clj`)
 - [x] Configuration from env vars (`config.clj`)
-- [x] Datomic connection, schema, tick counter (`db/core.clj`)
-- [x] Datomic schema + seed tags (`schema.edn`, `seed-tags.edn`)
+- [x] **Datalevin** connection, schema, tick counter (`db/core.clj`) — migrated from Datomic
+- [x] Schema defined in code (`db/core.clj`) + vector support via `:node/vector`, `:file-vec/vector`
 - [x] Prometheus metrics (`metrics.clj`)
+- [x] Local vector store replacing Qdrant (`embedding/local_vector_store.clj`)
+- [x] EDN export/import (`export/core.clj`, `clj -M:export`)
+- [ ] Migrate data from remote server (`scripts/migrate-from-server.bb`)
+- [ ] Update MCP config to point to local DB (`~/.claude/ai-memory/`)
 
 ## Tag Taxonomy (ADR-009 — primary retrieval)
 - [x] Tag CRUD: create, ensure, find by path/name (`tag/core.clj`)

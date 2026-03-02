@@ -1,12 +1,21 @@
 (ns ai-memory.graph.delete
-  (:require [datomic.api :as d]
+  (:require [datalevin.core :as d]
             [ai-memory.db.core :as db]
-            [ai-memory.embedding.vector-store :as vs]
+            [ai-memory.embedding.local-vector-store :as lvs]
             [ai-memory.blob.store :as blob-store]
             [clojure.tools.logging :as log]))
 
+(defn- dec-tag-counts!
+  "Client-side tag count decrements for given tag names."
+  [conn tag-names]
+  (when (seq tag-names)
+    (let [db (d/db conn)]
+      (doseq [tag-name tag-names]
+        (let [current (or (:tag/node-count (d/pull db [:tag/node-count] [:tag/name tag-name])) 0)]
+          (d/transact! conn [[:db/add [:tag/name tag-name] :tag/node-count (max 0 (dec current))]]))))))
+
 (defn delete-node!
-  "True deletion: retracts node + its edges from Datomic, removes Qdrant vector, deletes blob dir.
+  "True deletion: retracts node + its edges from Datalevin, removes vectors, deletes blob dir.
    Returns {:deleted-id eid :blob-dir dir-name}. Throws if not found."
   [conn cfg eid]
   (let [db   (d/db conn)
@@ -20,17 +29,16 @@
           edge-eids  (distinct (concat edges-from edges-to))
           tx-data    (-> []
                          (into (map #(vector :db/retractEntity %) edge-eids))
-                         (into (map #(vector :fn/inc-tag-count % -1) tag-names))
                          (conj [:db/retractEntity eid]))]
+      (lvs/delete-node-vecs! conn eid)
       (db/transact! conn tx-data)
-      (try (vs/delete-point! (:qdrant-url cfg) eid)
-           (catch Exception e (log/warn e "Failed to delete Qdrant point" eid)))
+      (dec-tag-counts! conn tag-names)
       (when blob-dir
         (blob-store/delete-blob-dir! (:blob-path cfg) blob-dir))
       {:deleted-id eid :blob-dir blob-dir})))
 
 (defn reset-all!
-  "Deletes all nodes, edges, resets tag counts to 0, wipes Qdrant, deletes all blob dirs.
+  "Deletes all nodes, edges, resets tag counts to 0, wipes vectors, deletes all blob dirs.
    Returns {:deleted-nodes N :deleted-edges M :deleted-blobs B}."
   [conn cfg]
   (let [db        (d/db conn)
@@ -41,9 +49,9 @@
                       (into (map #(vector :db/retractEntity %) edge-eids))
                       (into (map #(vector :db/retractEntity %) node-eids))
                       (into (map #(vector :db/add [:tag/name %] :tag/node-count 0) tag-names)))]
+    (lvs/delete-all-vecs! conn)
     (when (seq tx-data)
       (db/transact! conn tx-data))
-    (vs/delete-all-points! (:qdrant-url cfg))
     (let [deleted-blobs (blob-store/delete-all-blobs! (:blob-path cfg))]
       {:deleted-nodes (count node-eids)
        :deleted-edges (count edge-eids)

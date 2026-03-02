@@ -2,15 +2,15 @@
 ;; See ADR-009 for retrieval architecture.
 
 (ns ai-memory.graph.node
-  (:require [datomic.api :as d]
+  (:require [datalevin.core :as d]
             [ai-memory.db.core :as db]
             [ai-memory.tag.core :as tag]
             [ai-memory.embedding.core :as embedding]
-            [ai-memory.embedding.vector-store :as vs]
+            [ai-memory.embedding.local-vector-store :as lvs]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.tools.logging :as log])
-  (:import [java.util Date UUID]))
+  (:import [java.util Date]))
 
 (defn- now [] (Date.))
 
@@ -30,82 +30,88 @@
   (has-entity-tag? tag-refs))
 
 (defn- embed-async!
-  "Embeds content in Qdrant using entity ID as point ID. Logs warning on failure, never throws."
-  [cfg eid content]
+  "Embeds content into Datalevin vector index using entity ID. Logs warning on failure, never throws."
+  [conn cfg eid content]
   (try
     (let [vector (embedding/embed-document (:openai-api-key cfg) content)]
-      (vs/upsert-point! (:qdrant-url cfg) eid vector {}))
+      (lvs/upsert-fact-vec! conn eid vector))
     (catch Exception e
       (log/warn e "Failed to vectorize node" eid))))
 
 (defn embed-file!
-  "Vectorizes a blob file into Qdrant under a stable UUID point ID derived from blob-dir+file-path.
-   payload contains fact-eid, blob-dir and file-path for reverse lookup.
+  "Vectorizes a blob file into Datalevin under a file-vec entity.
+   Payload contains fact-eid, blob-dir and file-path for reverse lookup.
    Logs warning on failure, never throws."
-  [cfg fact-eid blob-dir file-path content]
+  [conn cfg fact-eid blob-dir file-path content]
   (try
-    (let [point-id (str (UUID/nameUUIDFromBytes (.getBytes (str blob-dir "/" file-path) "UTF-8")))
-          vector   (embedding/embed-document (:embedding-url cfg) content)]
-      (vs/upsert-point! (:qdrant-url cfg) point-id vector
-                        {:fact_eid  fact-eid
-                         :blob_dir  blob-dir
-                         :file_path file-path}))
+    (let [vector (embedding/embed-document (:openai-api-key cfg) content)]
+      (lvs/upsert-file-vec! conn fact-eid blob-dir file-path vector))
     (catch Exception e
       (log/warn e "Failed to vectorize file" blob-dir "/" file-path))))
 
+(defn- inc-tag-counts!
+  "Client-side tag count increments. delta = 1 (add) or -1 (remove)."
+  [conn tag-refs delta]
+  (when (seq tag-refs)
+    (let [db (d/db conn)]
+      (doseq [ref tag-refs]
+        (let [tag-name (second ref)
+              current  (or (:tag/node-count (d/pull db [:tag/node-count] [:tag/name tag-name])) 0)]
+          (d/transact! conn [[:db/add [:tag/name tag-name] :tag/node-count (+ current delta)]]))))))
+
 (defn create-node
-  "Creates a memory node in Datomic. Embeds content in Qdrant unless entity.
+  "Creates a memory node in Datalevin. Embeds content unless entity.
    Returns {:tx-result ... :node-eid <entity-id>}.
-   `cfg` — {:openai-api-key, :qdrant-url}.
+   `cfg` — {:openai-api-key}.
    `tag-refs` — vec of lookup refs like [[:tag/name \"clj\"]].
    Optional keys: :blob-dir (string), :sources (set of strings)."
   [conn cfg {:keys [content tag-refs blob-dir sources session-id]}]
-  (let [tick         (db/next-tick (d/db conn))
-        tempid       (d/tempid :db.part/user)
-        ts           (now)
-        base-tx      (cond-> {:db/id           tempid
-                               :node/content    content
-                               :node/weight     0.0
-                               :node/cycle      tick
-                               :node/created-at ts
-                               :node/updated-at ts}
-                       (seq tag-refs) (assoc :node/tag-refs tag-refs)
-                       blob-dir       (assoc :node/blob-dir blob-dir)
-                       (seq sources)  (assoc :node/sources sources)
-                       session-id     (assoc :node/session-id session-id))
-        count-txs    (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
-        tx-result    (db/transact! conn (into [base-tx] count-txs) tick)
-        eid          (d/resolve-tempid (:db-after tx-result) (:tempids tx-result) tempid)]
+  (let [tick     (db/next-tick (d/db conn))
+        tempid   "new-node"
+        ts       (now)
+        base-tx  (cond-> {:db/id           tempid
+                           :node/content    content
+                           :node/weight     0.0
+                           :node/cycle      tick
+                           :node/created-at ts
+                           :node/updated-at ts}
+                   (seq tag-refs) (assoc :node/tag-refs tag-refs)
+                   blob-dir       (assoc :node/blob-dir blob-dir)
+                   (seq sources)  (assoc :node/sources sources)
+                   session-id     (assoc :node/session-id session-id))
+        tx-result (db/transact! conn [base-tx] tick)
+        eid       (get-in tx-result [:tempids tempid])]
+    (inc-tag-counts! conn tag-refs 1)
     (when-not (skip-embedding? {:tag-refs tag-refs})
-      (embed-async! cfg eid content))
+      (embed-async! conn cfg eid content))
     {:tx-result tx-result
      :node-eid  eid}))
 
 (defn find-by-id [db eid]
   (d/pull db '[*] eid))
 
-(def ^:private min-score 0.2)
-(def ^:private min-file-score 0.15)
-
 (defn search
   "Finds nodes semantically similar to `text`.
-   Searches both fact vectors (long IDs) and blob file vectors (UUID IDs).
+   `db` — Datalevin db snapshot.
+   Searches both fact vectors and blob file vectors.
    Deduplicates by entity: if same fact found via both, keeps max score.
-   Returns nodes from Datomic enriched with :search/score, sorted by score desc."
+   Returns nodes enriched with :search/score, sorted by score desc."
   [db cfg text top-k]
-  (let [qvec (embedding/embed-query (:openai-api-key cfg) text)
-        hits (vs/search (:qdrant-url cfg) qvec top-k)]
-    (->> hits
-         (mapv (fn [{:keys [id score payload]}]
-                 (let [file-hit? (string? id)
-                       threshold (if file-hit? min-file-score min-score)]
-                   (when (>= score threshold)
-                     (let [eid  (if file-hit?
-                                  (:fact_eid payload)
-                                  (long id))
-                           node (when eid (d/pull db '[*] eid))]
-                       (when (:node/content node)
-                         (assoc node :search/score score)))))))
+  (let [qvec      (embedding/embed-query (:openai-api-key cfg) text)
+        fact-hits (lvs/search-facts db qvec top-k)
+        file-hits (lvs/search-files db qvec top-k)
+        all-hits  (concat
+                    (map (fn [{:keys [eid score]}]
+                           (let [node (d/pull db '[*] eid)]
+                             (when (:node/content node)
+                               (assoc node :search/score score))))
+                         fact-hits)
+                    (map (fn [{:keys [fact-eid score]}]
+                           (let [node (when fact-eid (d/pull db '[*] fact-eid))]
+                             (when (:node/content node)
+                               (assoc node :search/score score))))
+                         file-hits))]
+    (->> all-hits
          (filterv some?)
          ;; Deduplicate: same fact may appear from fact vector + file vector; keep max score
          (group-by :db/id)
@@ -134,7 +140,7 @@
       (d/pull db '[*] eid))))
 
 (defn update-content!
-  "Updates node content and updated-at. Re-embeds in Qdrant unless entity."
+  "Updates node content and updated-at. Re-embeds unless entity."
   [conn cfg eid new-content]
   (let [db   (d/db conn)
         node (d/pull db [{:node/tag-refs [:tag/name]}] eid)]
@@ -142,7 +148,7 @@
        [[:db/add eid :node/content    new-content]
         [:db/add eid :node/updated-at (now)]])
     (when-not (skip-embedding? {:tag-refs (:node/tag-refs node)})
-      (embed-async! cfg eid new-content))))
+      (embed-async! conn cfg eid new-content))))
 
 (defn- apply-score
   "Asymptotic approach to 1.0 for positive score; linear decrease for negative.
@@ -167,16 +173,16 @@
         [:db/add eid :node/updated-at (now)]]
        tick)
     (when-not (skip-embedding? {:tag-refs (:node/tag-refs node)})
-      (embed-async! cfg eid new-content))))
+      (embed-async! conn cfg eid new-content))))
 
 (defn reinforce-weight
   "Adjusts node base weight using score. Positive score: asymptotic toward 1.0.
    Negative score: linear decrease (floor 0.0). Updates cycle. No content change."
   [conn eid score factor]
-  (let [db (d/db conn)
+  (let [db   (d/db conn)
         tick (db/next-tick db)
         current-weight (or (:node/weight (d/pull db [:node/weight] eid)) 0.0)
-        new-weight (apply-score current-weight score factor)]
+        new-weight     (apply-score current-weight score factor)]
     (db/transact! conn
        [[:db/add eid :node/weight     new-weight]
         [:db/add eid :node/cycle      tick]
@@ -218,13 +224,12 @@
                                [?eid :node/tag-refs ?t]
                                [?t :tag/name ?name]]
                              db eid))
-          new-refs (remove #(existing (second %)) tag-refs)
-          count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) new-refs)]
+          new-refs (remove #(existing (second %)) tag-refs)]
       (db/transact! conn
-         (into [{:db/id           eid
-                 :node/tag-refs   tag-refs
-                 :node/updated-at (now)}]
-               count-txs)))))
+         [{:db/id           eid
+           :node/tag-refs   tag-refs
+           :node/updated-at (now)}])
+      (inc-tag-counts! conn new-refs 1))))
 
 (defn replace-tags!
   "Replaces all tags on a node with new-tag-names (seq of strings).
@@ -240,15 +245,15 @@
         new-names-set (set (map str/trim new-tag-names))
         to-add        (remove current-names new-names-set)
         to-remove     (remove new-names-set current-names)]
-    (doseq [name to-add]
-      (tag/ensure-tag! conn name))
-    (let [retract-txs (mapv (fn [name] [:db/retract eid :node/tag-refs [:tag/name name]]) to-remove)
-          add-txs     (mapv (fn [name] [:db/add eid :node/tag-refs [:tag/name name]]) to-add)
-          dec-txs     (mapv (fn [name] [:fn/inc-tag-count name -1]) to-remove)
-          inc-txs     (mapv (fn [name] [:fn/inc-tag-count name 1]) to-add)]
+    (doseq [n to-add]
+      (tag/ensure-tag! conn n))
+    (let [retract-txs (mapv (fn [n] [:db/retract eid :node/tag-refs [:tag/name n]]) to-remove)
+          add-txs     (mapv (fn [n] [:db/add eid :node/tag-refs [:tag/name n]]) to-add)]
       (db/transact! conn
-        (into (concat retract-txs add-txs dec-txs inc-txs)
-              [[:db/add eid :node/updated-at (now)]])))))
+        (into (concat retract-txs add-txs)
+              [[:db/add eid :node/updated-at (now)]])))
+    (inc-tag-counts! conn (mapv #(vector :tag/name %) to-add) 1)
+    (inc-tag-counts! conn (mapv #(vector :tag/name %) to-remove) -1)))
 
 (defn set-weight!
   "Directly sets node base weight, clamped to [0.0, 1.0]. Updates updated-at."
@@ -259,10 +264,11 @@
        [:db/add eid :node/updated-at (now)]])))
 
 (defn reindex-all!
-  "Re-embeds all non-entity nodes into Qdrant. Also re-embeds compact.md for blob nodes.
+  "Re-embeds all non-entity nodes into Datalevin. Also re-embeds compact.md for blob nodes.
    Synchronous, sequential. Returns {:reindexed N :skipped M :files-reindexed K}."
-  [db cfg]
-  (let [nodes (d/q '[:find [(pull ?e [:db/id :node/content :node/blob-dir
+  [conn cfg]
+  (let [db    (d/db conn)
+        nodes (d/q '[:find [(pull ?e [:db/id :node/content :node/blob-dir
                                       {:node/tag-refs [:tag/name]}]) ...]
                      :where [?e :node/content]]
                    db)
@@ -271,12 +277,12 @@
               (if (skip-embedding? {:tag-refs (:node/tag-refs node)})
                 (update acc :skipped inc)
                 (do
-                  (embed-async! cfg (:db/id node) (:node/content node))
+                  (embed-async! conn cfg (:db/id node) (:node/content node))
                   (let [acc' (update acc :reindexed inc)]
                     (if-let [blob-dir (:node/blob-dir node)]
                       (let [compact-file (io/file base blob-dir "compact.md")]
                         (if (.exists compact-file)
-                          (do (embed-file! cfg (:db/id node) blob-dir "compact.md"
+                          (do (embed-file! conn cfg (:db/id node) blob-dir "compact.md"
                                            (slurp compact-file))
                               (update acc' :files-reindexed inc))
                           acc'))

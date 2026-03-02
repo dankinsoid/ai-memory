@@ -6,7 +6,7 @@
             [ai-memory.db.core :as db-core]
             [ai-memory.metrics :as metrics]
             [ai-memory.util.date :as date]
-            [datomic.api :as d]))
+            [datalevin.core :as d]))
 
 (def ^:private node-pull-spec
   [:db/id :node/content :node/weight :node/cycle :node/sources
@@ -338,7 +338,7 @@
         tx-data (into []
                       (keep (fn [name]
                               (let [expected (get actual name 0)
-                                    current  (or (:tag/node-count (d/entity db [:tag/name name])) 0)]
+                                    current  (or (:tag/node-count (d/pull db [:tag/node-count] [:tag/name name])) 0)]
                                 (when (not= current expected)
                                   [:db/add [:tag/name name] :tag/node-count expected]))))
                       all-names)]

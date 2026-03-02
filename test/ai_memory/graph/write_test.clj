@@ -1,22 +1,29 @@
 (ns ai-memory.graph.write-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [datomic.api :as d]
+            [clojure.java.io :as io]
+            [datalevin.core :as d]
             [ai-memory.db.core :as db]
             [ai-memory.graph.edge :as edge]
             [ai-memory.graph.node :as node]
             [ai-memory.graph.write :as write]
             [ai-memory.tag.core :as tag]))
 
-;; --- In-memory Datomic fixture (no TEI/Qdrant) ---
+;; --- Datalevin fixture (no TEI/vector store) ---
 
 (def ^:dynamic *conn* nil)
 
-(defn- test-uri []
-  (str "datomic:mem://write-test-" (d/squuid)))
+(defn- test-db-path []
+  (str (System/getProperty "java.io.tmpdir") "/ai-memory-write-test-" (random-uuid)))
 
-(defn with-datomic [f]
-  (let [uri  (test-uri)
-        conn (db/connect uri)]
+(defn- delete-dir! [path]
+  (let [dir (io/file path)]
+    (when (.exists dir)
+      (doseq [f (reverse (sort (file-seq dir)))]
+        (.delete f)))))
+
+(defn with-datalevin [f]
+  (let [path (test-db-path)
+        conn (db/connect path)]
     (db/ensure-schema conn)
     (write/reset-contexts!)
     (binding [*conn* conn]
@@ -24,24 +31,25 @@
         (f)
         (finally
           (write/reset-contexts!)
-          (d/delete-database uri))))))
+          (d/close conn)
+          (delete-dir! path))))))
 
-(use-fixtures :each with-datomic)
+(use-fixtures :each with-datalevin)
 
 ;; --- Helpers ---
 
 (defn- create-test-node!
   "Creates a node directly (bypassing write pipeline) for test setup.
-   Returns Datomic entity ID."
+   Returns entity ID."
   ([conn content] (create-test-node! conn content 0))
   ([conn content tick]
-   (let [tempid (d/tempid :db.part/user)
-         tx     @(d/transact conn
-                   [{:db/id        tempid
-                     :node/content content
-                     :node/weight  1.0
-                     :node/cycle   tick}])]
-     (d/resolve-tempid (:db-after tx) (:tempids tx) tempid))))
+   (let [tempid "test-node"
+         tx     (d/transact! conn
+                  [{:db/id        tempid
+                    :node/content content
+                    :node/weight  1.0
+                    :node/cycle   tick}])]
+     (get-in tx [:tempids tempid]))))
 
 (defn- all-edges [conn]
   (edge/find-all (d/db conn)))
@@ -156,7 +164,7 @@
 (defn- set-tick!
   "Sets global tick to a specific value (for test setup)."
   [conn value]
-  @(d/transact conn [{:db/id :tick/singleton :tick/value value}]))
+  (d/transact! conn [{:db/id [:tick/id "singleton"] :tick/value value}]))
 
 (deftest global-edges-link-to-recent-nodes-test
   (testing ":global creates unidirectional edges to recent nodes from DB"
@@ -220,17 +228,17 @@
 
 (defn- create-entity-node!
   "Creates an entity node (tagged entity) directly for test setup.
-   Returns Datomic entity ID."
+   Returns entity ID."
   [conn content tick]
-  (let [tempid (d/tempid :db.part/user)]
+  (let [tempid "entity-node"]
     (tag/ensure-tag! conn "entity")
-    (let [tx @(d/transact conn
-                [{:db/id          tempid
-                  :node/content   content
-                  :node/weight    1.0
-                  :node/cycle     tick
-                  :node/tag-refs  [[:tag/name "entity"]]}])]
-      (d/resolve-tempid (:db-after tx) (:tempids tx) tempid))))
+    (let [tx (d/transact! conn
+               [{:db/id          tempid
+                 :node/content   content
+                 :node/weight    1.0
+                 :node/cycle     tick
+                 :node/tag-refs  [[:tag/name "entity"]]}])]
+      (get-in tx [:tempids tempid]))))
 
 (deftest entity-find-by-content-test
   (testing "find-entity-by-content returns entity by exact match"

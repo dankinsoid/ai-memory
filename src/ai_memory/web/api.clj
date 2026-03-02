@@ -9,9 +9,9 @@
             [ai-memory.decay.core :as decay]
             [ai-memory.blob.store :as blob-store]
             [ai-memory.blob.exec :as blob-exec]
-            [ai-memory.embedding.vector-store :as vs]
+            [ai-memory.embedding.local-vector-store :as lvs]
             [ai-memory.embedding.core :as embedding]
-            [datomic.api :as d]
+            [datalevin.core :as d]
             [clojure.string :as str])
   (:import [java.util Date UUID]
            [java.time Instant]))
@@ -73,26 +73,25 @@
 ;; --- Diagnostics ---
 
 (defn get-health
-  "Health check with Qdrant reachability."
-  [cfg _req]
-  (let [info (vs/collection-info (:qdrant-url cfg))]
-    {:status 200
-     :body   {:status "ok"
-              :qdrant (select-keys info [:reachable? :status])}}))
+  "Health check."
+  [conn _cfg _req]
+  {:status 200
+   :body   {:status "ok"
+            :vectors (lvs/vector-stats conn)}})
 
 (defn get-diagnostics
-  "Full Qdrant diagnostic: collection info + optional end-to-end test search.
+  "Diagnostics: vector stats + optional end-to-end test search.
    Pass ?test-query=<text> to also run embedding + vector search."
-  [cfg req]
-  (let [info       (vs/collection-info (:qdrant-url cfg))
+  [conn cfg req]
+  (let [stats      (lvs/vector-stats conn)
         test-query (get-in req [:query-params "test-query"])]
     {:status 200
-     :body   (cond-> {:qdrant info}
-               (and (:reachable? info) test-query)
+     :body   (cond-> {:vectors stats}
+               test-query
                (assoc :test-search
                       (try
                         (let [vec     (embedding/embed-query (:openai-api-key cfg) test-query)
-                              results (vs/search (:qdrant-url cfg) vec 3)]
+                              results (lvs/search-facts conn vec 3)]
                           {:ok true :hits (count results)})
                         (catch Exception e
                           {:ok false :error (.getMessage e)}))))}))
@@ -754,6 +753,6 @@
   {:status 200 :body (delete/reset-all! conn cfg)})
 
 (defn reindex-vectors
-  "POST /api/admin/reindex — re-embeds all non-entity nodes into Qdrant."
+  "POST /api/admin/reindex — re-embeds all non-entity nodes."
   [conn cfg _req]
-  {:status 200 :body (node/reindex-all! (db/db conn) cfg)})
+  {:status 200 :body (node/reindex-all! conn cfg)})

@@ -1,6 +1,7 @@
 (ns ai-memory.tag.query-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [datomic.api :as d]
+            [clojure.java.io :as io]
+            [datalevin.core :as d]
             [ai-memory.db.core :as db]
             [ai-memory.tag.core :as tag]
             [ai-memory.tag.query :as query]
@@ -8,47 +9,61 @@
 
 (def ^:dynamic *conn* nil)
 
-(defn- test-uri []
-  (str "datomic:mem://tag-query-test-" (d/squuid)))
+(defn- test-db-path []
+  (str (System/getProperty "java.io.tmpdir") "/ai-memory-query-test-" (random-uuid)))
 
-(defn with-datomic [f]
-  (let [uri  (test-uri)
-        conn (db/connect uri)]
+(defn- delete-dir! [path]
+  (let [dir (io/file path)]
+    (when (.exists dir)
+      (doseq [f (reverse (sort (file-seq dir)))]
+        (.delete f)))))
+
+(defn with-datalevin [f]
+  (let [path (test-db-path)
+        conn (db/connect path)]
     (db/ensure-schema conn)
     (binding [*conn* conn]
       (try
         (f)
         (finally
-          (d/delete-database uri))))))
+          (d/close conn)
+          (delete-dir! path))))))
 
-(use-fixtures :each with-datomic)
+(use-fixtures :each with-datalevin)
 
 ;; --- Helpers ---
+
+(defn- inc-tag-counts! [conn tag-names]
+  (let [db (d/db conn)]
+    (doseq [tag-name tag-names]
+      (let [current (or (:tag/node-count (d/pull db [:tag/node-count] [:tag/name tag-name])) 0)]
+        (d/transact! conn [[:db/add [:tag/name tag-name] :tag/node-count (inc current)]])))))
 
 (defn- create-tagged-node!
   "Creates a node with tag refs and increments materialized counts.
    Optional opts map with :updated-at, :weight, :cycle.
-   Returns Datomic entity ID."
+   Returns entity ID."
   ([conn content tag-names] (create-tagged-node! conn content tag-names nil))
   ([conn content tag-names opts]
-   (let [now    (java.util.Date.)
-         tempid (d/tempid :db.part/user)]
+   (let [now     (java.util.Date.)
+         tempid  "new-node"]
      (doseq [n tag-names]
        (tag/ensure-tag! conn n))
-     (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
-           count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
-           node-map  {:db/id           tempid
-                      :node/content    content
-                      :node/weight     (or (:weight opts) 0.0)
-                      :node/cycle      (or (:cycle opts) 0)
-                      :node/tag-refs   tag-refs
-                      :node/created-at now
-                      :node/updated-at (or (:updated-at opts) now)}
-           tx @(d/transact conn (into [node-map] count-txs))]
-       (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
+     (let [tag-refs (mapv #(vector :tag/name %) tag-names)
+           node-map {:db/id           tempid
+                     :node/content    content
+                     :node/weight     (or (:weight opts) 0.0)
+                     :node/cycle      (or (:cycle opts) 0)
+                     :node/tag-refs   tag-refs
+                     :node/created-at now
+                     :node/updated-at (or (:updated-at opts) now)}
+           tx       (d/transact! conn [node-map])
+           eid      (get-in tx [:tempids tempid])]
+       (inc-tag-counts! conn tag-names)
+       eid))))
 
 (defn- set-tick! [conn tick-val]
-  @(d/transact conn [{:db/id :tick/singleton :tick/value tick-val}]))
+  (d/transact! conn [{:db/id [:tick/id "singleton"] :tick/value tick-val}]))
 
 ;; --- Existing tests ---
 
@@ -251,12 +266,12 @@
     (create-tagged-node! *conn* "A" ["clj"])
     (create-tagged-node! *conn* "B" ["clj"])
     ;; Corrupt the count manually
-    @(d/transact *conn* [[:db/add [:tag/name "clj"] :tag/node-count 999]])
-    (is (= 999 (:tag/node-count (d/entity (d/db *conn*) [:tag/name "clj"]))))
+    (d/transact! *conn* [[:db/add [:tag/name "clj"] :tag/node-count 999]])
+    (is (= 999 (:tag/node-count (d/pull (d/db *conn*) [:tag/node-count] [:tag/name "clj"]))))
     ;; Reconcile
     (let [result (query/reconcile-counts! *conn*)]
       (is (pos? (:tags-updated result)))
-      (is (= 2 (:tag/node-count (d/entity (d/db *conn*) [:tag/name "clj"])))))))
+      (is (= 2 (:tag/node-count (d/pull (d/db *conn*) [:tag/node-count] [:tag/name "clj"])))))))
 
 ;; --- Sort tests ---
 
@@ -264,14 +279,14 @@
   (testing "weight sort puts reinforced old fact above newer unreinforced fact"
     ;; Simulate: tick is at 100
     (set-tick! *conn* 100)
-    ;; Old reinforced fact: weight=3.0, cycle=98 (recently reinforced)
-    ;; effective = 3.0 * 0.95^(100-98) = 3.0 * 0.9025 = 2.7075
+    ;; Old reinforced fact: base=0.9, cycle=98
+    ;; power-law effective = 3^((0.9-1)/5) = 3^(-0.02) ≈ 0.978
     (create-tagged-node! *conn* "reinforced-old" ["clj"]
-                         {:weight 3.0 :cycle 98 :updated-at (days-ago 20)})
-    ;; New unreinforced fact: weight=1.0, cycle=99
-    ;; effective = 1.0 * 0.95^(100-99) = 1.0 * 0.95 = 0.95
+                         {:weight 0.9 :cycle 98 :updated-at (days-ago 20)})
+    ;; New unreinforced fact: base=0.2, cycle=99
+    ;; power-law effective = 2^((0.2-1)/5) = 2^(-0.16) ≈ 0.895
     (create-tagged-node! *conn* "new-unreinforced" ["clj"]
-                         {:weight 1.0 :cycle 99 :updated-at (days-ago 1)})
+                         {:weight 0.2 :cycle 99 :updated-at (days-ago 1)})
     (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
                     [["clj"]]
                     {:limit 50 :sort-by "weight"})
@@ -295,8 +310,8 @@
       (is (= "light-new" (:node/content (first facts))))
       (is (= "heavy-old" (:node/content (second facts)))))))
 
-(deftest sort-by-weight-default-test
-  (testing "default sort (no sort-by param) uses weight"
+(deftest sort-by-weight-explicit-test
+  (testing "explicit weight sort puts higher-effective-weight fact first"
     (set-tick! *conn* 50)
     ;; Abandoned fact: base=0.0, cycle=0 → effective = 51^(-0.2) ≈ 0.56
     (create-tagged-node! *conn* "abandoned" ["clj"]
@@ -306,7 +321,7 @@
                          {:weight 0.8 :cycle 49 :updated-at (days-ago 10)})
     (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
                     [["clj"]]
-                    {:limit 50})
+                    {:limit 50 :sort-by "weight"})
           facts (:facts (first results))]
       (is (= "active" (:node/content (first facts))))
       (is (= "abandoned" (:node/content (second facts)))))))

@@ -4,7 +4,7 @@
             [ai-memory.db.core :as db]
             [ai-memory.scheduler :as scheduler]
             [ai-memory.tag.query :as tag-query]
-            [datomic.api :as d]))
+            [datalevin.core :as d]))
 
 (defonce system (atom nil))
 

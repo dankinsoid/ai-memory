@@ -1,25 +1,33 @@
 (ns ai-memory.tag.core-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [datomic.api :as d]
+            [clojure.java.io :as io]
+            [datalevin.core :as d]
             [ai-memory.db.core :as db]
             [ai-memory.tag.core :as tag]))
 
 (def ^:dynamic *conn* nil)
 
-(defn- test-uri []
-  (str "datomic:mem://tag-test-" (d/squuid)))
+(defn- test-db-path []
+  (str (System/getProperty "java.io.tmpdir") "/ai-memory-tag-test-" (random-uuid)))
 
-(defn with-datomic [f]
-  (let [uri  (test-uri)
-        conn (db/connect uri)]
+(defn- delete-dir! [path]
+  (let [dir (io/file path)]
+    (when (.exists dir)
+      (doseq [f (reverse (sort (file-seq dir)))]
+        (.delete f)))))
+
+(defn with-datalevin [f]
+  (let [path (test-db-path)
+        conn (db/connect path)]
     (db/ensure-schema conn)
     (binding [*conn* conn]
       (try
         (f)
         (finally
-          (d/delete-database uri))))))
+          (d/close conn)
+          (delete-dir! path))))))
 
-(use-fixtures :each with-datomic)
+(use-fixtures :each with-datalevin)
 
 ;; --- Tests ---
 
@@ -27,9 +35,8 @@
   (testing "ensure-tag! creates a new atomic tag"
     (let [name (tag/ensure-tag! *conn* "clj")
           db   (d/db *conn*)
-          e    (d/entity db [:tag/name "clj"])]
+          e    (d/pull db [:tag/name] [:tag/name "clj"])]
       (is (= "clj" name))
-      (is (some? e))
       (is (= "clj" (:tag/name e))))))
 
 (def aspect-tag-count (count db/aspect-tags))

@@ -3,7 +3,7 @@
 ;; Current read path uses tag taxonomy only (see ADR-009).
 
 (ns ai-memory.graph.edge
-  (:require [datomic.api :as d]
+  (:require [datalevin.core :as d]
             [ai-memory.db.core :as db]))
 
 (defn create-edge
@@ -12,8 +12,8 @@
   [conn {:keys [from to weight type]}]
   (let [tick (db/next-tick (d/db conn))]
     (db/transact! conn
-       [(cond-> {:db/id       (d/tempid :db.part/user)
-                 :edge/id     (d/squuid)
+       [(cond-> {:db/id       "new-edge"
+                 :edge/id     (random-uuid)
                  :edge/from   from
                  :edge/to     to
                  :edge/weight (or weight 0.0)

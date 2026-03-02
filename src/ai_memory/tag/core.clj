@@ -1,6 +1,6 @@
 (ns ai-memory.tag.core
   "Flat atomic tags. :tag/name (unique/identity) is the tag identifier."
-  (:require [datomic.api :as d]
+  (:require [datalevin.core :as d]
             [ai-memory.db.core :as db]))
 
 (defn ensure-tag!

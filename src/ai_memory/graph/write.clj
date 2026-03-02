@@ -80,7 +80,8 @@
   (some #(= % "entity") (:tags node-data)))
 
 (defn- find-duplicate-node
-  "Entity nodes: exact content match. Other nodes: vector search."
+  "Entity nodes: exact content match. Other nodes: vector search.
+   Accepts a db snapshot (read-only)."
   [db cfg content node-data opts]
   (if (entity-node? node-data)
     (node/find-entity-by-content db content)
@@ -94,10 +95,9 @@
   "Dedup check + create or reinforce. Resolves tags to entity refs.
    Returns {:id entity-id :status :created/:reinforced}."
   [conn cfg node-data opts]
-  (let [db         (db/db conn)
-        tag-refs   (when (seq (:tags node-data))
+  (let [tag-refs   (when (seq (:tags node-data))
                      (tag-resolve/resolve-tags conn (:tags node-data)))
-        duplicate  (find-duplicate-node db cfg (:content node-data) node-data opts)]
+        duplicate  (find-duplicate-node (db/db conn) cfg (:content node-data) node-data opts)]
     (if duplicate
       (let [eid (:db/id duplicate)]
         (node/reinforce-node conn cfg eid
