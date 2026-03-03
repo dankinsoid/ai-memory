@@ -88,6 +88,10 @@
 (def ^:private min-score 0.2)
 (def ^:private min-file-score 0.15)
 
+(def ^:private search-pull-spec
+  [:db/id :node/content :node/weight :node/cycle :node/blob-dir :node/updated-at
+   {:node/tag-refs [:tag/name]}])
+
 (defn search
   "Finds nodes semantically similar to `text`.
    Searches both fact vectors (long IDs) and blob file vectors (UUID IDs).
@@ -104,7 +108,7 @@
                      (let [eid  (if file-hit?
                                   (:fact_eid payload)
                                   (long id))
-                           node (when eid (d/pull db '[*] eid))]
+                           node (when eid (d/pull db search-pull-spec eid))]
                        (when (:node/content node)
                          (assoc node :search/score score)))))))
          (filterv some?)
