@@ -44,6 +44,7 @@
 - [x] `memory_reinforce` MCP tool — explicit fact weight feedback (-1 to 1)
 - [ ] Edge reinforcement via `memory_reinforce` — strengthen/weaken associations when fact reached via edges
 - [ ] Activate graph-based retrieval once enough edge data accumulates
+- [ ] Weight/decay strategy: нет выработанной стратегии когда и как агент должен reinforcement-ить факты, какой обучающий сигнал реально полезен, стоит ли показывать веса агенту (сейчас убраны из session-start)
 
 ### Graph API & MCP
 - [ ] API endpoint: get related facts for a given fact (follow edges, return neighbors with weights)
