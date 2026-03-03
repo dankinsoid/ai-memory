@@ -70,10 +70,32 @@
                 (when-not (str/blank? content)
                   {:filename filename :content content})))))))))
 
+(defn read-blob-meta
+  "Reads and parses meta.edn from a blob dir. Returns map or nil."
+  [blob-dir]
+  (when-let [content (read-blob-file blob-dir "meta.edn")]
+    (try (read-string content) (catch Exception _ nil))))
+
+(defn format-git-info
+  "Formats :git map as a compact string, or nil if no git info."
+  [git]
+  (when git
+    (let [{:keys [branch start-commit end-commit]} git
+          commits (cond
+                    (and start-commit end-commit (not= start-commit end-commit))
+                    (str start-commit ".." end-commit)
+                    (or end-commit start-commit)
+                    (or end-commit start-commit))]
+      (when (or branch commits)
+        (str "*git: " (str/join " @ " (filter some? [branch commits])) "*")))))
+
 (defn print-blob-content
   "Prints compact.md from a blob, falling back to _current.md.
    When compact.md exists, also prints last conversation turns."
   [blob-dir]
+  (when-let [git-line (some-> (read-blob-meta blob-dir) :git format-git-info)]
+    (println git-line)
+    (println))
   (if-let [compact (read-blob-file blob-dir "compact.md")]
     (do (println compact)
         (when-let [{:keys [filename content]} (read-blob-tail blob-dir 30)]

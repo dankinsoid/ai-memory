@@ -12,6 +12,7 @@
             [ai-memory.embedding.vector-store :as vs]
             [ai-memory.embedding.core :as embedding]
             [datomic.api :as d]
+            [clojure.java.shell :as shell]
             [clojure.string :as str])
   (:import [java.util Date UUID]
            [java.time Instant]))
@@ -507,6 +508,39 @@
   (when cwd
     (last (str/split cwd #"/"))))
 
+(defn- sh-out
+  "Runs a shell command, returns trimmed stdout or nil on error/empty."
+  [& args]
+  (try
+    (let [result (apply shell/sh args)]
+      (when (zero? (:exit result))
+        (let [out (str/trim (:out result))]
+          (when (seq out) out))))
+    (catch Exception _ nil)))
+
+(defn- detect-git-context
+  "Detects git branch, commit, and remote from cwd.
+   Returns map with :branch, :end-commit, :remote (all optional) or nil."
+  [cwd]
+  (when cwd
+    (let [branch (sh-out "git" "-C" cwd "rev-parse" "--abbrev-ref" "HEAD")
+          commit (sh-out "git" "-C" cwd "rev-parse" "--short" "HEAD")
+          remote (sh-out "git" "-C" cwd "remote" "get-url" "origin")]
+      (when commit
+        (cond-> {:end-commit commit}
+          (and branch (not= "HEAD" branch)) (assoc :branch branch)
+          remote                             (assoc :remote remote))))))
+
+(defn- merge-git-context
+  "Merges new git context with existing, preserving start-commit and remote."
+  [existing-git new-git]
+  (when new-git
+    (let [start  (or (:start-commit existing-git) (:end-commit new-git))
+          remote (or (:remote new-git) (:remote existing-git))]
+      (cond-> new-git
+        start  (assoc :start-commit start)
+        remote (assoc :remote remote)))))
+
 (defn session-sync [conn cfg req]
   (let [body       (:body-params req)
         session-id (:session-id body)
@@ -561,6 +595,8 @@
             session-summary (when session-eid
                               (:node/content (d/pull db [:node/content] session-eid)))
 
+            git-context (merge-git-context (:git existing-meta) (detect-git-context cwd))
+
             meta-data (merge
                         (or existing-meta
                             (cond-> {:id         (UUID/randomUUID)
@@ -572,7 +608,9 @@
                         (when (and project (not (:project existing-meta)))
                           {:project project})
                         (when session-summary
-                          {:session-summary session-summary}))]
+                          {:session-summary session-summary})
+                        (when git-context
+                          {:git git-context}))]
         (blob-store/write-meta! base blob-dir meta-data)
 
         ;; Create or link Datomic session node
