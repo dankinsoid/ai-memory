@@ -236,74 +236,88 @@
     (and (or (nil? since) (not (.before updated since)))
          (or (nil? until) (.before updated until)))))
 
+(defn- project-matches?
+  "Returns true if fact matches the project filter.
+   When project-key-present? is true: nil project = match facts with no :node/project."
+  [project project-key-present? fact]
+  (if project-key-present?
+    (if project
+      (= (:node/project fact) project)
+      (nil? (:node/project fact)))
+    true))
+
 (defn- execute-filter
-  "Executes a single filter. Returns {:filter <input> :facts [...] :total N}."
+  "Executes a single filter. Returns {:filter <input> :facts [...] :total N}.
+   project param: string = filter by project name, nil (key present) = no project, absent = no filter."
   [db cfg registry {:keys [id session-id tags query exclude-tags since until limit offset sort-by] :as filter-spec}]
-  (cond
-    ;; Direct session-id lookup
-    session-id
-    (let [eid  (d/q '[:find ?e .
-                      :in $ ?sid
-                      :where [?e :node/session-id ?sid]]
-                    db session-id)
-          fact (when eid (d/pull db node/node-pull-spec eid))
-          facts (if (:node/content fact)
-                  (enrich-effective-weight db [fact])
-                  [])]
-      {:filter filter-spec
-       :facts  facts
-       :total  (count facts)})
+  (let [project-key-present? (contains? filter-spec :project)
+        project              (:project filter-spec)
+        keep-project?        (partial project-matches? project project-key-present?)]
+    (cond
+      ;; Direct session-id lookup
+      session-id
+      (let [eid   (d/q '[:find ?e .
+                         :in $ ?sid
+                         :where [?e :node/session-id ?sid]]
+                       db session-id)
+            fact  (when eid (d/pull db node/node-pull-spec eid))
+            facts (cond->> (if (:node/content fact) (enrich-effective-weight db [fact]) [])
+                    project-key-present? (filter keep-project?))]
+        {:filter filter-spec
+         :facts  facts
+         :total  (count facts)})
 
-    ;; Direct ID lookup (Datomic entity ID)
-    id
-    (let [eid  (cond (number? id) (long id)
-                     (string? id) (parse-long id))
-          fact (when eid (d/pull db node/node-pull-spec eid))
-          facts (if (:node/content fact)
-                  (enrich-effective-weight db [fact])
-                  [])]
-      {:filter filter-spec
-       :facts  facts
-       :total  (count facts)})
+      ;; Direct ID lookup (Datomic entity ID)
+      id
+      (let [eid   (cond (number? id) (long id)
+                        (string? id) (parse-long id))
+            fact  (when eid (d/pull db node/node-pull-spec eid))
+            facts (cond->> (if (:node/content fact) (enrich-effective-weight db [fact]) [])
+                    project-key-present? (filter keep-project?))]
+        {:filter filter-spec
+         :facts  facts
+         :total  (count facts)})
 
-    ;; Vector search path — post-filter by tags and dates, sorted by search score
-    query
-    (let [since-d       (date/parse-date-param since)
-          until-d       (date/parse-date-param until)
-          default-limit (or limit 10)
-          ;; Fetch more from Qdrant to allow for post-filtering + offset
-          search-limit  (* (+ default-limit (or offset 0))
-                           (if (or tags since until) 5 1))
-          hits          (node/search db cfg query search-limit)
-          filtered      (cond->> hits
-                          tags         (filter (partial has-all-tags? tags))
-                          exclude-tags (remove (partial has-any-of-tags? exclude-tags))
-                          since-d      (filter (partial in-date-range? since-d nil))
-                          until-d      (filter (partial in-date-range? nil until-d)))
-          total         (count (vec filtered))
-          page          (->> filtered (drop (or offset 0)) (take default-limit)
-                             vec (enrich-effective-weight db))]
-      {:filter filter-spec
-       :facts  page
-       :total  total})
+      ;; Vector search path — post-filter by tags and dates, sorted by search score
+      query
+      (let [since-d       (date/parse-date-param since)
+            until-d       (date/parse-date-param until)
+            default-limit (or limit 10)
+            ;; Fetch more from Qdrant to allow for post-filtering + offset
+            search-limit  (* (+ default-limit (or offset 0))
+                             (if (or tags since until project-key-present?) 5 1))
+            hits          (node/search db cfg query search-limit)
+            filtered      (cond->> hits
+                            tags                 (filter (partial has-all-tags? tags))
+                            exclude-tags         (remove (partial has-any-of-tags? exclude-tags))
+                            since-d              (filter (partial in-date-range? since-d nil))
+                            until-d              (filter (partial in-date-range? nil until-d))
+                            project-key-present? (filter keep-project?))
+            total         (count (vec filtered))
+            page          (->> filtered (drop (or offset 0)) (take default-limit)
+                               vec (enrich-effective-weight db))]
+        {:filter filter-spec
+         :facts  page
+         :total  total})
 
-    ;; Datomic path — tag intersection + date filter
-    :else
-    (let [since-d       (date/parse-date-param since)
-          until-d       (date/parse-date-param until)
-          default-limit (or limit 50)
-          results       (cond
-                          (seq tags) (by-tags db {:tags tags :since since-d :until until-d})
-                          (or since-d until-d) (by-date-range db {:since since-d :until until-d})
-                          :else (all-nodes db))
-          sorted        (sort-facts db sort-by results)
-          excluded      (cond->> sorted
-                          exclude-tags (remove (partial has-any-of-tags? exclude-tags)))
-          total         (count excluded)
-          page          (->> excluded (drop (or offset 0)) (take default-limit) vec)]
-      {:filter filter-spec
-       :facts  page
-       :total  total})))
+      ;; Datomic path — tag intersection + date filter
+      :else
+      (let [since-d       (date/parse-date-param since)
+            until-d       (date/parse-date-param until)
+            default-limit (or limit 50)
+            results       (cond
+                            (seq tags)           (by-tags db {:tags tags :since since-d :until until-d})
+                            (or since-d until-d) (by-date-range db {:since since-d :until until-d})
+                            :else                (all-nodes db))
+            sorted        (sort-facts db sort-by results)
+            excluded      (cond->> sorted
+                            exclude-tags         (remove (partial has-any-of-tags? exclude-tags))
+                            project-key-present? (filter keep-project?))
+            total         (count excluded)
+            page          (->> excluded (drop (or offset 0)) (take default-limit) vec)]
+        {:filter filter-spec
+         :facts  page
+         :total  total}))))
 
 (defn fetch-by-filters
   "Executes an array of filters. Each filter is a map with optional keys:

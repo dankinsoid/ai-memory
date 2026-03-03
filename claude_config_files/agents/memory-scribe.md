@@ -65,18 +65,20 @@ memory_get_facts(filters=[{query: "<observation>", limit: 5}])
 - If a result is related but new info adds a distinct angle → create new fact, keep it clearly different
 - If nothing relevant → create new fact
 
+## Project param
+
+Pass `project` to `memory_remember` when the fact is specific to one project (e.g. `"ai-memory"`):
+- Add only when the fact is about this project's architecture, decisions, pitfalls, or patterns — not just because it happened while working on it
+- Use `universal` tag for facts that apply across all projects
+- Omit if unsure — better no project than wrong scope
+
 ## Tags
 
-Pick 3-5 total.
+Pick 2-4 total.
 
 1. **Aspect** (pick 1-2): call `memory_explore_tags` with no arguments to see available aspect tags — they have `tier: aspect`. Pick the best fit.
 
-2. **Project** (when fact is specific to one project): e.g. `ai-memory`
-   - Add only when the fact is about this project's architecture, decisions, pitfalls, or patterns — not just because it happened while working on it
-   - Use `universal` for facts that apply across all projects
-   - Omit if unsure — better no project tag than wrong scope
-
-3. **Technical** (2-3): technology, domain, context — e.g. `clojure`, `datomic`, `async`, `tags`
+2. **Technical** (1-3): technology, domain, context — e.g. `clojure`, `datomic`, `async`, `tags`
    Browse `memory_explore_tags` to prefer existing tags over creating new ones.
 
 ## Done
