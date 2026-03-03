@@ -4,6 +4,7 @@
 (ns ai-memory.graph.node
   (:require [datomic.api :as d]
             [ai-memory.db.core :as db]
+            [ai-memory.blob.store :as blob-store]
             [ai-memory.tag.core :as tag]
             [ai-memory.embedding.core :as embedding]
             [ai-memory.embedding.vector-store :as vs]
@@ -273,10 +274,12 @@
                 (do
                   (embed-async! cfg (:db/id node) (:node/content node))
                   (let [acc' (update acc :reindexed inc)]
-                    (if-let [blob-dir (:node/blob-dir node)]
-                      (let [compact-file (io/file base blob-dir "compact.md")]
+                    (if-let [blob-dir-short (:node/blob-dir node)]
+                      (let [resolved     (or (blob-store/resolve-blob-dir base blob-dir-short)
+                                             blob-dir-short)
+                            compact-file (io/file base resolved "compact.md")]
                         (if (.exists compact-file)
-                          (do (embed-file! cfg (:db/id node) blob-dir "compact.md"
+                          (do (embed-file! cfg (:db/id node) blob-dir-short "compact.md"
                                            (slurp compact-file))
                               (update acc' :files-reindexed inc))
                           acc'))

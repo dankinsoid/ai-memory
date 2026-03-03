@@ -26,7 +26,9 @@
       (try (vs/delete-point! (:qdrant-url cfg) eid)
            (catch Exception e (log/warn e "Failed to delete Qdrant point" eid)))
       (when blob-dir
-        (blob-store/delete-blob-dir! (:blob-path cfg) blob-dir))
+        (let [resolved (or (blob-store/resolve-blob-dir (:blob-path cfg) blob-dir)
+                           blob-dir)]
+          (blob-store/delete-blob-dir! (:blob-path cfg) resolved)))
       {:deleted-id eid :blob-dir blob-dir})))
 
 (defn reset-all!

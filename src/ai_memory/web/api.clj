@@ -363,17 +363,19 @@
      :body   {:blobs (node/find-blobs db {:limit (or limit 20)})}}))
 
 (defn read-blob [_conn cfg req]
-  (let [body     (:body-params req)
-        blob-dir (:blob-dir body)
-        section  (:section body)
-        base     (:blob-path cfg)]
+  (let [body         (:body-params req)
+        blob-dir-raw (:blob-dir body)
+        section      (:section body)
+        base         (:blob-path cfg)
+        blob-dir     (or (blob-store/resolve-blob-dir base blob-dir-raw)
+                         blob-dir-raw)]
     (if section
       (if-let [result (blob-store/read-section-by-index base blob-dir section)]
         {:status 200 :body result}
-        {:status 404 :body {:error (str "Section " section " not found in " blob-dir)}})
+        {:status 404 :body {:error (str "Section " section " not found in " blob-dir-raw)}})
       (if-let [meta (blob-store/read-meta base blob-dir)]
         {:status 200 :body meta}
-        {:status 404 :body {:error (str "Blob not found: " blob-dir)}}))))
+        {:status 404 :body {:error (str "Blob not found: " blob-dir-raw)}}))))
 
 (defn exec-blob [_conn cfg req]
   (let [body     (:body-params req)
@@ -518,11 +520,19 @@
             turns   (group-into-turns messages)
 
             session-eid  (find-session-fact db session-id)
-            existing-dir (or (when session-eid
-                               (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
-                             (blob-store/find-session-blob-dir base session-id))
-            blob-dir     (or existing-dir
-                             (blob-store/make-blob-dir-name base (str "session-" (subs session-id 0 8))))
+            ;; Short name from Datomic (nil if not linked)
+            datomic-dir  (when session-eid
+                           (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
+            ;; Resolved filesystem path (may include projects/ prefix)
+            blob-dir     (or (when datomic-dir
+                               (or (blob-store/resolve-blob-dir base datomic-dir)
+                                   datomic-dir))
+                             (blob-store/find-session-blob-dir base session-id)
+                             (blob-store/make-blob-dir-name
+                               base (str "session-" (subs session-id 0 8))
+                               :project project))
+            ;; Short name for Datomic and API response
+            blob-dir-short (blob-store/blob-dir-name blob-dir)
 
             ;; Count existing turns to number new ones correctly
             existing-meta (blob-store/read-meta base blob-dir)
@@ -568,8 +578,8 @@
         ;; Create or link Datomic session node
         (if session-eid
           (do
-            (when-not existing-dir
-              (link-blob-dir! conn session-eid blob-dir))
+            (when-not datomic-dir
+              (link-blob-dir! conn session-eid blob-dir-short))
             (when project
               (let [tag-refs (tag-resolve/resolve-tags conn [project])]
                 (node/update-tag-refs conn session-eid tag-refs))))
@@ -581,11 +591,11 @@
                                (extract-first-user-prompt messages)
                                "Session conversation")
                :tag-refs   tag-refs
-               :blob-dir   blob-dir
+               :blob-dir   blob-dir-short
                :session-id session-id})))
 
         {:status 200
-         :body   {:blob-dir           blob-dir
+         :body   {:blob-dir           blob-dir-short
                   :turns-added        (count new-turn-texts)
                   :total-turns        total-turns
                   :current-chunk-size (or (:byte-count append-result) 0)}}))))
@@ -606,14 +616,17 @@
       (let [base        (:blob-path cfg)
             db          (db/db conn)
             session-eid (find-session-fact db session-id)
-            existing-dir (or (when session-eid
-                               (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
-                             (blob-store/find-session-blob-dir base session-id))
-
-            ;; Create blob dir on first call if it doesn't exist yet
-            blob-dir    (or existing-dir
+            ;; Short name from Datomic (nil if not linked)
+            datomic-dir (when session-eid
+                          (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
+            ;; Resolved filesystem path
+            blob-dir    (or (when datomic-dir
+                              (or (blob-store/resolve-blob-dir base datomic-dir)
+                                  datomic-dir))
+                            (blob-store/find-session-blob-dir base session-id)
                             (let [dir-name (blob-store/make-blob-dir-name
-                                             base (str "session-" (subs session-id 0 8)))]
+                                             base (str "session-" (subs session-id 0 8))
+                                             :project project)]
                               (blob-store/write-meta! base dir-name
                                 (cond-> {:id         (UUID/randomUUID)
                                          :type       :session
@@ -621,10 +634,11 @@
                                          :session-id session-id}
                                   project (assoc :project project)))
                               dir-name))
+            blob-dir-short (blob-store/blob-dir-name blob-dir)
 
             ;; Link blob-dir to existing Datomic node if not yet linked
-            _ (when (and session-eid (not existing-dir))
-                (link-blob-dir! conn session-eid blob-dir))
+            _ (when (and session-eid (not datomic-dir))
+                (link-blob-dir! conn session-eid blob-dir-short))
 
             ;; 1. Update session summary in Datomic + blob meta
             summary-result
@@ -634,12 +648,12 @@
                 ;; If node was just created by upsert, link blob-dir to it
                 (when-not session-eid
                   (when-let [new-eid (find-session-fact (db/db conn) session-id)]
-                    (link-blob-dir! conn new-eid blob-dir))))
+                    (link-blob-dir! conn new-eid blob-dir-short))))
               (let [meta (blob-store/read-meta base blob-dir)]
                 (when meta
                   (blob-store/write-meta! base blob-dir
                     (assoc meta :session-summary summary))))
-              (if existing-dir "updated" "created"))
+              (if datomic-dir "updated" "created"))
 
             ;; 1b. Update session title in blob meta (title-only, no Datomic)
             _ (when title
@@ -665,11 +679,11 @@
                 (when meta
                   (blob-store/write-meta! base blob-dir
                     (assoc meta :compact-summary compact))))
-              (node/embed-file! cfg session-eid blob-dir "compact.md" compact)
+              (node/embed-file! cfg session-eid blob-dir-short "compact.md" compact)
               "stored")]
 
         {:status 200
-         :body   (cond-> {:blob-dir blob-dir}
+         :body   (cond-> {:blob-dir blob-dir-short}
                    summary-result (assoc :summary summary-result)
                    chunk-result   (assoc :chunk chunk-result)
                    compact-result (assoc :compact compact-result))}))))

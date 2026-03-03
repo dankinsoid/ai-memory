@@ -15,13 +15,15 @@ Sessions need lazy navigation — agent should see a meaningful TOC of what was 
 Each session blob has named chunk files plus a rolling tail:
 
 ```
-data/blobs/{YYYY-MM-DD}_session-{id8}/
+data/blobs/projects/{project}/{YYYY-MM-DD}_session-{id8}/
   meta.edn
   01-designed-blob-architecture.md    ← named chunk
   02-fixed-session-tags.md            ← named chunk
   _current.md                         ← unnamed tail (accumulates turns)
   compact.md                          ← detailed summary from /save
 ```
+
+Session blobs are organized by project under `projects/`. Non-session blobs remain flat under `data/blobs/`. Datomic `:node/blob-dir` stores only the short directory name (e.g. `2026-02-19_session-abc`); the server resolves it to the filesystem path at runtime.
 
 ### How chunks get named
 

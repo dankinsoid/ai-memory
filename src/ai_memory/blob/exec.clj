@@ -2,7 +2,8 @@
   "Executes bash commands inside blob directories.
    Uses ProcessBuilder with cwd set to the blob dir. When the server runs
    inside Docker, the container itself provides sandboxing."
-  (:require [clojure.java.io :as io]
+  (:require [ai-memory.blob.store :as blob-store]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.tools.logging :as log])
   (:import [java.util.concurrent TimeUnit]
@@ -12,17 +13,22 @@
 (def ^:private max-output-bytes 102400) ;; 100 KB
 
 (defn validate-blob-dir
-  "Validates blob-dir name and returns absolute path. Throws on invalid input."
+  "Validates blob-dir path and returns absolute path. Throws on invalid input.
+   Accepts both short names and resolved paths (e.g. projects/ai-memory/...)."
   [base-path blob-dir]
   (when (or (str/blank? blob-dir)
             (str/includes? blob-dir "..")
-            (str/starts-with? blob-dir "/")
-            (str/includes? blob-dir "/"))
+            (str/starts-with? blob-dir "/"))
     (throw (ex-info "Invalid blob-dir" {:blob-dir blob-dir})))
-  (let [dir (io/file base-path blob-dir)]
+  (let [dir      (io/file base-path blob-dir)
+        abs-dir  (.getCanonicalPath dir)
+        abs-base (.getCanonicalPath (io/file base-path))]
+    ;; Ensure resolved path stays under base-path
+    (when-not (str/starts-with? abs-dir abs-base)
+      (throw (ex-info "Invalid blob-dir: escapes base path" {:blob-dir blob-dir})))
     (when-not (.isDirectory dir)
       (throw (ex-info "Blob directory not found" {:blob-dir blob-dir})))
-    (.getAbsolutePath dir)))
+    abs-dir))
 
 (defn- read-stream
   "Reads an InputStream to string in a future (avoids pipe deadlock)."
@@ -70,11 +76,14 @@
                     "Process timed out")})))
 
 (defn exec-blob
-  "Executes a bash command inside a blob directory. Returns {:exit-code :stdout :stderr}."
+  "Executes a bash command inside a blob directory. Returns {:exit-code :stdout :stderr}.
+   Resolves short blob-dir names to their actual filesystem path."
   [config blob-dir command]
-  (let [base-path (:blob-path config)
-        abs-dir   (validate-blob-dir base-path blob-dir)
-        timeout   (or (:blob-exec-timeout config) default-timeout-ms)]
+  (let [base-path    (:blob-path config)
+        resolved-dir (or (blob-store/resolve-blob-dir base-path blob-dir)
+                         blob-dir)
+        abs-dir      (validate-blob-dir base-path resolved-dir)
+        timeout      (or (:blob-exec-timeout config) default-timeout-ms)]
     (log/info "exec-blob" blob-dir command)
     (let [{:keys [exit-code stdout stderr]} (exec-in-dir abs-dir command timeout)]
       {:exit-code exit-code

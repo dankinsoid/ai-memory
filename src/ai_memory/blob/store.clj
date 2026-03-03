@@ -1,6 +1,8 @@
 (ns ai-memory.blob.store
   "Filesystem operations for blob storage.
-   Blobs live in data/blobs/{YYYY-MM-DD}_{slug}/ with meta.edn + content files."
+   Session blobs live in data/blobs/projects/{project}/{YYYY-MM-DD}_{slug}/.
+   Non-session blobs live flat in data/blobs/{YYYY-MM-DD}_{slug}/.
+   Both have meta.edn + content files."
   (:require [clojure.java.io :as io]
             [clojure.edn :as edn]
             [clojure.pprint :as pp]
@@ -35,12 +37,52 @@
             (recur (inc n))))))))
 
 (defn make-blob-dir-name
-  "Creates blob directory name: {date}_{slug}. Ensures uniqueness under base-path."
-  [base-path title & {:keys [date]}]
-  (let [date-str (or date (today-str))
-        slug     (slugify title)
-        name     (str date-str "_" slug)]
-    (unique-dir-name base-path name)))
+  "Creates blob directory name: {date}_{slug}. Ensures uniqueness.
+   When :project is provided, creates under projects/{project}/ and returns
+   the full relative path (e.g. projects/ai-memory/2026-03-03_session-abc).
+   Without :project, creates flat and returns just the dir name."
+  [base-path title & {:keys [date project]}]
+  (let [date-str   (or date (today-str))
+        slug       (slugify title)
+        dir-name   (str date-str "_" slug)
+        parent     (if project
+                     (str "projects/" project)
+                     nil)
+        check-path (if parent
+                     (io/file base-path parent)
+                     (io/file base-path))
+        _          (when parent (.mkdirs check-path))
+        unique     (unique-dir-name (.getPath check-path) dir-name)]
+    (if parent
+      (str parent "/" unique)
+      unique)))
+
+(defn blob-dir-name
+  "Extracts the short blob-dir name from a possibly nested path.
+   'projects/ai-memory/2026-03-03_session-abc' → '2026-03-03_session-abc'
+   '2026-03-03_session-abc' → '2026-03-03_session-abc'"
+  [dir-path]
+  (last (str/split dir-path #"/")))
+
+(defn resolve-blob-dir
+  "Resolves a blob-dir name to its actual relative path on the filesystem.
+   Checks: 1) legacy flat path, 2) projects/*/ subdirs.
+   Returns relative path (e.g. 'projects/ai-memory/2026-03-03_session-abc')
+   or nil if not found."
+  [base-path blob-dir]
+  ;; Already a resolved path (contains /)?
+  (when-not (str/blank? blob-dir)
+    (if (.isDirectory (io/file base-path blob-dir))
+      blob-dir
+      ;; Scan projects/*/
+      (let [projects-dir (io/file base-path "projects")]
+        (when (.isDirectory projects-dir)
+          (some (fn [project-dir]
+                  (when (.isDirectory project-dir)
+                    (let [candidate (io/file project-dir blob-dir)]
+                      (when (.isDirectory candidate)
+                        (str "projects/" (.getName project-dir) "/" blob-dir)))))
+                (.listFiles projects-dir)))))))
 
 (defn make-section-filename
   "Creates section filename: {NNNN}-{slug}.{ext}"
@@ -67,17 +109,41 @@
       (doseq [f (reverse (file-seq dir))]
         (.delete f)))))
 
+(defn- delete-dir-recursive!
+  "Recursively deletes a directory and all its contents."
+  [dir]
+  (when (.exists dir)
+    (doseq [f (reverse (file-seq dir))]
+      (.delete f))))
+
 (defn delete-all-blobs!
-  "Deletes all blob directories under base-path. Returns count deleted."
+  "Deletes all blob directories under base-path (flat + projects/*/).
+   Returns count deleted."
   [base-path]
   (let [root (io/file base-path)]
     (if-not (.exists root)
       0
-      (let [dirs (filter #(.isDirectory %) (.listFiles root))]
-        (doseq [dir dirs]
-          (doseq [f (reverse (file-seq dir))]
-            (.delete f)))
-        (count dirs)))))
+      (let [;; Flat dirs
+            flat-dirs (->> (.listFiles root)
+                           (filter #(and (.isDirectory %)
+                                         (not= "projects" (.getName %)))))
+            ;; Project dirs
+            projects-dir (io/file root "projects")
+            nested-dirs (when (.isDirectory projects-dir)
+                          (->> (.listFiles projects-dir)
+                               (filter #(.isDirectory %))
+                               (mapcat #(filter (fn [f] (.isDirectory f))
+                                                (.listFiles %)))))
+            all-dirs (concat flat-dirs nested-dirs)]
+        (doseq [dir all-dirs]
+          (delete-dir-recursive! dir))
+        ;; Clean up empty project dirs
+        (when (.isDirectory projects-dir)
+          (doseq [pd (.listFiles projects-dir)]
+            (when (and (.isDirectory pd)
+                       (empty? (.listFiles pd)))
+              (.delete pd))))
+        (count all-dirs)))))
 
 (defn read-meta
   "Reads and parses meta.edn from a blob directory. Returns nil if not found."
@@ -172,14 +238,29 @@
       0)))
 
 (defn list-blob-dirs
-  "Lists all blob directories, sorted newest first (date prefix sort)."
+  "Lists all blob directories, sorted newest first (date prefix sort).
+   Includes both flat dirs and projects/*/ subdirs.
+   Returns relative paths (e.g. 'projects/ai-memory/2026-03-03_session-abc')."
   [base-path]
   (let [base (io/file base-path)]
     (when (.exists base)
-      (->> (.listFiles base)
-           (filter #(.isDirectory %))
-           (map #(.getName %))
-           (sort #(compare %2 %1))))))
+      (let [;; Flat dirs (legacy + non-session blobs)
+            flat (->> (.listFiles base)
+                      (filter #(and (.isDirectory %)
+                                    (not= "projects" (.getName %))))
+                      (map #(.getName %)))
+            ;; Project dirs
+            projects-dir (io/file base "projects")
+            nested (when (.isDirectory projects-dir)
+                     (->> (.listFiles projects-dir)
+                          (filter #(.isDirectory %))
+                          (mapcat (fn [project-dir]
+                                    (->> (.listFiles project-dir)
+                                         (filter #(.isDirectory %))
+                                         (map #(str "projects/" (.getName project-dir)
+                                                    "/" (.getName %))))))))]
+        (->> (concat flat nested)
+             (sort #(compare %2 %1)))))))
 
 (defn blob-exists?
   "Returns true if the blob directory and meta.edn exist."
@@ -189,15 +270,16 @@
 
 (defn find-session-blob-dir
   "Finds existing blob directory for a session-id by scanning meta.edn files.
-   Returns dir-name or nil."
+   Searches both flat dirs and projects/*/ subdirs.
+   Returns the short blob-dir name (without projects/ prefix) or nil."
   [base-path session-id]
   (when-let [dirs (list-blob-dirs base-path)]
     (->> dirs
          (filter #(str/includes? % "session"))
-         (some (fn [dir-name]
-                 (when-let [meta (read-meta base-path dir-name)]
+         (some (fn [dir-path]
+                 (when-let [meta (read-meta base-path dir-path)]
                    (when (= session-id (:session-id meta))
-                     dir-name)))))))
+                     dir-path)))))))
 
 ;; --- Session chunks (_current.md + named chunks) ---
 
