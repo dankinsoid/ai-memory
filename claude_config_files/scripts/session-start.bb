@@ -103,8 +103,7 @@
     (str "- " content
          (when blob-dir (str " [blob: " blob-dir "]"))
          (when (seq tags) (str " {" (str/join ", " tags) "}"))
-         (when-let [ew (get f (keyword "node/effective-weight"))]
-           (str " w:" (format "%.2f" (double ew)))))))
+         )))
 
 (defn format-facts [results filter-pred label]
   (when-let [group (first (filter filter-pred results))]
@@ -112,6 +111,16 @@
       (when (seq facts)
         (str "## " label "\n"
              (str/join "\n" (map format-fact facts)))))))
+
+(defn format-session-line [f]
+  (let [content  (get f (keyword "node/content"))
+        blob-dir (get f (keyword "node/blob-dir"))
+        lines    (some-> content (str/split #"\n"))
+        title    (first lines)
+        summary  (second lines)]
+    (str "- " (or title "(no summary)")
+         (when summary (str " — " summary))
+         (when blob-dir (str " [blob: " blob-dir "]")))))
 
 (defn format-project-section [results project-name]
   (let [summary-facts (or (:facts (first (filter #(and (= (get-in % [:filter :project]) project-name)
@@ -143,20 +152,10 @@
            (when (seq other)
              (str/join ", " (map format-tag other)))))))
 
-(defn format-sessions [facts]
+(defn format-sessions [facts label]
   (when (seq facts)
-    (str "## Recent Sessions\n"
-         (str/join "\n"
-           (map (fn [f]
-                  (let [content  (get f (keyword "node/content"))
-                        blob-dir (get f (keyword "node/blob-dir"))
-                        lines    (some-> content (str/split #"\n"))
-                        title    (first lines)
-                        summary  (second lines)]
-                    (str "- " (or title "(no summary)")
-                         (when summary (str " — " summary))
-                         (when blob-dir (str " [blob: " blob-dir "]")))))
-                facts)))))
+    (str "## " label "\n"
+         (str/join "\n" (map format-session-line facts)))))
 
 (defn format-timestamp []
   (let [now    (java.time.ZonedDateTime/now)
@@ -186,9 +185,15 @@
       sessions-section
       (when-not no-sessions?
         (let [session-group (first (filter
-                                     (fn [r] (= (get-in r [:filter :tags]) ["session"]))
-                                     results))]
-          (format-sessions (:facts session-group))))
+                                     (fn [r] (and (= (get-in r [:filter :tags]) ["session"])
+                                                  (nil? (get-in r [:filter :exclude_tags]))))
+                                     results))
+              cross-project-group (first (filter
+                                           (fn [r] (and (= (get-in r [:filter :tags]) ["session"])
+                                                        (seq (get-in r [:filter :exclude_tags]))))
+                                           results))
+              facts (or (:facts cross-project-group) (:facts session-group))]
+          (format-sessions facts "Other Projects")))
 
       tags-section    (format-tags tags-data)
       timestamp       (format-timestamp)

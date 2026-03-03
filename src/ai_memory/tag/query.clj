@@ -8,15 +8,10 @@
             [ai-memory.util.date :as date]
             [datomic.api :as d]))
 
-(def ^:private node-pull-spec
-  [:db/id :node/content :node/weight :node/cycle :node/sources
-   :node/blob-dir :node/updated-at :node/project
-   {:node/tag-refs [:tag/name]}])
-
 (defn- pull-nodes
   "Pulls full node data for a set of entity IDs."
   [db eids]
-  (mapv #(d/pull db node-pull-spec %) eids))
+  (mapv #(d/pull db node/node-pull-spec %) eids))
 
 (defn by-tag
   "Nodes with a specific tag. Optional :since/:until (java.util.Date) for date filtering."
@@ -265,7 +260,7 @@
                          :in $ ?sid
                          :where [?e :node/session-id ?sid]]
                        db session-id)
-            fact  (when eid (d/pull db node-pull-spec eid))
+            fact  (when eid (d/pull db node/node-pull-spec eid))
             facts (cond->> (if (:node/content fact) (enrich-effective-weight db [fact]) [])
                     project-key-present? (filter keep-project?))]
         {:filter filter-spec
@@ -276,7 +271,7 @@
       id
       (let [eid   (cond (number? id) (long id)
                         (string? id) (parse-long id))
-            fact  (when eid (d/pull db node-pull-spec eid))
+            fact  (when eid (d/pull db node/node-pull-spec eid))
             facts (cond->> (if (:node/content fact) (enrich-effective-weight db [fact]) [])
                     project-key-present? (filter keep-project?))]
         {:filter filter-spec
