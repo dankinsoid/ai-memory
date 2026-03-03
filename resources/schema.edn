@@ -67,12 +67,6 @@
   :db/index       true
   :db/doc         "Claude Code session ID. Links session facts and blobs to sessions."}
 
- {:db/ident       :node/project
-  :db/valueType   :db.type/string
-  :db/cardinality :db.cardinality/one
-  :db/index       true
-  :db/doc         "Project name this fact belongs to. Set from the project param, not stored as a tag."}
-
  ;; --- Edge ---
  {:db/ident       :edge/id
   :db/valueType   :db.type/uuid

@@ -59,8 +59,8 @@
    Returns {:tx-result ... :node-eid <entity-id>}.
    `cfg` — {:openai-api-key, :qdrant-url}.
    `tag-refs` — vec of lookup refs like [[:tag/name \"clj\"]].
-   Optional keys: :blob-dir (string), :sources (set of strings), :project (string)."
-  [conn cfg {:keys [content tag-refs blob-dir sources session-id project]}]
+   Optional keys: :blob-dir (string), :sources (set of strings)."
+  [conn cfg {:keys [content tag-refs blob-dir sources session-id]}]
   (let [tick         (db/next-tick (d/db conn))
         tempid       (d/tempid :db.part/user)
         ts           (now)
@@ -73,8 +73,7 @@
                        (seq tag-refs) (assoc :node/tag-refs tag-refs)
                        blob-dir       (assoc :node/blob-dir blob-dir)
                        (seq sources)  (assoc :node/sources sources)
-                       session-id     (assoc :node/session-id session-id)
-                       project        (assoc :node/project project))
+                       session-id     (assoc :node/session-id session-id))
         count-txs    (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
         tx-result    (db/transact! conn (into [base-tx] count-txs) tick)
         eid          (d/resolve-tempid (:db-after tx-result) (:tempids tx-result) tempid)]
@@ -85,7 +84,7 @@
 
 (def node-pull-spec
   [:db/id :node/content :node/weight :node/cycle :node/sources
-   :node/blob-dir :node/updated-at :node/project
+   :node/blob-dir :node/updated-at
    {:node/tag-refs [:tag/name]}])
 
 (defn find-by-id [db eid]
@@ -232,14 +231,6 @@
                  :node/tag-refs   tag-refs
                  :node/updated-at (now)}]
                count-txs)))))
-
-(defn update-project!
-  "Sets :node/project on an existing node. Updates updated-at."
-  [conn eid project]
-  (when project
-    (db/transact! conn
-      [[:db/add eid :node/project project]
-       [:db/add eid :node/updated-at (now)]])))
 
 (defn replace-tags!
   "Replaces all tags on a node with new-tag-names (seq of strings).
