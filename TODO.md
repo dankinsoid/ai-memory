@@ -101,7 +101,9 @@
 - [x] `memory_read_blob` MCP tool — execute bash in blob dir via ProcessBuilder
 - [x] Removed SSHFS preflight hook and direct blob path exposure
 
-## Project Identity
+## Git Integration
+- [x] Auto-capture git context (branch, start-commit, end-commit, remote) in session blob meta.edn (`web/api.clj`)
+- [ ] Show git branch in session context (MEMORY.md Recent Sessions section)
 - [ ] Stable project ID via git root commit hash (`git rev-list --max-parents=0 HEAD`)
 - [ ] Fallback to folder name when no git
 - [ ] Handle project renames: map old folder name → stable ID
