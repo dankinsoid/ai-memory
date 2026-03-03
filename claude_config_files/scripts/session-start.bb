@@ -86,12 +86,13 @@
 
 (def fact-filters
   (if project-name
-    [{:tags ["pref"]}
-     {:tags ["universal"]}
-     {:tags ["project" project-name]}
-     {:tags [project-name] :exclude_tags ["session"]}
-     {:tags ["session" project-name] :sort_by "date" :limit 3}
-     {:tags ["session"] :exclude_tags [project-name] :sort_by "date" :limit 4}]
+    (let [ptag (str "project/" project-name)]
+      [{:tags ["pref"]}
+       {:tags ["universal"]}
+       {:tags ["project" ptag]}
+       {:tags [ptag] :exclude_tags ["session"]}
+       {:tags ["session" ptag] :sort_by "date" :limit 3}
+       {:tags ["session"] :exclude_tags [ptag] :sort_by "date" :limit 4}])
     [{:tags ["pref"]}
      {:tags ["universal"]}
      {:tags ["session"] :sort_by "date" :limit 5}]))
@@ -128,9 +129,10 @@
          (when blob-dir (str " [blob: " blob-dir "]")))))
 
 (defn format-project-section [results project-name]
-  (let [summary-facts  (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["project" project-name]) results))) [])
-        project-facts  (or (:facts (first (filter #(= (get-in % [:filter :tags]) [project-name]) results))) [])
-        project-sessions (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["session" project-name]) results))) [])
+  (let [ptag           (str "project/" project-name)
+        summary-facts  (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["project" ptag]) results))) [])
+        project-facts  (or (:facts (first (filter #(= (get-in % [:filter :tags]) [ptag]) results))) [])
+        project-sessions (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["session" ptag]) results))) [])
         summary-ids    (set (map :db/id summary-facts))
         other-facts    (remove #(summary-ids (:db/id %)) project-facts)]
     (when (or (seq project-sessions) (seq summary-facts) (seq other-facts))

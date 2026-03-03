@@ -200,11 +200,16 @@
         opts       (merge defaults cfg)
         start-ns   (System/nanoTime)
         context-id (:context-id params)
+        project    (:project params)
+        nodes      (if project
+                     (mapv #(update % :tags (fnil conj []) (str "project/" project))
+                           (:nodes params))
+                     (:nodes params))
 
         ;; Phase: nodes
         results
         (metrics/timed registry metrics/write-duration {:phase "nodes"}
-          (mapv #(process-node conn cfg % opts) (:nodes params)))
+          (mapv #(process-node conn cfg % opts) nodes))
 
         node-ids (mapv :id results)
 

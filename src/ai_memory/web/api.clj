@@ -308,7 +308,7 @@
   [conn cfg session-id session-summary project tags]
   (let [db       (db/db conn)
         eid      (find-session-fact db session-id)
-        tag-strs (distinct (concat ["session"] (when project [project]) tags))]
+        tag-strs (distinct (concat ["session"] (when project [(str "project/" project)]) tags))]
     (if eid
       (do (node/update-content! conn cfg eid session-summary)
           (let [tag-refs (tag-resolve/resolve-tags conn tag-strs)]
@@ -327,12 +327,12 @@
          [?e :node/tag-refs ?t1]
          [?t2 :tag/name ?pname]
          [?e :node/tag-refs ?t2]]
-       db project))
+       db (str "project/" project)))
 
 (defn- upsert-project-fact! [conn cfg project summary tags]
   (let [db       (db/db conn)
         eid      (find-project-fact db project)
-        tag-strs (distinct (concat ["project"] [project] tags))]
+        tag-strs (distinct (concat ["project" (str "project/" project)] tags))]
     (if eid
       (do (node/update-content! conn cfg eid summary)
           (node/update-tag-refs conn eid (tag-resolve/resolve-tags conn tag-strs)))
@@ -619,10 +619,10 @@
             (when-not datomic-dir
               (link-blob-dir! conn session-eid blob-dir-short))
             (when project
-              (let [tag-refs (tag-resolve/resolve-tags conn [project])]
+              (let [tag-refs (tag-resolve/resolve-tags conn [(str "project/" project)])]
                 (node/update-tag-refs conn session-eid tag-refs))))
           (let [tag-strs (cond-> ["session"]
-                           project (conj project))
+                           project (conj (str "project/" project)))
                 tag-refs (tag-resolve/resolve-tags conn tag-strs)]
             (node/create-node conn cfg
               {:content    (or session-summary
