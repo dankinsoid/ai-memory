@@ -88,8 +88,8 @@
   (cond-> [{:tags ["pref"]}
            {:tags ["universal"]}
            {:tags ["session"] :sort_by "date" :limit 5}]
-    project-name (conj {:tags ["project" project-name]})
-    project-name (conj {:tags [project-name] :exclude_tags ["session"]})))
+    project-name (conj {:tags ["project"] :project project-name})
+    project-name (conj {:project project-name :exclude_tags ["session"]})))
 
 (def facts-data (api-post "/api/tags/facts" {:filters fact-filters}))
 
@@ -114,8 +114,10 @@
              (str/join "\n" (map format-fact facts)))))))
 
 (defn format-project-section [results project-name]
-  (let [summary-facts (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["project" project-name]) results))) [])
-        project-facts (or (:facts (first (filter #(= (get-in % [:filter :tags]) [project-name]) results))) [])
+  (let [summary-facts (or (:facts (first (filter #(and (= (get-in % [:filter :project]) project-name)
+                                                        (seq (get-in % [:filter :tags]))) results))) [])
+        project-facts (or (:facts (first (filter #(and (= (get-in % [:filter :project]) project-name)
+                                                        (nil? (get-in % [:filter :tags]))) results))) [])
         summary-ids   (set (map :db/id summary-facts))
         other-facts   (remove #(summary-ids (:db/id %)) project-facts)
         all-facts     (concat summary-facts other-facts)]

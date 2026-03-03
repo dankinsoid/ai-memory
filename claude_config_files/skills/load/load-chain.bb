@@ -199,10 +199,10 @@
           (println "---")
           (println "Continuation edge strengthened."))
         ;; Fallback: no chain found — load most recent session blob from memory
-        ;; Filter by project tag if provided, to avoid cross-project contamination.
+        ;; Filter by project if provided, to avoid cross-project contamination.
         (let [resp     (api-post "/api/tags/facts"
-                         {:filters [{:tags    (cond-> ["session"] project (conj project))
-                                     :sort_by "date" :limit 5}]})
+                         {:filters [(cond-> {:tags ["session"] :sort_by "date" :limit 5}
+                                     project (assoc :project project))]})
               facts    (:facts (first (:results resp)))
               ;; Only facts with blob-dir, skip current session
               ;; blob-dir uses short UUID prefix (first 8 chars)
