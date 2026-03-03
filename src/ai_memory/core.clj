@@ -1,7 +1,6 @@
 (ns ai-memory.core
   (:require [ai-memory.config :as config]
             [ai-memory.db.core :as db]
-            [ai-memory.db.migrate :as migrate]
             [ai-memory.embedding.vector-store :as vs]
             [ai-memory.metrics :as metrics]
             [ai-memory.scheduler :as scheduler]
@@ -14,9 +13,6 @@
         cfg      (assoc config :metrics registry)
         conn     (db/connect (:datomic-uri cfg))]
     (db/ensure-schema conn)
-    (let [result (migrate/migrate-project-tags! conn)]
-      (when (pos? (:migrated result))
-        (log/info "migrate-project-tags! completed" result)))
     (vs/ensure-collection! (:qdrant-url cfg))
     (let [server (web/start {:port (:port cfg)
                              :conn conn

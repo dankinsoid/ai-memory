@@ -55,7 +55,7 @@ Good: `Designed blob storage using Node model with filesystem sections. Chose la
 Good: `Full adversarial debate on local vs server architecture. Chose hybrid .edn approach at 72% confidence.`
 Bad: `blob storage architecture` (too short, use title for this)
 
-`tags` — topic tags for the session (e.g. `["refactoring", "architecture"]`). Merged with automatic `session` tag. Omit if nothing notable.
+`tags` — topic tags for the session (e.g. `["refactoring", "architecture"]`). Merged with automatic `session` and project tags. Omit if nothing notable.
 
 ## Project Summaries — `memory_project`
 

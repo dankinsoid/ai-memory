@@ -308,47 +308,37 @@
   [conn cfg session-id session-summary project tags]
   (let [db       (db/db conn)
         eid      (find-session-fact db session-id)
-        tag-strs (distinct (concat ["session"] tags))]
+        tag-strs (distinct (concat ["session"] (when project [project]) tags))]
     (if eid
       (do (node/update-content! conn cfg eid session-summary)
           (let [tag-refs (tag-resolve/resolve-tags conn tag-strs)]
-            (node/update-tag-refs conn eid tag-refs))
-          (node/update-project! conn eid project))
+            (node/update-tag-refs conn eid tag-refs)))
       (let [tag-refs (tag-resolve/resolve-tags conn tag-strs)]
         (node/create-node conn cfg
           {:content    session-summary
            :tag-refs   tag-refs
-           :session-id session-id
-           :project    project})))))
+           :session-id session-id})))))
 
 (defn- find-project-fact [db project]
-  ;; Query by :node/project (new) or fall back to tag-based lookup (pre-migration)
-  (or (d/q '[:find ?e .
-              :in $ ?pname
-              :where [?e :node/project ?pname]
-                     [?t :tag/name "project"]
-                     [?e :node/tag-refs ?t]]
-            db project)
-      (d/q '[:find ?e .
-              :in $ ?pname
-              :where [?t1 :tag/name "project"]
-                     [?e :node/tag-refs ?t1]
-                     [?t2 :tag/name ?pname]
-                     [?e :node/tag-refs ?t2]]
-            db project)))
+  (d/q '[:find ?e .
+         :in $ ?pname
+         :where
+         [?t1 :tag/name "project"]
+         [?e :node/tag-refs ?t1]
+         [?t2 :tag/name ?pname]
+         [?e :node/tag-refs ?t2]]
+       db project))
 
 (defn- upsert-project-fact! [conn cfg project summary tags]
   (let [db       (db/db conn)
         eid      (find-project-fact db project)
-        tag-strs (distinct (concat ["project"] tags))]
+        tag-strs (distinct (concat ["project"] [project] tags))]
     (if eid
       (do (node/update-content! conn cfg eid summary)
-          (node/update-tag-refs conn eid (tag-resolve/resolve-tags conn tag-strs))
-          (node/update-project! conn eid project))
+          (node/update-tag-refs conn eid (tag-resolve/resolve-tags conn tag-strs)))
       (node/create-node conn cfg
         {:content  summary
-         :tag-refs (tag-resolve/resolve-tags conn tag-strs)
-         :project  project}))))
+         :tag-refs (tag-resolve/resolve-tags conn tag-strs)}))))
 
 (defn project-update [conn cfg req]
   (let [{:keys [project summary tags]} (:body-params req)]
@@ -431,8 +421,7 @@
           blob-node (node/create-node conn cfg
                       {:content   (:summary body)
                        :tag-refs  tag-refs
-                       :blob-dir  blob-dir
-                       :project   (:project body)})]
+                       :blob-dir  blob-dir})]
       {:status 201
        :body   {:blob-dir blob-dir
                 :blob-id  (:node-eid blob-node)}})))
@@ -630,16 +619,18 @@
             (when-not datomic-dir
               (link-blob-dir! conn session-eid blob-dir-short))
             (when project
-              (node/update-project! conn session-eid project)))
-          (let [tag-refs (tag-resolve/resolve-tags conn ["session"])]
+              (let [tag-refs (tag-resolve/resolve-tags conn [project])]
+                (node/update-tag-refs conn session-eid tag-refs))))
+          (let [tag-strs (cond-> ["session"]
+                           project (conj project))
+                tag-refs (tag-resolve/resolve-tags conn tag-strs)]
             (node/create-node conn cfg
               {:content    (or session-summary
                                (extract-first-user-prompt messages)
                                "Session conversation")
                :tag-refs   tag-refs
                :blob-dir   blob-dir-short
-               :session-id session-id
-               :project    project})))
+               :session-id session-id})))
 
         {:status 200
          :body   {:blob-dir           blob-dir-short

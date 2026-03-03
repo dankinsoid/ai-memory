@@ -85,11 +85,16 @@
 (def tags-data (api-get "/api/tags" {"limit" "50"}))
 
 (def fact-filters
-  (cond-> [{:tags ["pref"]}
-           {:tags ["universal"]}
-           {:tags ["session"] :sort_by "date" :limit 5}]
-    project-name (conj {:tags ["project"] :project project-name})
-    project-name (conj {:project project-name :exclude_tags ["session"]})))
+  (if project-name
+    [{:tags ["pref"]}
+     {:tags ["universal"]}
+     {:tags ["project" project-name]}
+     {:tags [project-name] :exclude_tags ["session"]}
+     {:tags ["session" project-name] :sort_by "date" :limit 3}
+     {:tags ["session"] :exclude_tags [project-name] :sort_by "date" :limit 4}]
+    [{:tags ["pref"]}
+     {:tags ["universal"]}
+     {:tags ["session"] :sort_by "date" :limit 5}]))
 
 (def facts-data (api-post "/api/tags/facts" {:filters fact-filters}))
 
@@ -123,16 +128,16 @@
          (when blob-dir (str " [blob: " blob-dir "]")))))
 
 (defn format-project-section [results project-name]
-  (let [summary-facts (or (:facts (first (filter #(and (= (get-in % [:filter :project]) project-name)
-                                                        (seq (get-in % [:filter :tags]))) results))) [])
-        project-facts (or (:facts (first (filter #(and (= (get-in % [:filter :project]) project-name)
-                                                        (nil? (get-in % [:filter :tags]))) results))) [])
-        summary-ids   (set (map :db/id summary-facts))
-        other-facts   (remove #(summary-ids (:db/id %)) project-facts)
-        all-facts     (concat summary-facts other-facts)]
-    (when (seq all-facts)
+  (let [summary-facts  (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["project" project-name]) results))) [])
+        project-facts  (or (:facts (first (filter #(= (get-in % [:filter :tags]) [project-name]) results))) [])
+        project-sessions (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["session" project-name]) results))) [])
+        summary-ids    (set (map :db/id summary-facts))
+        other-facts    (remove #(summary-ids (:db/id %)) project-facts)]
+    (when (or (seq project-sessions) (seq summary-facts) (seq other-facts))
       (str "## Project: " project-name "\n"
-           (str/join "\n" (map format-fact all-facts))))))
+           (when (seq project-sessions)
+             (str (str/join "\n" (map format-session-line project-sessions)) "\n"))
+           (str/join "\n" (map format-fact (concat summary-facts other-facts)))))))
 
 (defn format-tag [t]
   (str (get t (keyword "tag/name"))
