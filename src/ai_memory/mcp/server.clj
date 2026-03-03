@@ -68,3 +68,6 @@
 
 (defn handle-project [{:keys [base-url api-token]} params]
   (api-post base-url "/api/project" params api-token))
+
+(defn handle-auto-update [{:keys [base-url api-token]} params]
+  (api-post base-url "/api/session/auto-update" params api-token))

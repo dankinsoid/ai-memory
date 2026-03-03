@@ -12,7 +12,8 @@
             [ai-memory.embedding.vector-store :as vs]
             [ai-memory.embedding.core :as embedding]
             [datomic.api :as d]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [clojure.java.io :as io])
   (:import [java.util Date UUID]
            [java.time Instant]))
 
@@ -600,6 +601,36 @@
                   :total-turns        total-turns
                   :current-chunk-size (or (:byte-count append-result) 0)}}))))
 
+;; --- Transcript helpers (shared by session-update and auto-update) ---
+
+(defn- transcript-total-bytes
+  "Returns total byte count of all conversation .md files in blob dir (excluding compact.md)."
+  [base blob-dir]
+  (let [dir (io/file base blob-dir)]
+    (if (.exists dir)
+      (->> (.listFiles dir)
+           (filter #(and (str/ends-with? (.getName %) ".md")
+                         (not= (.getName %) "compact.md")))
+           (map #(.length %))
+           (reduce + 0))
+      0)))
+
+(defn- read-transcript-content
+  "Reads all conversation .md files concatenated in order (numbered chunks, then _current.md).
+   Excludes compact.md."
+  [base blob-dir]
+  (let [dir (io/file base blob-dir)]
+    (when (.exists dir)
+      (let [files (->> (.listFiles dir)
+                       (filter #(and (str/ends-with? (.getName %) ".md")
+                                     (not= (.getName %) "compact.md")))
+                       (sort-by #(.getName %)))
+            {numbered true current false}
+            (group-by #(re-matches #"\d{4,}-.*\.md" (.getName %)) files)
+            ordered (concat (sort-by #(.getName %) numbered)
+                            (sort-by #(.getName %) current))]
+        (str/join "\n" (map slurp ordered))))))
+
 ;; --- Unified session update (summary, chunk naming, compact) ---
 
 (defn session-update [conn cfg req]
@@ -680,13 +711,77 @@
                   (blob-store/write-meta! base blob-dir
                     (assoc meta :compact-summary compact))))
               (node/embed-file! cfg session-eid blob-dir-short "compact.md" compact)
-              "stored")]
+              "stored")
+
+            ;; 4. Track auto-update watermark when summary or compact changes
+            _ (when (or summary compact)
+                (let [total (transcript-total-bytes base blob-dir)
+                      meta  (blob-store/read-meta base blob-dir)]
+                  (when meta
+                    (blob-store/write-meta! base blob-dir
+                      (cond-> (assoc meta :last-auto-bytes total)
+                        compact (assoc :last-compact-bytes total))))))]
 
         {:status 200
          :body   (cond-> {:blob-dir blob-dir-short}
                    summary-result (assoc :summary summary-result)
                    chunk-result   (assoc :chunk chunk-result)
                    compact-result (assoc :compact compact-result))}))))
+
+;; --- Session auto-update (agent hook: check if summary/compact needed) ---
+
+(def ^:private auto-update-delta-bytes
+  "Minimum transcript growth (bytes) before returning transcript for update."
+  5000)
+
+(def ^:private auto-update-compact-threshold
+  "Minimum total transcript bytes before compact generation is warranted."
+  15000)
+
+(defn session-auto-update
+  "POST /api/session/auto-update — checks if session needs metadata refresh.
+   Returns {:status 'current'} or {:status 'needed' :transcript '...' ...}."
+  [conn cfg req]
+  (let [body       (:body-params req)
+        session-id (:session-id body)]
+    (if-not session-id
+      {:status 400 :body {:error "session_id required"}}
+      (let [base        (:blob-path cfg)
+            db          (db/db conn)
+            session-eid (find-session-fact db session-id)
+            datomic-dir (when session-eid
+                          (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
+            blob-dir    (or (when datomic-dir
+                              (or (blob-store/resolve-blob-dir base datomic-dir)
+                                  datomic-dir))
+                            (blob-store/find-session-blob-dir base session-id))]
+        (if-not blob-dir
+          {:status 200 :body {:status "current" :reason "no blob"}}
+          (let [meta           (blob-store/read-meta base blob-dir)
+                total-bytes    (transcript-total-bytes base blob-dir)
+                last-auto      (or (:last-auto-bytes meta) 0)
+                delta          (- total-bytes last-auto)
+                has-compact?   (some? (:compact-summary meta))
+                needs-compact? (and (>= total-bytes auto-update-compact-threshold)
+                                    (or (not has-compact?)
+                                        ;; Re-generate if transcript doubled since last compact
+                                        (>= total-bytes (* 2 (or (:last-compact-bytes meta) total-bytes)))))
+                needs-update?  (>= delta auto-update-delta-bytes)]
+            (if-not needs-update?
+              {:status 200 :body {:status "current"}}
+              (let [transcript (read-transcript-content base blob-dir)
+                    blob-dir-short (blob-store/blob-dir-name blob-dir)]
+                {:status 200
+                 :body   {:status          "needed"
+                          :session-id      session-id
+                          :project         (:project meta)
+                          :blob-dir        blob-dir-short
+                          :transcript      transcript
+                          :transcript-bytes total-bytes
+                          :current-title   (:title meta)
+                          :current-summary (:session-summary meta)
+                          :current-compact (:compact-summary meta)
+                          :needs-compact   needs-compact?}}))))))))
 
 ;; --- Session continuation (linking across /clear) ---
 

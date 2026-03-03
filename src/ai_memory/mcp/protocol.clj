@@ -118,6 +118,12 @@
                                :compact    {:type "string" :description "Detailed multi-paragraph session summary for /save. Stored as compact.md in the blob."}}
                   :required   ["session_id"]}}
 
+   {:name        "memory_auto_update"
+    :description "Check if session needs metadata update. Server decides based on transcript growth. Returns status='current' (no action needed) or status='needed' with transcript and metadata for the agent to generate title/summary/compact."
+    :inputSchema {:type       "object"
+                  :properties {:session_id {:type "string" :description "Session ID to check"}}
+                  :required   ["session_id"]}}
+
    {:name        "memory_project"
     :description "Store or update a persistent project summary. One fact per project, upserted in-place. Call when the project's architecture, tech stack, goals, or structure become clear or change meaningfully."
     :inputSchema {:type       "object"
@@ -237,6 +243,7 @@
     :project         {:project (:project params)
                       :summary (:summary params)
                       :tags    (:tags params)}
+    :auto-update     {:session-id (:session_id params)}
     params))
 
 ;; --- Handler dispatch ---
@@ -250,7 +257,8 @@
     :read-blob          (server/handle-read-blob cfg params)
     :reinforce          (server/handle-reinforce cfg params)
     :session            (server/handle-session cfg params)
-    :project            (server/handle-project cfg params)))
+    :project            (server/handle-project cfg params)
+    :auto-update        (server/handle-auto-update cfg params)))
 
 ;; --- JSON-RPC method handlers ---
 
@@ -282,7 +290,8 @@
    "memory_read_blob"            :read-blob
    "memory_reinforce"            :reinforce
    "memory_session"              :session
-   "memory_project"              :project})
+   "memory_project"              :project
+   "memory_auto_update"          :auto-update})
 
 (defn- format-result [handler-key result]
   (case handler-key
@@ -305,6 +314,9 @@
     :reinforce   (if (:error result) (str "error: " (:error result)) "ok")
     :session     (if (:error result) (str "error: " (:error result)) "ok")
     :project     (if (:error result) (str "error: " (:error result)) "ok")
+    :auto-update (if (:error result)
+                   (str "error: " (:error result))
+                   (json/generate-string result))
     (json/generate-string result)))
 
 (defn- handle-tools-call [cfg id params]

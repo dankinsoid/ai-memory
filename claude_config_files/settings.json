@@ -12,7 +12,8 @@
       "mcp__ai-memory__memory_list_blobs",
       "mcp__ai-memory__memory_reinforce",
       "mcp__ai-memory__memory_session",
-      "mcp__ai-memory__memory_project"
+      "mcp__ai-memory__memory_project",
+      "mcp__ai-memory__memory_auto_update"
     ]
   },
   "hooks": {
@@ -43,6 +44,16 @@
             "type": "command",
             "command": "bb ~/.claude/hooks/session-sync.bb",
             "timeout": 30000
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "You are a session metadata updater. Your ONLY job: call memory_auto_update with the session_id from $ARGUMENTS, then act on the result.\n\nIf status='current': return {\"ok\":true} immediately.\n\nIf status='needed': the response contains the session transcript and metadata. Generate updates and call memory_session with:\n- session_id (from response)\n- project (from response)\n- title: 2-5 word session name (English)\n- summary: 1-2 sentences describing what was done (English)\n- compact (ONLY if needs_compact=true): structured summary with header (Status/Next/Blockers) + compression-gradient narrative (early=compressed, recent=detailed). Include file paths, function names, decisions with rationale, dead ends.\n\nThen return {\"ok\":true}.\n\nDo NOT do anything else. Do NOT read files. Do NOT run commands. Just call the two MCP tools.",
+            "model": "haiku",
+            "timeout": 120
           }
         ]
       }

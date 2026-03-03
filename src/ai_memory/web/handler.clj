@@ -93,6 +93,7 @@
                       ["/session/sync" {:post (fn [req] (api/session-sync conn cfg req))}]
                       ["/session/continue" {:post (fn [req] (api/session-continue conn cfg req))}]
                       ["/session/chain" {:post (fn [req] (api/session-chain conn cfg req))}]
+                      ["/session/auto-update" {:post (fn [req] (api/session-auto-update conn cfg req))}]
                       ["/session" {:post (fn [req] (api/session-update conn cfg req))}]
                       ["/project" {:post (fn [req] (api/project-update conn cfg req))}]]
                      ["/mcp" {:handler (mcp/streamable-handler

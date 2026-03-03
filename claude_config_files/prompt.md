@@ -43,20 +43,6 @@ After completing a task where retrieved facts influenced your work, call `memory
 **Score**: -1 (actively misled) to 1 (essential, directly unblocked task).
 Only facts with **direct impact**. Retrieved but unused = skip. Score near 0 = skip.
 
-## Session Metadata — `memory_session`
-
-Hook reminders tell you when to call and which params to include.
-
-`title` — short session name, 2-5 words. Always English.
-Good: `blob storage architecture`, `fix auth bug`, `prompt rewrite`
-
-`summary` — 1-2 sentences describing what was done and key decisions. Always English. Each call replaces previous, so include full arc.
-Good: `Designed blob storage using Node model with filesystem sections. Chose lazy navigation over pre-indexed TOC.`
-Good: `Full adversarial debate on local vs server architecture. Chose hybrid .edn approach at 72% confidence.`
-Bad: `blob storage architecture` (too short, use title for this)
-
-`tags` — topic tags for the session (e.g. `["refactoring", "architecture"]`). Merged with automatic `session` and project tags. Omit if nothing notable.
-
 ## Project Summaries — `memory_project`
 
 Call when the project's architecture, tech stack, goals, or structure become clear or change meaningfully:
