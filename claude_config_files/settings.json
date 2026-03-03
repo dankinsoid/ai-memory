@@ -2,6 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(bb ~/.claude/skills/**)",
+      "Bash(bb ~/.claude/hooks/**)",
       "mcp__ai-memory__memory_explore_tags",
       "mcp__ai-memory__memory_get_facts",
       "mcp__ai-memory__memory_remember",
