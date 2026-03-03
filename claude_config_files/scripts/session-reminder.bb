@@ -158,10 +158,10 @@
              need-chunk?
              (conj (str "Chunk ~" (quot context-tokens 1000) "K tokens."
                         " Call memory_session with session_id: \"" session-id
-                        "\", chunk_title, and summary."))
+                        "\", chunk_title, title, and summary."))
              (and need-summary? (not need-chunk?))
              (conj (str "Call memory_session with session_id: \"" session-id
-                        "\", summary, and tags."))
+                        "\", title, summary, and tags."))
              need-project-remind?
              (conj (str "Call memory_project(project=\"" project-name
                         "\", summary=\"...\") if the project description has changed or is not yet stored.")))))))))

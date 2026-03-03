@@ -596,6 +596,7 @@
   (let [body        (:body-params req)
         session-id  (:session-id body)
         project     (:project body)
+        title       (:title body)
         summary     (:summary body)
         tags        (:tags body)
         chunk-title (:chunk-title body)
@@ -628,7 +629,8 @@
             ;; 1. Update session summary in Datomic + blob meta
             summary-result
             (when summary
-              (let [_ (upsert-session-fact! conn cfg session-id summary project tags)]
+              (let [content (if title (str title "\n" summary) summary)
+                    _ (upsert-session-fact! conn cfg session-id content project tags)]
                 ;; If node was just created by upsert, link blob-dir to it
                 (when-not session-eid
                   (when-let [new-eid (find-session-fact (db/db conn) session-id)]
@@ -638,6 +640,13 @@
                   (blob-store/write-meta! base blob-dir
                     (assoc meta :session-summary summary))))
               (if existing-dir "updated" "created"))
+
+            ;; 1b. Update session title in blob meta (title-only, no Datomic)
+            _ (when title
+                (let [meta (blob-store/read-meta base blob-dir)]
+                  (when meta
+                    (blob-store/write-meta! base blob-dir
+                      (assoc meta :title title)))))
 
             ;; Re-read session-eid after potential upsert
             session-eid (or session-eid (find-session-fact (db/db conn) session-id))
@@ -678,14 +687,14 @@
             prev-eid (or (find-session-fact db prev-session-id)
                          ;; Self-heal: create prev session if Stop hook hasn't synced yet
                          (do (upsert-session-fact! conn cfg prev-session-id
-                               (str "session " (subs prev-session-id 0 8)) project)
+                               (str "session " (subs prev-session-id 0 8)) project nil)
                              (find-session-fact (db/db conn) prev-session-id)))]
         (if-not prev-eid
           {:status 500 :body {:error "failed to create prev session fact"}}
           (let [;; Create new session fact if it doesn't exist yet
                 _        (when-not (find-session-fact db session-id)
                            (upsert-session-fact! conn cfg session-id
-                             (str "continuation of " prev-session-id) project))
+                             (str "continuation of " prev-session-id) project nil))
                 new-db   (db/db conn)
                 new-eid  (find-session-fact new-db session-id)
                 prev-dir (:node/blob-dir (d/pull new-db [:node/blob-dir] prev-eid))]

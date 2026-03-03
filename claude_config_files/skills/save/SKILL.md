@@ -50,16 +50,21 @@ If facts retrieved during this session influenced task completion, call `memory_
 ```
 memory_session({
   session_id: "<session-id>",
-  summary: "<session arc as Fact Format>",
+  title: "<2-5 word session name>",
+  summary: "<1-2 sentences: what was done and key decisions>",
   chunk_title: "<title for last chunk>",
   compact: "<content from step 1>"
 })
 ```
 
-`summary` — 2-5 words, what this session was about, no articles, always English:
-
+`title` — 2-5 words, short session name, always English:
 ```
 updated load/save skills
+```
+
+`summary` — 1-2 sentences describing what was done and key decisions:
+```
+Reworked /load and /save skills to use new blob storage. Added compact summary generation with vectorization.
 ```
 
 ## 3. Confirm to user

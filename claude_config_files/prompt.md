@@ -47,10 +47,13 @@ Only facts with **direct impact**. Retrieved but unused = skip. Score near 0 = s
 
 Hook reminders tell you when to call and which params to include.
 
-`summary` — answer "what was this session about?" in 2-5 words. Always English, even if the conversation was in another language. Each call replaces previous, so include full arc.
-Good: `blob storage architecture`
-Good: `prompt rewrite and tag system`
-Bad: `explored dedup strategies → chose normalized prose → designed prompt → committed` (too detailed)
+`title` — short session name, 2-5 words. Always English.
+Good: `blob storage architecture`, `fix auth bug`, `prompt rewrite`
+
+`summary` — 1-2 sentences describing what was done and key decisions. Always English. Each call replaces previous, so include full arc.
+Good: `Designed blob storage using Node model with filesystem sections. Chose lazy navigation over pre-indexed TOC.`
+Good: `Full adversarial debate on local vs server architecture. Chose hybrid .edn approach at 72% confidence.`
+Bad: `blob storage architecture` (too short, use title for this)
 
 `tags` — topic tags for the session (e.g. `["refactoring", "architecture"]`). Merged with automatic `session` and project tags. Omit if nothing notable.
 

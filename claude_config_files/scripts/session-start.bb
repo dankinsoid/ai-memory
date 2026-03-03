@@ -147,8 +147,12 @@
          (str/join "\n"
            (map (fn [f]
                   (let [content  (get f (keyword "node/content"))
-                        blob-dir (get f (keyword "node/blob-dir"))]
-                    (str "- " (or (some-> content (str/split #"\n") first) "(no summary)")
+                        blob-dir (get f (keyword "node/blob-dir"))
+                        lines    (some-> content (str/split #"\n"))
+                        title    (first lines)
+                        summary  (second lines)]
+                    (str "- " (or title "(no summary)")
+                         (when summary (str " — " summary))
                          (when blob-dir (str " [blob: " blob-dir "]")))))
                 facts)))))
 
