@@ -105,6 +105,7 @@
                              1.0
                              (:reinforcement-factor opts))
         (node/update-tag-refs conn eid tag-refs)
+        (node/update-project! conn eid (:project node-data))
         {:id eid :status :reinforced})
       (let [result (node/create-node conn cfg
                      (-> node-data
@@ -194,17 +195,22 @@
      :nodes      — vec of {:content, :tags}
      :context-id — string: session-scoped linking (RAM cache)
                    :global: link to all recent nodes (DB query by tick)
-                   nil: no context edges, only batch"
+                   nil: no context edges, only batch
+     :project    — project name, injected into each node as :node/project"
   [conn cfg params]
   (let [registry   (:metrics cfg)
         opts       (merge defaults cfg)
         start-ns   (System/nanoTime)
         context-id (:context-id params)
+        project    (:project params)
+        nodes      (if project
+                     (mapv #(assoc % :project project) (:nodes params))
+                     (:nodes params))
 
         ;; Phase: nodes
         results
         (metrics/timed registry metrics/write-duration {:phase "nodes"}
-          (mapv #(process-node conn cfg % opts) (:nodes params)))
+          (mapv #(process-node conn cfg % opts) nodes))
 
         node-ids (mapv :id results)
 

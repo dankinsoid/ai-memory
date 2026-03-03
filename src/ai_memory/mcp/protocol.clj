@@ -55,7 +55,9 @@
                                                                                :default "date"}
                                                                      :offset {:type "integer"
                                                                               :description "Skip first N results for pagination (default 0)"
-                                                                              :default 0}}}
+                                                                              :default 0}
+                                                                     :project {:type ["string" "null"]
+                                                                               :description "Filter by project name. Omit to not filter. null = facts with no project."}}}
                                           :description "Array of filters. Each filter is an independent query."}}
                   :required   ["filters"]}}
 
@@ -71,7 +73,7 @@
                                :session_id      {:type        "string"
                                                  :description "Session ID for context-based linking across calls"}
                                :project         {:type        "string"
-                                                 :description "Project name. Tags facts with this."}}}}
+                                                 :description "Project name. Sets :node/project on all stored facts."}}}}
 
    {:name        "memory_store_file"
     :description "Store a file (code, document, image) as a blob. Provide content directly or a file path."
@@ -152,6 +154,7 @@
         content  (:node/content fact)
         sources  (:node/sources fact)
         blob-dir (:node/blob-dir fact)
+        project  (:node/project fact)
         ew       (:node/effective-weight fact)
         refs     (cond-> []
                    (seq sources) (into (map #(str "src: " %) sources))
@@ -160,6 +163,7 @@
          (when eid (str "[" eid "] "))
          content
          (when (seq refs) (str " [" (str/join ", " refs) "]"))
+         (when project (str " {" project "}"))
          (when ew (str " w:" (format "%.2f" (double ew)))))))
 
 (defn- render-scored-fact [fact]
