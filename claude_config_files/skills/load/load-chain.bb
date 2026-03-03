@@ -11,6 +11,10 @@
 ;; When [project] is provided, only processes cache files for that project
 ;; and filters the fallback session query by project tag.
 ;; Blob mode: directly reads compact.md from a specific blob dir.
+;;
+;; Content strategy: shows last N chars of conversation (concatenated chunks).
+;; If entire conversation fits in N chars, compact.md is skipped.
+;; If conversation exceeds N chars, compact.md is shown first, then the tail.
 
 (require '[cheshire.core :as json]
          '[babashka.http-client :as http]
@@ -19,6 +23,7 @@
 
 (def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
 (def api-token (System/getenv "AI_MEMORY_TOKEN"))
+(def context-chars 12000) ;; ~3000 words — enough to recover conversation context
 
 (defn api-post [path body]
   (try
@@ -44,48 +49,71 @@
         (when-not (str/blank? stdout)
           stdout)))))
 
-(defn truncate-lines
-  "Truncates text to max-lines, appending a note if truncated."
-  [text max-lines]
-  (let [lines (str/split-lines text)]
-    (if (<= (count lines) max-lines)
-      text
-      (str (str/join "\n" (take max-lines lines))
-           "\n\n... (" (- (count lines) max-lines) " more lines)"))))
-
-(defn read-blob-tail
-  "Reads last N lines of the latest transcript .md file in a blob."
-  [blob-dir n]
+(defn read-conversation
+  "Reads conversation from blob — all numbered chunks + _current.md in order.
+   Returns {:content str :total-size int :full? bool} or nil."
+  [blob-dir max-chars]
+  ;; Step 1: list conversation files and get total size
   (let [result (api-post "/api/blobs/exec"
                  {:blob_dir blob-dir
-                  :command  "ls -t *.md 2>/dev/null | grep -v compact.md | head -1"})]
+                  :command  (str "files=$(ls -1 *.md 2>/dev/null | grep -v compact.md | sort);"
+                                 "if [ -z \"$files\" ]; then exit 1; fi;"
+                                 "total=$(echo \"$files\" | xargs cat | wc -c);"
+                                 "echo \"$files\";"
+                                 "echo '---SIZE---';"
+                                 "echo $total")})]
     (when (and result (zero? (or (:exit-code result) -1)))
-      (let [filename (str/trim (:stdout result))]
-        (when-not (str/blank? filename)
-          (let [tail-result (api-post "/api/blobs/exec"
-                              {:blob_dir blob-dir
-                               :command  (str "tail -" n " " filename)})]
-            (when (and tail-result (zero? (or (:exit-code tail-result) -1)))
-              (let [content (:stdout tail-result)]
-                (when-not (str/blank? content)
-                  {:filename filename :content content})))))))))
+      (let [output     (:stdout result)
+            [file-sec size-sec] (str/split output #"---SIZE---\n?")
+            files      (->> (str/split-lines (str/trim file-sec))
+                            (remove str/blank?))
+            total-size (some-> size-sec str/trim parse-long)]
+        (when (and (seq files) total-size (pos? total-size))
+          (let [all-files (str/join " " files)
+                full?     (<= total-size max-chars)
+                cmd       (if full?
+                            (str "cat " all-files)
+                            (str "cat " all-files " | tail -c " max-chars))
+                content-result (api-post "/api/blobs/exec"
+                                 {:blob_dir blob-dir :command cmd})]
+            (when (and content-result (zero? (or (:exit-code content-result) -1)))
+              {:content    (:stdout content-result)
+               :total-size total-size
+               :full?      full?})))))))
+
+(defn trim-to-line-boundary
+  "Trims content to start at the first newline (avoids partial first line)."
+  [content]
+  (if-let [idx (str/index-of content "\n")]
+    (subs content (inc idx))
+    content))
 
 (defn print-blob-content
-  "Prints compact.md from a blob, falling back to _current.md.
-   When compact.md exists, also prints last conversation turns."
+  "Prints session content from a blob.
+   Small conversations: full transcript, no compact.md needed.
+   Large conversations: compact.md summary + last N chars of transcript."
   [blob-dir]
-  (if-let [compact (read-blob-file blob-dir "compact.md")]
-    (do (println compact)
-        (when-let [{:keys [filename content]} (read-blob-tail blob-dir 30)]
+  (if-let [{:keys [content total-size full?]} (read-conversation blob-dir context-chars)]
+    (if full?
+      ;; Entire conversation fits — show it directly, skip compact
+      (println content)
+      ;; Large conversation — compact summary + tail
+      (do
+        (when-let [compact (read-blob-file blob-dir "compact.md")]
+          (println compact)
           (println)
-          (println (str "## Last Conversation Turns (from " filename ")"))
-          (println)
-          (println content)))
-    (if-let [current (read-blob-file blob-dir "_current.md")]
-      (do (println "*No compact.md — showing _current.md (raw transcript):*")
-          (println)
-          (println (truncate-lines current 80)))
-      (println "*No compact.md or _current.md found.*"))))
+          (println "---")
+          (println))
+        (println "## Conversation Tail")
+        (println)
+        (println (str "*(last ~" (quot context-chars 1000) "K of "
+                      (quot total-size 1000) "K total)*"))
+        (println)
+        (println (trim-to-line-boundary content))))
+    ;; No conversation files — try compact.md alone
+    (if-let [compact (read-blob-file blob-dir "compact.md")]
+      (println compact)
+      (println "*No content found.*"))))
 
 ;; --- Main ---
 
