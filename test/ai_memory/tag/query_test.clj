@@ -295,18 +295,18 @@
       (is (= "light-new" (:node/content (first facts))))
       (is (= "heavy-old" (:node/content (second facts)))))))
 
-(deftest sort-by-weight-default-test
-  (testing "default sort (no sort-by param) uses weight"
+(deftest sort-by-date-default-test
+  (testing "default sort (no sort-by param) uses date desc"
     (set-tick! *conn* 50)
-    ;; Abandoned fact: base=0.0, cycle=0 → effective = 51^(-0.2) ≈ 0.56
-    (create-tagged-node! *conn* "abandoned" ["clj"]
+    ;; recent fact: updated 1 day ago
+    (create-tagged-node! *conn* "recent" ["clj"]
                          {:weight 0.0 :cycle 0 :updated-at (days-ago 1)})
-    ;; Active fact: base=0.8, cycle=49 → effective = 2^(-0.04) ≈ 0.97
-    (create-tagged-node! *conn* "active" ["clj"]
+    ;; old fact: updated 10 days ago
+    (create-tagged-node! *conn* "old" ["clj"]
                          {:weight 0.8 :cycle 49 :updated-at (days-ago 10)})
     (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
                     [["clj"]]
                     {:limit 50})
           facts (:facts (first results))]
-      (is (= "active" (:node/content (first facts))))
-      (is (= "abandoned" (:node/content (second facts)))))))
+      (is (= "recent" (:node/content (first facts))))
+      (is (= "old" (:node/content (second facts)))))))

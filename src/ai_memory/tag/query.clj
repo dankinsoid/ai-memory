@@ -189,7 +189,7 @@
            (enrich-effective-weight db facts)))
 
 (defn- sort-facts
-  "Dispatches sorting: \"weight\" → by effective weight, \"date\" (default) → by updated-at.
+  "Dispatches sorting: \"weight\" → by effective weight, \"date\" or nil (default) → by updated-at.
    Always enriches facts with :node/effective-weight."
   [db sort-by-param facts]
   (case sort-by-param
@@ -199,7 +199,7 @@
 (defn fetch-by-tag-sets
   "Fetches facts for each tag set (intersection). Per-set limit.
    Optional :since/:until (java.util.Date) for date filtering.
-   Optional :sort-by — \"weight\" (default) or \"date\".
+   Optional :sort-by — \"date\" (default) or \"weight\".
    When tag-sets is nil/empty, returns all matching facts in a single group.
    Output: [{:tags [...] :facts [...]} ...]"
   [db registry tag-sets {:keys [limit since until sort-by] :or {limit 50}}]
