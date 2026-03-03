@@ -82,6 +82,11 @@
     {:tx-result tx-result
      :node-eid  eid}))
 
+(def node-pull-spec
+  [:db/id :node/content :node/weight :node/cycle :node/sources
+   :node/blob-dir :node/updated-at
+   {:node/tag-refs [:tag/name]}])
+
 (defn find-by-id [db eid]
   (d/pull db '[*] eid))
 
@@ -104,7 +109,7 @@
                      (let [eid  (if file-hit?
                                   (:fact_eid payload)
                                   (long id))
-                           node (when eid (d/pull db '[*] eid))]
+                           node (when eid (d/pull db node-pull-spec eid))]
                        (when (:node/content node)
                          (assoc node :search/score score)))))))
          (filterv some?)

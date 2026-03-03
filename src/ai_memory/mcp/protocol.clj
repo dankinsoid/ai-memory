@@ -152,29 +152,26 @@
         content  (:node/content fact)
         sources  (:node/sources fact)
         blob-dir (:node/blob-dir fact)
-        ew       (:node/effective-weight fact)
         refs     (cond-> []
                    (seq sources) (into (map #(str "src: " %) sources))
                    blob-dir      (conj (str "blob: " blob-dir)))]
     (str "- "
          (when eid (str "[" eid "] "))
          content
-         (when (seq refs) (str " [" (str/join ", " refs) "]"))
-         (when ew (str " w:" (format "%.2f" (double ew)))))))
+         (when (seq refs) (str " [" (str/join ", " refs) "]")))))
 
 (defn- render-scored-fact [fact]
   (let [eid     (:db/id fact)
         score   (:search/score fact)
-        ew      (:node/effective-weight fact)
         content (:node/content fact)
         tags    (->> (:node/tag-refs fact)
                      (map :tag/name)
+                     (filter some?)
                      (str/join ", "))]
     (str (format "%.2f" (double score))
          (when eid (str " [" eid "]"))
          " " content
-         (when (seq tags) (str " [" tags "]"))
-         (when ew (str " w:" (format "%.2f" (double ew)))))))
+         (when (seq tags) (str " [" tags "]")))))
 
 (defn- filter-header [{:keys [id tags query]}]
   (let [parts (cond-> []
