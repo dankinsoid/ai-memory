@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { selectedFact, selectFact } from '../lib/store.js'
-import { weightColor, timeAgo, tagColor, tagBg } from '../lib/utils.js'
+import { weightColor, timeAgo, tagColor, tagBg, projectColor, projectBg } from '../lib/utils.js'
 
 export function FactCard({ fact }) {
   const content = fact['node/content'] || fact.content || ''
@@ -8,6 +8,7 @@ export function FactCard({ fact }) {
   const weight = fact['node/effective-weight'] ?? fact['node/weight'] ?? fact.weight
   const updatedAt = fact['node/updated-at'] || fact.updated_at
   const id = fact['db/id'] || fact.id
+  const project = fact['node/project']
   const isSelected = selectedFact.value && (selectedFact.value['db/id'] || selectedFact.value.id) === id
 
   const tagNames = tags.map(t => typeof t === 'string' ? t : (t['tag/name'] || t.name || ''))
@@ -18,8 +19,9 @@ export function FactCard({ fact }) {
          onClick=${() => selectFact(fact)}>
       <div class="fact-card-body">
         <div class="fact-card-content">${content}</div>
-        ${tagNames.length > 0 && html`
+        ${(tagNames.length > 0 || project) && html`
           <div class="fact-card-meta">
+            ${project && html`<span class="fact-card-project" style="color: ${projectColor(project)}; background: ${projectBg(project)}">${project}</span>`}
             ${tagNames.map(t => html`
               <span key=${t} class="fact-card-tag" style="color: ${tagColor(t)}; background: ${tagBg(t)}">${t}</span>
             `)}

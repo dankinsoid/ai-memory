@@ -102,7 +102,7 @@
 
 (def ^:private node-pull-spec-full
   [:db/id :node/content :node/weight :node/cycle :node/created-at :node/updated-at
-   :node/blob-dir :node/session-id :node/sources
+   :node/blob-dir :node/session-id :node/sources :node/project
    {:node/tag-refs [:tag/name :tag/node-count]}])
 
 (defn get-top-nodes
@@ -199,6 +199,7 @@
                     :updated-at       (str (:node/updated-at node))
                     :blob-dir         (:node/blob-dir node)
                     :session-id       (:node/session-id node)
+                    :project          (:node/project node)
                     :sources          (vec (:node/sources node))}}
           {:status 404 :body {:error "Not found"}})))))
 

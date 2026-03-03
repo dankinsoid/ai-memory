@@ -594,6 +594,13 @@ body {
   white-space: nowrap;
 }
 
+.fact-card-project {
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .fact-card-right {
   display: flex;
   flex-direction: column;

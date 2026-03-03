@@ -186,6 +186,10 @@ export function FactDetail() {
                 <span class="detail-meta-key">Session</span>
                 <span class="detail-meta-val">${detail['session-id']}</span>
               `}
+              ${(fact?.['node/project'] || detail?.project) && html`
+                <span class="detail-meta-key">Project</span>
+                <span class="detail-meta-val">${fact?.['node/project'] || detail?.project}</span>
+              `}
             </div>
           </div>
 

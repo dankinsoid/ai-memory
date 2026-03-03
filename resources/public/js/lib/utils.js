@@ -87,6 +87,19 @@ export function tagBg(name) {
   return `hsla(${h}, ${s}%, 68%, 0.12)`
 }
 
+// Inverted tag palette: opaque background, semi-transparent dark text
+export function projectBg(name) {
+  const h = tagHue(name)
+  const s = 55 + (hashStr(name) % 25)
+  return `hsl(${h}, ${s}%, 68%)`
+}
+
+export function projectColor(name) {
+  const h = tagHue(name)
+  const s = 55 + (hashStr(name) % 25)
+  return `hsla(${h}, ${s}%, 15%, 0.75)`
+}
+
 /**
  * Node type to CSS color variable.
  */
