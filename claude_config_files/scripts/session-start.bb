@@ -104,8 +104,7 @@
 (defn- format-fact [f]
   (let [content  (get f (keyword "node/content"))
         blob-dir (get f (keyword "node/blob-dir"))
-        tags     (->> (get f (keyword "node/tag-refs"))
-                      (map #(get % (keyword "tag/name"))))]
+        tags     (get f (keyword "node/tags"))]
     (str "- " content
          (when blob-dir (str " [blob: " blob-dir "]"))
          (when (seq tags) (str " {" (str/join ", " tags) "}"))

@@ -1,21 +1,23 @@
 (ns ai-memory.web.api
-  (:require [ai-memory.db.core :as db]
+  (:require [ai-memory.store.protocols :as p]
             [ai-memory.graph.node :as node]
-            [ai-memory.graph.edge :as edge]
             [ai-memory.graph.write :as write]
             [ai-memory.graph.delete :as delete]
             [ai-memory.tag.query :as tag-query]
-            [ai-memory.tag.resolve :as tag-resolve]
             [ai-memory.decay.core :as decay]
             [ai-memory.blob.store :as blob-store]
             [ai-memory.blob.exec :as blob-exec]
-            [ai-memory.embedding.vector-store :as vs]
-            [ai-memory.embedding.core :as embedding]
-            [datomic.api :as d]
             [clojure.java.shell :as shell]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [clojure.tools.logging :as log])
   (:import [java.util Date UUID]
            [java.time Instant]))
+
+;; --- Store accessors ---
+
+(defn- fact-store [stores] (:fact-store stores))
+(defn- vector-store [stores] (:vector-store stores))
+(defn- embedding [stores] (:embedding stores))
 
 ;; --- D3 visualization ---
 
@@ -32,7 +34,7 @@
    :content (:node/content n)
    :type    (infer-d3-type n)
    :weight  (:node/weight n)
-   :tags    (mapv :tag/name (:node/tag-refs n))})
+   :tags    (vec (:node/tags n))})
 
 (defn- node->d3-with-ew [tick n]
   (assoc (node->d3 n)
@@ -49,12 +51,10 @@
 
 (defn get-graph
   "Returns full graph for D3 visualization."
-  [conn _req]
-  (let [db    (db/db conn)
-        nodes (d/q '[:find [(pull ?e [* {:node/tag-refs [:tag/name]}]) ...]
-                      :where [?e :node/content]]
-                    db)
-        edges (edge/find-all db)]
+  [_conn stores _req]
+  (let [fs    (fact-store stores)
+        nodes (tag-query/all-nodes fs)
+        edges (p/all-edges fs)]
     {:status 200
      :body   {:nodes (mapv node->d3 nodes)
               :links (mapv edge->d3 edges)}}))
@@ -63,37 +63,37 @@
 
 (defn get-stats
   "Returns global counts for the playground stat bar."
-  [conn _req]
-  (let [db (db/db conn)]
+  [_conn stores _req]
+  (let [fs (fact-store stores)]
     {:status 200
-     :body   {:fact-count (or (d/q '[:find (count ?n) . :where [?n :node/content]] db) 0)
-              :tag-count  (or (d/q '[:find (count ?t) . :where [?t :tag/name]] db) 0)
-              :edge-count (or (d/q '[:find (count ?e) . :where [?e :edge/id]] db) 0)
-              :tick       (db/current-tick db)}}))
+     :body   {:fact-count (count (p/all-nodes fs))
+              :tag-count  (count (p/all-tags fs))
+              :edge-count (count (p/all-edges fs))
+              :tick       (p/current-tick fs)}}))
 
 ;; --- Diagnostics ---
 
 (defn get-health
-  "Health check with Qdrant reachability."
-  [cfg _req]
-  (let [info (vs/collection-info (:qdrant-url cfg))]
+  "Health check with vector store reachability."
+  [stores _req]
+  (let [info (p/store-info (vector-store stores))]
     {:status 200
      :body   {:status "ok"
               :qdrant (select-keys info [:reachable? :status])}}))
 
 (defn get-diagnostics
-  "Full Qdrant diagnostic: collection info + optional end-to-end test search.
+  "Full diagnostic: collection info + optional end-to-end test search.
    Pass ?test-query=<text> to also run embedding + vector search."
-  [cfg req]
-  (let [info       (vs/collection-info (:qdrant-url cfg))
+  [stores req]
+  (let [info       (p/store-info (vector-store stores))
         test-query (get-in req [:query-params "test-query"])]
     {:status 200
      :body   (cond-> {:qdrant info}
                (and (:reachable? info) test-query)
                (assoc :test-search
                       (try
-                        (let [vec     (embedding/embed-query (:openai-api-key cfg) test-query)
-                              results (vs/search (:qdrant-url cfg) vec 3)]
+                        (let [vec     (p/embed-query (embedding stores) test-query)
+                              results (p/search (vector-store stores) vec 3 nil)]
                           {:ok true :hits (count results)})
                         (catch Exception e
                           {:ok false :error (.getMessage e)}))))}))
@@ -102,19 +102,18 @@
 
 (def ^:private node-pull-spec-full
   [:db/id :node/content :node/weight :node/cycle :node/created-at :node/updated-at
-   :node/blob-dir :node/session-id :node/sources
-   {:node/tag-refs [:tag/name :tag/node-count]}])
+   :node/blob-dir :node/session-id :node/sources :node/tags])
 
 (defn get-top-nodes
   "Returns highest effective-weight nodes as graph entry points."
-  [conn _cfg req]
-  (let [db    (db/db conn)
+  [stores req]
+  (let [fs    (fact-store stores)
         limit (min 100 (or (some-> (get-in req [:query-params "limit"]) parse-long) 20))
         tag   (get-in req [:query-params "tag"])
-        tick  (db/current-tick db)
+        tick  (p/current-tick fs)
         nodes (if tag
-                (tag-query/by-tag db tag)
-                (tag-query/all-nodes db))
+                (tag-query/by-tag fs tag)
+                (tag-query/all-nodes fs))
         with-ew (mapv (fn [n]
                          (assoc n ::ew
                            (decay/effective-weight
@@ -128,14 +127,14 @@
      :body   {:nodes (mapv (fn [n]
                              (-> (node->d3 n)
                                  (assoc :effective-weight (::ew n))
-                                 (assoc :edge-count (count (edge/find-edges-from db (:db/id n))))))
+                                 (assoc :edge-count (count (p/find-edges-from fs (:db/id n))))))
                            top-n)}}))
 
 ;; --- Graph: neighborhood BFS ---
 
 (defn- bfs-neighborhood
   "BFS traversal from center node, collecting nodes and edges up to `depth` hops."
-  [db center-eid depth limit tick]
+  [fact-store center-eid depth limit tick]
   (loop [frontier #{center-eid}
          visited  #{center-eid}
          nodes    []
@@ -143,14 +142,14 @@
          d        0]
     (if (or (>= d depth) (empty? frontier))
       {:nodes nodes :edges edges :has-more (and (< d depth) (not (empty? frontier)))}
-      (let [new-edges   (mapcat #(edge/find-edges-from db %) frontier)
+      (let [new-edges    (mapcat #(p/find-edges-from fact-store %) frontier)
             neighbor-ids (->> new-edges
                               (keep #(get-in % [:edge/to :db/id]))
                               (remove visited)
                               distinct
                               (take limit))
-            new-nodes   (mapv #(d/pull db node-pull-spec-full %) neighbor-ids)
-            edges-d3    (mapv edge->d3 new-edges)]
+            new-nodes    (mapv #(p/find-node-by-eid fact-store %) neighbor-ids)
+            edges-d3     (mapv edge->d3 new-edges)]
         (recur (set neighbor-ids)
                (into visited neighbor-ids)
                (into nodes (mapv (partial node->d3-with-ew tick) new-nodes))
@@ -159,16 +158,16 @@
 
 (defn get-graph-neighborhood
   "Returns subgraph around a center node."
-  [conn _cfg req]
-  (let [db      (db/db conn)
+  [_conn stores req]
+  (let [fs      (fact-store stores)
         node-id (some-> (get-in req [:query-params "node_id"]) parse-long)
         depth   (min 3 (or (some-> (get-in req [:query-params "depth"]) parse-long) 1))
         limit   (min 200 (or (some-> (get-in req [:query-params "limit"]) parse-long) 50))]
     (if-not node-id
       {:status 400 :body {:error "node_id required"}}
-      (let [tick   (db/current-tick db)
-            center (d/pull db node-pull-spec-full node-id)
-            result (bfs-neighborhood db node-id depth limit tick)]
+      (let [tick   (p/current-tick fs)
+            center (p/find-node-by-eid fs node-id)
+            result (bfs-neighborhood fs node-id depth limit tick)]
         (if (:node/content center)
           {:status 200
            :body   (assoc result :center (node->d3-with-ew tick center))}
@@ -178,18 +177,18 @@
 
 (defn get-fact-detail
   "Returns single fact with full metadata, edges, and effective weight."
-  [conn _cfg req]
-  (let [db  (db/db conn)
+  [stores req]
+  (let [fs  (fact-store stores)
         id  (some-> (get-in req [:path-params :id]) parse-long)]
     (if-not id
       {:status 400 :body {:error "id required"}}
-      (let [node (d/pull db node-pull-spec-full id)
-            tick (db/current-tick db)
+      (let [node  (p/find-node-by-eid fs id)
+            tick  (p/current-tick fs)
             eff-w (decay/effective-weight
                     (or (:node/weight node) 0.0)
                     (or (:node/cycle node) 0)
                     tick decay/default-decay-k)
-            edges (edge/find-edges-from db id)]
+            edges (p/find-edges-from fs id)]
         (if (:node/content node)
           {:status 200
            :body   {:fact             (node->d3 node)
@@ -204,8 +203,11 @@
 
 (defn update-fact
   "PATCH /api/facts/:id — updates content, tags, and/or weight. All fields optional."
-  [conn cfg req]
-  (let [id     (some-> (get-in req [:path-params :id]) parse-long)
+  [stores req]
+  (let [fs     (fact-store stores)
+        vs     (vector-store stores)
+        emb    (embedding stores)
+        id     (some-> (get-in req [:path-params :id]) parse-long)
         body   (:body-params req)
         content (:content body)
         tags    (:tags body)
@@ -214,156 +216,189 @@
       {:status 400 :body {:error "id required"}}
       (do
         (when (and content (not (str/blank? content)))
-          (node/update-content! conn cfg id content))
+          (p/update-node-content! fs id content)
+          ;; Re-embed updated content
+          (try
+            (let [vector (p/embed-document emb content)]
+              (p/upsert! vs id vector {}))
+            (catch Exception e
+              (log/warn e "Failed to re-embed updated node" id))))
         (when (some? tags)
-          (node/replace-tags! conn id tags))
+          (p/replace-node-tags! fs id tags))
         (when (some? weight)
-          (node/set-weight! conn id weight))
+          (p/set-node-weight! fs id weight))
         {:status 200 :body {:status "updated"}}))))
 
 ;; --- Nodes ---
 
-(defn list-nodes [_conn _req]
+(defn list-nodes [_req]
   {:status 200
    :body   []})
 
-(defn create-node [conn cfg req]
+(defn create-node [stores req]
   (let [body (:body-params req)]
-    (node/create-node conn cfg body)
+    (p/create-node! (fact-store stores) body)
     {:status 201
      :body   {:status "created"}}))
 
 ;; --- Tags ---
 
-(defn browse-tags [conn _cfg req]
-  (let [db     (db/db conn)
-        limit  (some-> (get-in req [:query-params "limit"]) parse-long)
+(defn browse-tags [stores req]
+  (let [limit  (some-> (get-in req [:query-params "limit"]) parse-long)
         offset (some-> (get-in req [:query-params "offset"]) parse-long)]
     {:status 200
-     :body   (tag-query/browse db {:limit  (or limit 50)
-                                    :offset (or offset 0)})}))
+     :body   (tag-query/browse (fact-store stores) {:limit  (or limit 50)
+                                                     :offset (or offset 0)})}))
 
-(defn count-facts [conn cfg req]
-  (let [db       (db/db conn)
-        tag-sets (get-in req [:body-params :tag-sets])]
+(defn count-facts [stores cfg req]
+  (let [tag-sets (get-in req [:body-params :tag-sets])]
     {:status 200
-     :body   {:counts (tag-query/count-by-tag-sets db (:metrics cfg) tag-sets)}}))
+     :body   {:counts (tag-query/count-by-tag-sets (fact-store stores) (:metrics cfg) tag-sets)}}))
 
-(defn get-facts [conn cfg req]
-  (let [db      (db/db conn)
-        body    (:body-params req)
+(defn get-facts [stores cfg req]
+  (let [body    (:body-params req)
         filters (:filters body)]
     {:status 200
-     :body   {:results (tag-query/fetch-by-filters db cfg (:metrics cfg) filters)}}))
+     :body   {:results (tag-query/fetch-by-filters
+                         (fact-store stores)
+                         (vector-store stores)
+                         (embedding stores)
+                         (:metrics cfg)
+                         filters)}}))
 
-(defn recall [conn _cfg req]
-  (let [db   (db/db conn)
-        body (:body-params req)
+(defn recall [stores req]
+  (let [body (:body-params req)
         tags (:tags body)]
     {:status 200
      :body   {:results (if (seq tags)
-                         (tag-query/by-tags db {:tags tags})
+                         (tag-query/by-tags (fact-store stores) {:tags tags})
                          [])}}))
 
 ;; --- Reinforce ---
 
-(defn reinforce [conn cfg req]
-  (let [body           (:body-params req)
+(defn reinforce [stores cfg req]
+  (let [fs             (fact-store stores)
+        body           (:body-params req)
         reinforcements (:reinforcements body)
         factor         (or (:reinforcement-factor cfg) 0.5)]
     {:status 200
      :body   (let [results (mapv (fn [{:keys [id score]}]
-                                   (node/reinforce-weight conn id score factor)
+                                   (p/reinforce-weight! fs id score factor)
                                    {:id id :score score})
                                  reinforcements)]
                {:reinforced (count results)
                 :details    results})}))
 
-(defn promote-eternal [conn _cfg req]
+(defn promote-eternal [stores req]
   (let [id (:id (:body-params req))]
-    (node/promote-eternal! conn id)
+    (p/promote-edge-eternal! (fact-store stores) id)
     {:status 200
      :body   {:promoted id}}))
 
 ;; --- Helpers ---
 
 (defn- link-blob-dir!
-  "Links blob-dir to an existing node."
-  [conn eid blob-dir]
-  (db/transact! conn [[:db/add eid :node/blob-dir blob-dir]]))
+  "Links blob-dir to an existing node via fact-store."
+  [fact-store eid blob-dir]
+  (p/set-node-blob-dir! fact-store eid blob-dir))
 
 ;; --- Remember (nodes + session summary) ---
 
 (defn- find-session-fact
   "Finds existing session node by session-id."
-  [db session-id]
+  [fact-store session-id]
   (when session-id
-    (d/q '[:find ?e .
-           :in $ ?sid
-           :where [?e :node/session-id ?sid]]
-         db session-id)))
+    (when-let [node (p/find-nodes-by-session fact-store session-id)]
+      (:db/id node))))
 
 (defn- upsert-session-fact!
   "Creates or updates the rolling session summary fact."
-  [conn cfg session-id session-summary project tags]
-  (let [db       (db/db conn)
-        eid      (find-session-fact db session-id)
+  [stores session-id session-summary project tags]
+  (let [fs       (fact-store stores)
+        vs       (vector-store stores)
+        emb      (embedding stores)
+        eid      (find-session-fact fs session-id)
         tag-strs (distinct (concat ["session"] (when project [(str "project/" project)]) tags))]
+    (let [tag-vec (mapv str/trim tag-strs)]
+      (doseq [t tag-vec] (p/ensure-tag! fs t))
+      (if eid
+        (do
+          (p/update-node-content! fs eid session-summary)
+          (try
+            (let [vector (p/embed-document emb session-summary)]
+              (p/upsert! vs eid vector {}))
+            (catch Exception e
+              (log/warn e "Failed to re-embed session node" eid)))
+          (p/update-node-tags! fs eid tag-vec))
+        (let [result (p/create-node! fs
+                       {:content    session-summary
+                        :tags       tag-vec
+                        :session-id session-id})
+              new-eid (:id result)]
+          (try
+            (let [vector (p/embed-document emb session-summary)]
+              (p/upsert! vs new-eid vector {}))
+            (catch Exception e
+              (log/warn e "Failed to embed new session node" new-eid))))))))
+
+(defn- find-project-fact [fact-store project]
+  ;; Find entity with both "project" tag and the project/<name> tag (intersection)
+  (when-let [nodes (p/find-nodes-by-tags fact-store
+                                         ["project" (str "project/" project)]
+                                         nil)]
+    (:db/id (first nodes))))
+
+(defn- upsert-project-fact! [stores project summary tags]
+  (let [fs       (fact-store stores)
+        vs       (vector-store stores)
+        emb      (embedding stores)
+        eid      (find-project-fact fs project)
+        tag-strs (mapv str/trim (distinct (concat ["project" (str "project/" project)] tags)))]
+    (doseq [t tag-strs] (p/ensure-tag! fs t))
     (if eid
-      (do (node/update-content! conn cfg eid session-summary)
-          (let [tag-refs (tag-resolve/resolve-tags conn tag-strs)]
-            (node/update-tag-refs conn eid tag-refs)))
-      (let [tag-refs (tag-resolve/resolve-tags conn tag-strs)]
-        (node/create-node conn cfg
-          {:content    session-summary
-           :tag-refs   tag-refs
-           :session-id session-id})))))
+      (do
+        (p/update-node-content! fs eid summary)
+        (try
+          (let [vector (p/embed-document emb summary)]
+            (p/upsert! vs eid vector {}))
+          (catch Exception e
+            (log/warn e "Failed to re-embed project node" eid)))
+        (p/update-node-tags! fs eid tag-strs))
+      (let [result  (p/create-node! fs {:content summary :tags tag-strs})
+            new-eid (:id result)]
+        (try
+          (let [vector (p/embed-document emb summary)]
+            (p/upsert! vs new-eid vector {}))
+          (catch Exception e
+            (log/warn e "Failed to embed new project node" new-eid)))))))
 
-(defn- find-project-fact [db project]
-  (d/q '[:find ?e .
-         :in $ ?pname
-         :where
-         [?t1 :tag/name "project"]
-         [?e :node/tag-refs ?t1]
-         [?t2 :tag/name ?pname]
-         [?e :node/tag-refs ?t2]]
-       db (str "project/" project)))
-
-(defn- upsert-project-fact! [conn cfg project summary tags]
-  (let [db       (db/db conn)
-        eid      (find-project-fact db project)
-        tag-strs (distinct (concat ["project" (str "project/" project)] tags))]
-    (if eid
-      (do (node/update-content! conn cfg eid summary)
-          (node/update-tag-refs conn eid (tag-resolve/resolve-tags conn tag-strs)))
-      (node/create-node conn cfg
-        {:content  summary
-         :tag-refs (tag-resolve/resolve-tags conn tag-strs)}))))
-
-(defn project-update [conn cfg req]
+(defn project-update [stores cfg req]
   (let [{:keys [project summary tags]} (:body-params req)]
     (if (or (str/blank? project) (str/blank? summary))
       {:status 400 :body {:error "project and summary are required"}}
-      (do (upsert-project-fact! conn cfg project summary (or tags []))
+      (do (upsert-project-fact! stores project summary (or tags []))
           {:status 200 :body {:project project}}))))
 
-(defn remember [conn cfg req]
+(defn remember [stores cfg req]
   (let [body   (:body-params req)
         nodes  (:nodes body)
+        params (assoc body :metrics (:metrics cfg))
         result (when (seq nodes)
-                 (write/remember conn cfg body))]
+                 (write/remember (fact-store stores)
+                                 (vector-store stores)
+                                 (embedding stores)
+                                 params))]
     {:status 201
      :body   (or result {:nodes [] :edges-created 0})}))
 
 ;; --- Blobs ---
 
-(defn list-blobs [conn _cfg req]
-  (let [db    (db/db conn)
-        limit (some-> (get-in req [:query-params "limit"]) parse-long)]
+(defn list-blobs [stores req]
+  (let [limit (some-> (get-in req [:query-params "limit"]) parse-long)]
     {:status 200
-     :body   {:blobs (node/find-blobs db {:limit (or limit 20)})}}))
+     :body   {:blobs (p/find-blob-nodes (fact-store stores) {:limit (or limit 20)})}}))
 
-(defn read-blob [_conn cfg req]
+(defn read-blob [cfg req]
   (let [body         (:body-params req)
         blob-dir-raw (:blob-dir body)
         section      (:section body)
@@ -378,7 +413,7 @@
         {:status 200 :body meta}
         {:status 404 :body {:error (str "Blob not found: " blob-dir-raw)}}))))
 
-(defn exec-blob [_conn cfg req]
+(defn exec-blob [cfg req]
   (let [body     (:body-params req)
         blob-dir (:blob-dir body)
         command  (:command body)]
@@ -389,8 +424,11 @@
         (catch Exception e
           {:status 400 :body {:error (.getMessage e)}})))))
 
-(defn store-file [conn cfg req]
-  (let [body     (:body-params req)
+(defn store-file [stores cfg req]
+  (let [fs       (fact-store stores)
+        vs       (vector-store stores)
+        emb      (embedding stores)
+        body     (:body-params req)
         base     (:blob-path cfg)
         blob-dir (blob-store/make-blob-dir-name base (:title body))
         now      (Date.)
@@ -416,15 +454,22 @@
                     (:project body)     (assoc :project (:project body))
                     (:path body)        (assoc :source-path (:path body)))]
     (blob-store/write-meta! base blob-dir meta-data)
-    (let [tag-strs (distinct (:tags body))
-          tag-refs (tag-resolve/resolve-tags conn tag-strs)
-          blob-node (node/create-node conn cfg
-                      {:content   (:summary body)
-                       :tag-refs  tag-refs
-                       :blob-dir  blob-dir})]
-      {:status 201
-       :body   {:blob-dir blob-dir
-                :blob-id  (:node-eid blob-node)}})))
+    (let [tags (mapv str/trim (distinct (:tags body)))]
+      (doseq [t tags] (p/ensure-tag! fs t))
+      (let [result  (p/create-node! fs
+                      {:content  (:summary body)
+                       :tags     tags
+                       :blob-dir blob-dir})
+            blob-id (:id result)]
+        ;; Embed the blob node summary
+        (try
+          (let [vector (p/embed-document emb (:summary body))]
+            (p/upsert! vs blob-id vector {}))
+          (catch Exception e
+            (log/warn e "Failed to embed blob node" blob-id)))
+        {:status 201
+         :body   {:blob-dir blob-dir
+                  :blob-id  blob-id}}))))
 
 ;; --- Session sync (called by UserPromptSubmit hook) ---
 
@@ -541,22 +586,24 @@
         start  (assoc :start-commit start)
         remote (assoc :remote remote)))))
 
-(defn session-sync [conn cfg req]
-  (let [body       (:body-params req)
+(defn session-sync [_conn stores cfg req]
+  (let [fs         (fact-store stores)
+        vs         (vector-store stores)
+        emb        (embedding stores)
+        body       (:body-params req)
         session-id (:session-id body)
         cwd        (:cwd body)
         messages   (:messages body)]
     (if-not session-id
       {:status 400 :body {:error "session_id required"}}
       (let [base    (:blob-path cfg)
-            db      (db/db conn)
             project (or (:project body) (derive-project cwd))
             turns   (group-into-turns messages)
 
-            session-eid  (find-session-fact db session-id)
-            ;; Short name from Datomic (nil if not linked)
+            session-eid  (find-session-fact fs session-id)
+            ;; Short name from fact store (nil if not linked)
             datomic-dir  (when session-eid
-                           (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
+                           (:node/blob-dir (p/find-node fs session-eid)))
             ;; Resolved filesystem path (may include projects/ prefix)
             blob-dir     (or (when datomic-dir
                                (or (blob-store/resolve-blob-dir base datomic-dir)
@@ -565,7 +612,7 @@
                              (blob-store/make-blob-dir-name
                                base (str "session-" (subs session-id 0 8))
                                :project project))
-            ;; Short name for Datomic and API response
+            ;; Short name for DB and API response
             blob-dir-short (blob-store/blob-dir-name blob-dir)
 
             ;; Count existing turns to number new ones correctly
@@ -591,9 +638,9 @@
 
             total-turns (+ turn-offset (count new-turn-texts))
 
-            ;; Pull session_summary from Datomic (from memory_remember)
+            ;; Pull session_summary from fact store (from memory_remember)
             session-summary (when session-eid
-                              (:node/content (d/pull db [:node/content] session-eid)))
+                              (:node/content (p/find-node fs session-eid)))
 
             git-context (merge-git-context (:git existing-meta) (detect-git-context cwd))
 
@@ -613,24 +660,32 @@
                           {:git git-context}))]
         (blob-store/write-meta! base blob-dir meta-data)
 
-        ;; Create or link Datomic session node
+        ;; Create or link session node
         (if session-eid
           (do
             (when-not datomic-dir
-              (link-blob-dir! conn session-eid blob-dir-short))
+              (link-blob-dir! fs session-eid blob-dir-short))
             (when project
-              (let [tag-refs (tag-resolve/resolve-tags conn [(str "project/" project)])]
-                (node/update-tag-refs conn session-eid tag-refs))))
-          (let [tag-strs (cond-> ["session"]
-                           project (conj (str "project/" project)))
-                tag-refs (tag-resolve/resolve-tags conn tag-strs)]
-            (node/create-node conn cfg
-              {:content    (or session-summary
-                               (extract-first-user-prompt messages)
-                               "Session conversation")
-               :tag-refs   tag-refs
-               :blob-dir   blob-dir-short
-               :session-id session-id})))
+              (let [proj-tag (str "project/" project)]
+                (p/ensure-tag! fs proj-tag)
+                (p/update-node-tags! fs session-eid [proj-tag]))))
+          (let [tags (cond-> ["session"]
+                       project (conj (str "project/" project)))]
+            (doseq [t tags] (p/ensure-tag! fs t))
+            (let [content (or session-summary
+                              (extract-first-user-prompt messages)
+                              "Session conversation")
+                  result  (p/create-node! fs
+                            {:content    content
+                             :tags       tags
+                             :blob-dir   blob-dir-short
+                             :session-id session-id})
+                  new-eid (:id result)]
+              (try
+                (let [vector (p/embed-document emb content)]
+                  (p/upsert! vs new-eid vector {}))
+                (catch Exception e
+                  (log/warn e "Failed to embed new session node" new-eid))))))
 
         {:status 200
          :body   {:blob-dir           blob-dir-short
@@ -640,8 +695,9 @@
 
 ;; --- Unified session update (summary, chunk naming, compact) ---
 
-(defn session-update [conn cfg req]
-  (let [body        (:body-params req)
+(defn session-update [_conn stores cfg req]
+  (let [fs          (fact-store stores)
+        body        (:body-params req)
         session-id  (:session-id body)
         project     (:project body)
         title       (:title body)
@@ -652,11 +708,10 @@
     (if-not session-id
       {:status 400 :body {:error "session_id required"}}
       (let [base        (:blob-path cfg)
-            db          (db/db conn)
-            session-eid (find-session-fact db session-id)
-            ;; Short name from Datomic (nil if not linked)
+            session-eid (find-session-fact fs session-id)
+            ;; Short name from fact store (nil if not linked)
             datomic-dir (when session-eid
-                          (:node/blob-dir (d/pull db [:node/blob-dir] session-eid)))
+                          (:node/blob-dir (p/find-node fs session-eid)))
             ;; Resolved filesystem path
             blob-dir    (or (when datomic-dir
                               (or (blob-store/resolve-blob-dir base datomic-dir)
@@ -674,26 +729,26 @@
                               dir-name))
             blob-dir-short (blob-store/blob-dir-name blob-dir)
 
-            ;; Link blob-dir to existing Datomic node if not yet linked
+            ;; Link blob-dir to existing node if not yet linked
             _ (when (and session-eid (not datomic-dir))
-                (link-blob-dir! conn session-eid blob-dir-short))
+                (link-blob-dir! fs session-eid blob-dir-short))
 
-            ;; 1. Update session summary in Datomic + blob meta
+            ;; 1. Update session summary in fact store + blob meta
             summary-result
             (when summary
               (let [content (if title (str title "\n" summary) summary)
-                    _ (upsert-session-fact! conn cfg session-id content project tags)]
+                    _ (upsert-session-fact! stores session-id content project tags)]
                 ;; If node was just created by upsert, link blob-dir to it
                 (when-not session-eid
-                  (when-let [new-eid (find-session-fact (db/db conn) session-id)]
-                    (link-blob-dir! conn new-eid blob-dir-short))))
+                  (when-let [new-eid (find-session-fact fs session-id)]
+                    (link-blob-dir! fs new-eid blob-dir-short))))
               (let [meta (blob-store/read-meta base blob-dir)]
                 (when meta
                   (blob-store/write-meta! base blob-dir
                     (assoc meta :session-summary summary))))
               (if datomic-dir "updated" "created"))
 
-            ;; 1b. Update session title in blob meta (title-only, no Datomic)
+            ;; 1b. Update session title in blob meta (title-only, no DB)
             _ (when title
                 (let [meta (blob-store/read-meta base blob-dir)]
                   (when meta
@@ -701,7 +756,7 @@
                       (assoc meta :title title)))))
 
             ;; Re-read session-eid after potential upsert
-            session-eid (or session-eid (find-session-fact (db/db conn) session-id))
+            session-eid (or session-eid (find-session-fact fs session-id))
 
             ;; 2. Name current chunk
             chunk-result
@@ -717,7 +772,8 @@
                 (when meta
                   (blob-store/write-meta! base blob-dir
                     (assoc meta :compact-summary compact))))
-              (node/embed-file! cfg session-eid blob-dir-short "compact.md" compact)
+              (node/embed-file! (vector-store stores) (embedding stores)
+                                session-eid blob-dir-short "compact.md" compact)
               "stored")]
 
         {:status 200
@@ -728,31 +784,29 @@
 
 ;; --- Session continuation (linking across /clear) ---
 
-(defn session-continue [conn cfg req]
-  (let [body            (:body-params req)
+(defn session-continue [_conn stores cfg req]
+  (let [fs              (fact-store stores)
+        body            (:body-params req)
         prev-session-id (:prev-session-id body)
         session-id      (:session-id body)
         project         (:project body)]
     (if-not (and prev-session-id session-id)
       {:status 400 :body {:error "prev-session-id and session-id required"}}
-      (let [db       (db/db conn)
-            prev-eid (or (find-session-fact db prev-session-id)
+      (let [prev-eid (or (find-session-fact fs prev-session-id)
                          ;; Self-heal: create prev session if Stop hook hasn't synced yet
-                         (do (upsert-session-fact! conn cfg prev-session-id
+                         (do (upsert-session-fact! stores prev-session-id
                                (str "session " (subs prev-session-id 0 8)) project nil)
-                             (find-session-fact (db/db conn) prev-session-id)))]
+                             (find-session-fact fs prev-session-id)))]
         (if-not prev-eid
           {:status 500 :body {:error "failed to create prev session fact"}}
           (let [;; Create new session fact if it doesn't exist yet
-                _        (when-not (find-session-fact db session-id)
-                           (upsert-session-fact! conn cfg session-id
+                _        (when-not (find-session-fact fs session-id)
+                           (upsert-session-fact! stores session-id
                              (str "continuation of " prev-session-id) project nil))
-                new-db   (db/db conn)
-                new-eid  (find-session-fact new-db session-id)
-                prev-dir (:node/blob-dir (d/pull new-db [:node/blob-dir] prev-eid))]
+                new-eid  (find-session-fact fs session-id)
+                prev-dir (:node/blob-dir (p/find-node fs prev-eid))]
             ;; Create typed continuation edge: new → prev (tentative, weight=0.5)
-            (edge/find-or-create-edge conn new-eid prev-eid 0.5
-              {:type :continuation})
+            (p/find-or-create-edge! fs new-eid prev-eid 0.5 {:type :continuation})
             {:status 200
              :body   (cond-> {:status "linked" :edge-created true}
                        prev-dir (assoc :prev-blob-dir prev-dir))}))))))
@@ -760,61 +814,72 @@
 (defn- traverse-continuation-chain
   "Follows :continuation edges backward from session-eid, returns vec of
    {:eid :session-id :blob-dir :content} in order (immediate prev first)."
-  [db start-eid max-depth]
+  [fact-store start-eid max-depth]
   (loop [eid   start-eid
          chain []
          depth 0]
     (if (>= depth max-depth)
       chain
-      (if-let [edge-data (edge/find-typed-edge-from db eid :continuation)]
+      (if-let [edge-data (p/find-typed-edge-from fact-store eid :continuation)]
         (let [prev      (:edge/to edge-data)
               prev-eid  (:db/id prev)]
           (recur prev-eid
-                 (conj chain {:eid        prev-eid
-                              :session-id (:node/session-id prev)
-                              :blob-dir   (:node/blob-dir prev)
-                              :content    (:node/content prev)
-                              :edge-id    (:edge/id edge-data)
+                 (conj chain {:eid         prev-eid
+                              :session-id  (:node/session-id prev)
+                              :blob-dir    (:node/blob-dir prev)
+                              :content     (:node/content prev)
+                              :edge-id     (:edge/id edge-data)
                               :edge-weight (:edge/weight edge-data)})
                  (inc depth)))
         chain))))
 
-(defn session-chain [conn _cfg req]
-  (let [body       (:body-params req)
+(defn session-chain [_conn stores req]
+  (let [fs         (fact-store stores)
+        body       (:body-params req)
         session-id (:session-id body)
         strengthen (:strengthen body)]
     (if-not session-id
       {:status 400 :body {:error "session-id required"}}
-      (let [db  (db/db conn)
-            eid (find-session-fact db session-id)]
+      (let [eid (find-session-fact fs session-id)]
         (if-not eid
           {:status 200 :body {:chain []}}
-          (let [chain (traverse-continuation-chain db eid 10)]
+          (let [chain (traverse-continuation-chain fs eid 10)]
             ;; On explicit load: promote first continuation edge to eternal (1.0)
             (when (and strengthen (seq chain))
-              (edge/promote-eternal! conn (:edge-id (first chain))))
+              (p/promote-edge-eternal! fs (:edge-id (first chain))))
             {:status 200
              :body   {:chain (mapv #(dissoc % :eid) chain)}}))))))
 
 ;; --- Admin: deletion ---
 
 (defn delete-fact
-  "DELETE /api/facts/:id — true deletion from Datomic, Qdrant, and filesystem."
-  [conn cfg req]
+  "DELETE /api/facts/:id — true deletion from fact store, vector store, and filesystem."
+  [stores cfg req]
   (let [eid (some-> (get-in req [:path-params :id]) parse-long)]
     (if-not eid
       {:status 400 :body {:error "Invalid id"}}
       (try
-        {:status 200 :body (delete/delete-node! conn cfg eid)}
+        {:status 200
+         :body   (delete/delete-node! (fact-store stores)
+                                      (vector-store stores)
+                                      (:blob-path cfg)
+                                      eid)}
         (catch Exception e
           {:status 404 :body {:error (ex-message e)}})))))
 
 (defn reset-db
   "POST /api/admin/reset — wipe all facts, edges, blobs, and vectors."
-  [conn cfg _req]
-  {:status 200 :body (delete/reset-all! conn cfg)})
+  [stores cfg _req]
+  {:status 200
+   :body   (delete/reset-all! (fact-store stores)
+                               (vector-store stores)
+                               (:blob-path cfg))})
 
 (defn reindex-vectors
-  "POST /api/admin/reindex — re-embeds all non-entity nodes into Qdrant."
-  [conn cfg _req]
-  {:status 200 :body (node/reindex-all! (db/db conn) cfg)})
+  "POST /api/admin/reindex — re-embeds all non-entity nodes into vector store."
+  [stores cfg _req]
+  {:status 200
+   :body   (node/reindex-all! (fact-store stores)
+                               (vector-store stores)
+                               (embedding stores)
+                               (:blob-path cfg))})

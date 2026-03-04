@@ -4,9 +4,11 @@
             [ai-memory.db.core :as db]
             [ai-memory.tag.core :as tag]
             [ai-memory.tag.query :as query]
+            [ai-memory.store.datomic-store :as datomic-store]
             [ai-memory.decay.core :as decay]))
 
 (def ^:dynamic *conn* nil)
+(def ^:dynamic *fact-store* nil)
 
 (defn- test-uri []
   (str "datomic:mem://tag-query-test-" (d/squuid)))
@@ -15,7 +17,8 @@
   (let [uri  (test-uri)
         conn (db/connect uri)]
     (db/ensure-schema conn)
-    (binding [*conn* conn]
+    (binding [*conn* conn
+              *fact-store* (datomic-store/create conn)]
       (try
         (f)
         (finally
@@ -26,25 +29,21 @@
 ;; --- Helpers ---
 
 (defn- create-tagged-node!
-  "Creates a node with tag refs and increments materialized counts.
-   Optional opts map with :updated-at, :weight, :cycle.
+  "Creates a node with string tags. Optional opts map with :updated-at, :weight, :cycle.
    Returns Datomic entity ID."
   ([conn content tag-names] (create-tagged-node! conn content tag-names nil))
   ([conn content tag-names opts]
    (let [now    (java.util.Date.)
          tempid (d/tempid :db.part/user)]
-     (doseq [n tag-names]
-       (tag/ensure-tag! conn n))
-     (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
-           count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
-           node-map  {:db/id           tempid
-                      :node/content    content
-                      :node/weight     (or (:weight opts) 0.0)
-                      :node/cycle      (or (:cycle opts) 0)
-                      :node/tag-refs   tag-refs
-                      :node/created-at now
-                      :node/updated-at (or (:updated-at opts) now)}
-           tx @(d/transact conn (into [node-map] count-txs))]
+     (doseq [n tag-names] (tag/ensure-tag! conn n))
+     (let [node-map {:db/id           tempid
+                     :node/content    content
+                     :node/weight     (or (:weight opts) 0.0)
+                     :node/cycle      (or (:cycle opts) 0)
+                     :node/tags       (vec tag-names)
+                     :node/created-at now
+                     :node/updated-at (or (:updated-at opts) now)}
+           tx       @(d/transact conn [node-map])]
        (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
 
 (defn- set-tick! [conn tick-val]
@@ -56,7 +55,7 @@
   (testing "finds nodes with a specific tag"
     (create-tagged-node! *conn* "Clojure macros" ["clj"])
     (create-tagged-node! *conn* "Python decorators" ["python"])
-    (let [results (query/by-tag (d/db *conn*) "clj")]
+    (let [results (query/by-tag *fact-store* "clj")]
       (is (= 1 (count results)))
       (is (= "Clojure macros" (:node/content (first results)))))))
 
@@ -68,7 +67,7 @@
                          ["clj"])
     (create-tagged-node! *conn* "Python error handling"
                          ["python" "error-handling"])
-    (let [results (query/by-tags (d/db *conn*)
+    (let [results (query/by-tags *fact-store*
                                  {:tags ["clj" "error-handling"]})]
       (is (= 1 (count results)))
       (is (= "Clojure error handling" (:node/content (first results)))))))
@@ -78,7 +77,7 @@
     (create-tagged-node! *conn* "Clojure facts" ["clj"])
     (create-tagged-node! *conn* "Python facts" ["python"])
     (create-tagged-node! *conn* "Unrelated" ["tooling"])
-    (let [results (query/by-any-tags (d/db *conn*)
+    (let [results (query/by-any-tags *fact-store*
                                      {:tags ["clj" "python"]})]
       (is (= 2 (count results))))))
 
@@ -89,7 +88,8 @@
     (create-tagged-node! *conn* "Fact 1" ["clj"])
     (create-tagged-node! *conn* "Fact 2" ["clj"])
     (create-tagged-node! *conn* "Fact 3" ["python"])
-    (let [results (query/browse (d/db *conn*) {})
+    (db/recompute-tag-counts! *conn*)
+    (let [results (query/browse *fact-store* {})
           with-nodes (filterv #(pos? (or (:tag/node-count %) 0)) results)]
       ;; Total includes aspect tags, but only 2 have nodes
       (is (= (+ 2 aspect-tag-count) (count results)))
@@ -107,30 +107,31 @@
     (create-tagged-node! *conn* "A" ["clj"])
     (create-tagged-node! *conn* "B" ["python"])
     (create-tagged-node! *conn* "C" ["rust"])
+    (db/recompute-tag-counts! *conn*)
     (let [total   (+ 3 aspect-tag-count)
-          page1   (query/browse (d/db *conn*) {:limit 2 :offset 0})
-          page2   (query/browse (d/db *conn*) {:limit 2 :offset 2})
-          page-last (query/browse (d/db *conn*) {:limit 50 :offset (- total 1)})]
+          page1   (query/browse *fact-store* {:limit 2 :offset 0})
+          page2   (query/browse *fact-store* {:limit 2 :offset 2})
+          page-last (query/browse *fact-store* {:limit 50 :offset (- total 1)})]
       (is (= 2 (count page1)))
       (is (= 2 (count page2)))
       (is (= 1 (count page-last))))))
 
 (deftest browse-only-aspect-tags-test
   (testing "browse returns seeded aspect tags when no user tags created"
-    (is (= aspect-tag-count (count (query/browse (d/db *conn*) {}))))))
+    (is (= aspect-tag-count (count (query/browse *fact-store* {}))))))
 
 (deftest node-tags-test
   (testing "returns all tag names for a node"
     (let [uuid (create-tagged-node! *conn* "Multi-tagged"
                                     ["clj" "error-handling"])]
       (is (= #{"clj" "error-handling"}
-             (set (query/node-tags (d/db *conn*) uuid)))))))
+             (set (query/node-tags *fact-store* uuid)))))))
 
 (deftest empty-queries-test
   (testing "queries with no matching data return empty"
-    (is (empty? (query/by-tag (d/db *conn*) "haskell")))
-    (is (empty? (query/by-tags (d/db *conn*) {:tags ["nonexistent"]})))
-    (is (nil? (query/by-tags (d/db *conn*) {:tags []})))))
+    (is (empty? (query/by-tag *fact-store* "haskell")))
+    (is (empty? (query/by-tags *fact-store* {:tags ["nonexistent"]})))
+    (is (nil? (query/by-tags *fact-store* {:tags []})))))
 
 ;; --- Count by tag sets tests ---
 
@@ -140,7 +141,7 @@
     (create-tagged-node! *conn* "B" ["clj" "concurrency"])
     (create-tagged-node! *conn* "C" ["clj"])
     (create-tagged-node! *conn* "D" ["python"])
-    (let [results (query/count-by-tag-sets (d/db *conn*) nil
+    (let [results (query/count-by-tag-sets *fact-store* nil
                     [["clj" "error-handling"]
                      ["clj"]
                      ["python"]])]
@@ -151,7 +152,7 @@
 
 (deftest count-by-tag-sets-empty-test
   (testing "returns 0 for non-matching tag sets"
-    (let [results (query/count-by-tag-sets (d/db *conn*) nil
+    (let [results (query/count-by-tag-sets *fact-store* nil
                     [["nonexistent"]])]
       (is (= 0 (:count (first results)))))))
 
@@ -162,7 +163,7 @@
     (create-tagged-node! *conn* "A" ["clj" "error-handling"])
     (create-tagged-node! *conn* "B" ["clj"])
     (create-tagged-node! *conn* "C" ["python"])
-    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+    (let [results (query/fetch-by-tag-sets *fact-store* nil
                     [["clj"] ["python"]]
                     {:limit 50})]
       (is (= 2 (count results)))
@@ -174,7 +175,7 @@
     (create-tagged-node! *conn* "A" ["clj"])
     (create-tagged-node! *conn* "B" ["clj"])
     (create-tagged-node! *conn* "C" ["clj"])
-    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+    (let [results (query/fetch-by-tag-sets *fact-store* nil
                     [["clj"]]
                     {:limit 2})]
       (is (= 2 (count (:facts (first results))))))))
@@ -190,7 +191,7 @@
   (testing "by-tags filters by :since on updated-at"
     (create-tagged-node! *conn* "Old fact" ["clj"] {:updated-at (days-ago 30)})
     (create-tagged-node! *conn* "New fact" ["clj"] {:updated-at (days-ago 1)})
-    (let [results (query/by-tags (d/db *conn*) {:tags ["clj"] :since (days-ago 7)})]
+    (let [results (query/by-tags *fact-store* {:tags ["clj"] :since (days-ago 7)})]
       (is (= 1 (count results)))
       (is (= "New fact" (:node/content (first results)))))))
 
@@ -199,7 +200,7 @@
     (create-tagged-node! *conn* "Old" ["clj"] {:updated-at (days-ago 30)})
     (create-tagged-node! *conn* "Mid" ["clj"] {:updated-at (days-ago 10)})
     (create-tagged-node! *conn* "New" ["clj"] {:updated-at (days-ago 1)})
-    (let [results (query/by-tags (d/db *conn*)
+    (let [results (query/by-tags *fact-store*
                     {:tags ["clj"] :since (days-ago 15) :until (days-ago 5)})]
       (is (= 1 (count results)))
       (is (= "Mid" (:node/content (first results)))))))
@@ -208,7 +209,7 @@
   (testing "by-date-range returns nodes in date range without tag filter"
     (create-tagged-node! *conn* "Old" ["clj"] {:updated-at (days-ago 30)})
     (create-tagged-node! *conn* "Recent" ["python"] {:updated-at (days-ago 2)})
-    (let [results (query/by-date-range (d/db *conn*) {:since (days-ago 7)})]
+    (let [results (query/by-date-range *fact-store* {:since (days-ago 7)})]
       (is (= 1 (count results)))
       (is (= "Recent" (:node/content (first results)))))))
 
@@ -216,7 +217,7 @@
   (testing "fetch-by-tag-sets respects date params"
     (create-tagged-node! *conn* "Old clj" ["clj"] {:updated-at (days-ago 30)})
     (create-tagged-node! *conn* "New clj" ["clj"] {:updated-at (days-ago 1)})
-    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+    (let [results (query/fetch-by-tag-sets *fact-store* nil
                     [["clj"]]
                     {:limit 50 :since (days-ago 7)})]
       (is (= 1 (count (:facts (first results)))))
@@ -226,7 +227,7 @@
   (testing "fetch-by-tag-sets with no tags returns date-filtered facts"
     (create-tagged-node! *conn* "Old" ["clj"] {:updated-at (days-ago 30)})
     (create-tagged-node! *conn* "Recent" ["python"] {:updated-at (days-ago 2)})
-    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+    (let [results (query/fetch-by-tag-sets *fact-store* nil
                     nil
                     {:limit 50 :since (days-ago 7)})]
       (is (= 1 (count results)))
@@ -238,7 +239,7 @@
     (create-tagged-node! *conn* "Oldest" ["clj"] {:updated-at (days-ago 30)})
     (create-tagged-node! *conn* "Middle" ["python"] {:updated-at (days-ago 10)})
     (create-tagged-node! *conn* "Newest" ["rust"] {:updated-at (days-ago 1)})
-    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil nil {:limit 2 :sort-by "date"})
+    (let [results (query/fetch-by-tag-sets *fact-store* nil nil {:limit 2 :sort-by "date"})
           facts   (:facts (first results))]
       (is (= 2 (count facts)))
       (is (= "Newest" (:node/content (first facts))))
@@ -254,8 +255,8 @@
     @(d/transact *conn* [[:db/add [:tag/name "clj"] :tag/node-count 999]])
     (is (= 999 (:tag/node-count (d/entity (d/db *conn*) [:tag/name "clj"]))))
     ;; Reconcile
-    (let [result (query/reconcile-counts! *conn*)]
-      (is (pos? (:tags-updated result)))
+    (let [result (query/reconcile-counts! *fact-store*)]
+      (is (number? (:duration-ms result)))
       (is (= 2 (:tag/node-count (d/entity (d/db *conn*) [:tag/name "clj"])))))))
 
 ;; --- Sort tests ---
@@ -264,15 +265,15 @@
   (testing "weight sort puts reinforced old fact above newer unreinforced fact"
     ;; Simulate: tick is at 100
     (set-tick! *conn* 100)
-    ;; Old reinforced fact: weight=3.0, cycle=98 (recently reinforced)
-    ;; effective = 3.0 * 0.95^(100-98) = 3.0 * 0.9025 = 2.7075
+    ;; Old reinforced fact: weight=0.9, cycle=98
+    ;; effective = (100-98+1)^((0.9-1)/5) = 3^(-0.02) ≈ 0.978
     (create-tagged-node! *conn* "reinforced-old" ["clj"]
-                         {:weight 3.0 :cycle 98 :updated-at (days-ago 20)})
-    ;; New unreinforced fact: weight=1.0, cycle=99
-    ;; effective = 1.0 * 0.95^(100-99) = 1.0 * 0.95 = 0.95
+                         {:weight 0.9 :cycle 98 :updated-at (days-ago 20)})
+    ;; New unreinforced fact: weight=0.3, cycle=99
+    ;; effective = (100-99+1)^((0.3-1)/5) = 2^(-0.14) ≈ 0.907
     (create-tagged-node! *conn* "new-unreinforced" ["clj"]
-                         {:weight 1.0 :cycle 99 :updated-at (days-ago 1)})
-    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+                         {:weight 0.3 :cycle 99 :updated-at (days-ago 1)})
+    (let [results (query/fetch-by-tag-sets *fact-store* nil
                     [["clj"]]
                     {:limit 50 :sort-by "weight"})
           facts (:facts (first results))]
@@ -288,7 +289,7 @@
     ;; Low weight but recent date
     (create-tagged-node! *conn* "light-new" ["clj"]
                          {:weight 1.0 :cycle 99 :updated-at (days-ago 1)})
-    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+    (let [results (query/fetch-by-tag-sets *fact-store* nil
                     [["clj"]]
                     {:limit 50 :sort-by "date"})
           facts (:facts (first results))]
@@ -304,7 +305,7 @@
     ;; old fact: updated 10 days ago
     (create-tagged-node! *conn* "old" ["clj"]
                          {:weight 0.8 :cycle 49 :updated-at (days-ago 10)})
-    (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
+    (let [results (query/fetch-by-tag-sets *fact-store* nil
                     [["clj"]]
                     {:limit 50})
           facts (:facts (first results))]

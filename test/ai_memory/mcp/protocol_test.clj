@@ -5,7 +5,9 @@
             [ai-memory.db.core :as db]
             [ai-memory.tag.core :as tag]
             [ai-memory.web.handler :as web]
-            [ai-memory.mcp.protocol :as protocol]))
+            [ai-memory.mcp.protocol :as protocol]
+            [ai-memory.store.datomic-store :as datomic-store]
+            [ai-memory.store.protocols :as p]))
 
 (def ^:dynamic *conn* nil)
 (def ^:dynamic *base-url* nil)
@@ -14,13 +16,32 @@
 (defn- test-uri []
   (str "datomic:mem://mcp-protocol-test-" (d/squuid)))
 
+(def ^:private stub-vector-store
+  (reify p/VectorStore
+    (ensure-store! [_ _dim])
+    (upsert!       [_ _id _vec _payload])
+    (search        [_ _qvec _top-k _opts] [])
+    (delete!       [_ _id])
+    (delete-all!   [_])
+    (store-info    [_] {:reachable? false})))
+
+(def ^:private stub-embedding
+  (reify p/EmbeddingProvider
+    (embed-query    [_ _text] (vec (repeat 1536 0.0)))
+    (embed-document [_ _text] (vec (repeat 1536 0.0)))
+    (embed-batch    [_ texts] (mapv (fn [_] (vec (repeat 1536 0.0))) texts))
+    (embedding-dim  [_] 1536)))
+
 (defn with-server [f]
-  (let [uri  (test-uri)
-        conn (db/connect uri)
-        _    (db/ensure-schema conn)
-        cfg  {:metrics nil :blob-path "/tmp/ai-memory-test-blobs"}
-        srv  (web/start {:port 0 :conn conn :cfg cfg})
-        port (-> srv .getConnectors first .getLocalPort)]
+  (let [uri        (test-uri)
+        conn       (db/connect uri)
+        _          (db/ensure-schema conn)
+        cfg        {:metrics nil :blob-path "/tmp/ai-memory-test-blobs"}
+        stores     {:fact-store   (datomic-store/create conn)
+                    :vector-store stub-vector-store
+                    :embedding    stub-embedding}
+        srv        (web/start {:port 0 :conn conn :cfg cfg :stores stores})
+        port       (-> srv .getConnectors first .getLocalPort)]
     (binding [*conn*     conn
               *base-url* (str "http://localhost:" port)
               *server*   srv]
@@ -39,18 +60,15 @@
   ([conn content tag-names opts]
    (let [now    (java.util.Date.)
          tempid (d/tempid :db.part/user)]
-     (doseq [n tag-names]
-       (tag/ensure-tag! conn n))
-     (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
-           count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
-           node-map  {:db/id           tempid
-                      :node/content    content
-                      :node/weight     1.0
-                      :node/cycle      0
-                      :node/tag-refs   tag-refs
-                      :node/created-at now
-                      :node/updated-at (or (:updated-at opts) now)}
-           tx @(d/transact conn (into [node-map] count-txs))]
+     (doseq [n tag-names] (tag/ensure-tag! conn n))
+     (let [node-map {:db/id           tempid
+                     :node/content    content
+                     :node/weight     1.0
+                     :node/cycle      0
+                     :node/tags       (vec tag-names)
+                     :node/created-at now
+                     :node/updated-at (or (:updated-at opts) now)}
+           tx       @(d/transact conn [node-map])]
        (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
 
 (defn- handler []
@@ -156,6 +174,7 @@
     (create-tagged-node! *conn* "Fact 1" ["clj"])
     (create-tagged-node! *conn* "Fact 2" ["clj"])
     (create-tagged-node! *conn* "Fact 3" ["python"])
+    (db/recompute-tag-counts! *conn*)
     (let [resp (call "tools/call"
                  :params {:name "memory_explore_tags"
                           :arguments {:limit 50}})

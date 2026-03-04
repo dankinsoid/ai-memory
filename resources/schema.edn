@@ -24,10 +24,11 @@
   :db/fulltext    true
   :db/doc         "Node content — one thought, 1-3 sentences"}
 
- {:db/ident       :node/tag-refs
-  :db/valueType   :db.type/ref
+ {:db/ident       :node/tags
+  :db/valueType   :db.type/string
   :db/cardinality :db.cardinality/many
-  :db/doc         "References to tag entities"}
+  :db/index       true
+  :db/doc         "Tag names on this node (flat strings)"}
 
  {:db/ident       :node/weight
   :db/valueType   :db.type/double

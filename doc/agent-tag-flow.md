@@ -1,139 +1,143 @@
 # Agent Tag Retrieval Flow
 
-Agent retrieves facts from memory in three phases. Each phase minimizes context usage — agent controls depth and breadth of exploration.
+Agent retrieves facts from memory in two steps. Each step minimizes context usage — agent controls depth and breadth of exploration.
 
 ## Overview
 
 ```
-Phase 1: Navigate tag tree    → understand what memory contains
-Phase 2: Estimate fact counts  → narrow tag sets to manageable size
-Phase 3: Fetch facts           → get actual content
+Step 1: Explore tags       → understand what memory contains, estimate counts
+Step 2: Fetch facts        → get actual content by tag intersection or semantic search
 ```
 
-All three phases can happen in a single exchange if the agent already knows the taxonomy.
+Both steps can be combined into a single exchange if the agent already knows relevant tag names.
 
-## Phase 1 — Tag Tree Navigation
+## Step 1 — Explore Tags
 
-Agent explores the tag taxonomy to find relevant branches.
+Agent browses the flat tag list to discover available tags and their counts.
 
-### Request: browse tags
-
-```
-memory_browse_tags({ path: null, depth: 2 })
-```
-
-### Response: indented text with counts
+### Browse all tags
 
 ```
-languages 142
-  clojure 87
-  python 31
-  typescript 24
-patterns 95
-  error-handling 18
-  state-management 22
-    ...
-  concurrency 15
-projects 68
-  ...
-preferences 34
-  ...
+memory_explore_tags({ limit: 50 })
 ```
 
-Format: `name count`, nesting via 2-space indent. `...` as child means deeper levels exist — drill down with `path`. Agent reconstructs full tag paths from hierarchy: indented `clojure` under `languages` → `languages/clojure`.
-
-### Drill into a branch
+Response: one line per tag, sorted by count descending:
 
 ```
-memory_browse_tags({ path: "patterns/error-handling", depth: 2 })
+clojure 87
+error-handling 18
+python 31
+preferences 12
+ai-memory 45
+...
 ```
 
-Returns only that subtree. Agent repeats until it has the tags it needs.
+Agent scans the list, identifies relevant tags, proceeds to step 2.
 
-## Phase 2 — Estimate Fact Counts
+### Count tag intersections
 
-Agent sends candidate tag combinations and gets counts without fetching actual facts.
-
-### Request: count facts by tag sets
+Before fetching, agent can estimate how many facts match a combination:
 
 ```
-memory_count_facts({
+memory_explore_tags({
   tag_sets: [
-    ["languages/clojure", "patterns/error-handling"],
-    ["languages/clojure", "patterns/concurrency"],
-    ["languages/clojure"]
+    ["clojure", "error-handling"],
+    ["clojure"],
+    ["python"]
   ]
 })
 ```
 
-### Response: one line per tag set
+Response: one line per set:
 
 ```
-languages/clojure + patterns/error-handling: 7
-languages/clojure + patterns/concurrency: 3
-languages/clojure: 87
+clojure + error-handling: 7
+clojure: 87
+python: 31
 ```
 
-Agent evaluates: 87 is too many, 3 is good, 7 is good. It can narrow the broad set by adding more tags, or proceed with the specific ones.
+Agent uses counts to choose which sets to actually fetch. 87 is too many; 7 is fine.
 
-### Narrowing loop
+## Step 2 — Fetch Facts
 
-If counts are too high, agent adds tags and re-queries:
+Agent fetches actual content with one or more filters. Each filter runs independently and results are returned grouped.
 
-```
-memory_count_facts({
-  tag_sets: [
-    ["languages/clojure", "projects/ai-memory"],
-    ["languages/clojure", "preferences/coding-style"]
-  ]
-})
-```
-
-In practice, the agent sends multiple candidate sets in the first request and at least one is usually satisfactory — single round-trip.
-
-## Phase 3 — Fetch Facts
-
-Agent fetches actual fact content for chosen tag sets.
-
-### Request: get facts
+### Basic tag filter
 
 ```
 memory_get_facts({
-  tag_sets: [
-    ["languages/clojure", "patterns/error-handling"],
-    ["languages/clojure", "patterns/concurrency"]
-  ],
-  limit: 20
+  filters: [
+    { tags: ["clojure", "error-handling"], limit: 10 },
+    { tags: ["clojure", "concurrency"], limit: 10 }
+  ]
 })
 ```
 
-### Response: plain text, content only
+Response: grouped by filter:
 
 ```
-= languages/clojure + patterns/error-handling
-- Use ex-info for domain errors, ex-data for structured context
-- Prefer try/catch at boundaries, let exceptions propagate internally
+= clojure + error-handling
+- [101] Use ex-info for domain errors, ex-data for structured context
+- [102] Prefer try/catch at system boundaries, let exceptions propagate internally
 
-= languages/clojure + patterns/concurrency
-- core.async channels for pipeline stages
-- Use agents for independent state updates
+= clojure + concurrency
+- [103] core.async channels for pipeline stages
 ```
 
-`limit` applies per tag set. No metadata — just fact content grouped by queried tags.
+### With date filter
+
+```
+memory_get_facts({
+  filters: [
+    { tags: ["clojure"], since: "7d", limit: 20 }
+  ]
+})
+```
+
+### Semantic search
+
+```
+memory_get_facts({
+  filters: [
+    { query: "error handling in concurrent systems", limit: 10 }
+  ]
+})
+```
+
+### Date-only (recent facts, all tags)
+
+```
+memory_get_facts({
+  filters: [
+    { since: "3d", sort_by: "date", limit: 20 }
+  ]
+})
+```
+
+### Sort by weight
+
+```
+memory_get_facts({
+  filters: [
+    { tags: ["clojure"], sort_by: "weight", limit: 20 }
+  ]
+})
+```
+
+`sort_by: "weight"` uses decay-adjusted effective weight — higher-reinforced, more recently accessed facts appear first.
 
 ## MCP Tools Summary
 
 | Tool | Input | Output | Purpose |
 |------|-------|--------|---------|
-| `memory_browse_tags` | `path?`, `depth` | Indented text: `name count`, `...` = truncated | Navigate taxonomy |
-| `memory_count_facts` | `tag_sets: [[str]]` | Text: `tags: count` per line | Estimate before fetching |
-| `memory_get_facts` | `tag_sets: [[str]]`, `limit?` | Text: `= tags` header + `- content` lines | Get actual content |
+| `memory_explore_tags` | `limit?`, `offset?` | Text: `name count` per line | Browse flat tag list |
+| `memory_explore_tags` | `tag_sets: [[str]]` | Text: `tags: count` per line | Count intersections before fetching |
+| `memory_get_facts` | `filters: [{tags?, query?, since?, until?, sort_by?, limit?, id?}]` | Text: `= tags` header + `- [id] content` lines | Fetch facts by any combination |
 
 ## Design Principles
 
-- **Agent controls context cost.** Depth limits and tag narrowing keep responses small.
-- **Compact taxonomy format.** Indented text instead of JSON — zero overhead per tag node.
+- **Agent controls context cost.** Limit and date filters keep responses small.
+- **Flat tags, no tree traversal.** Agent goes straight to intersection — no hierarchy to navigate.
 - **Counts are cheap.** Datomic `(count ?n)` aggregation — no entity pulls.
-- **Batch by default.** Multiple tag sets per request to minimize round-trips.
-- **One round-trip ideal.** Agent sends diverse tag sets in phase 2; usually at least one is good enough — skip narrowing loop.
-- **Content only in facts.** No IDs, weights, or metadata — just the text the agent needs. Tags are already known from the query.
+- **Batch by default.** Multiple filters per request to minimize round-trips.
+- **Entity IDs in output.** Each fact line includes `[id]` for referencing in `memory_reinforce`.
