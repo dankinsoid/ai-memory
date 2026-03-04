@@ -516,26 +516,34 @@
          (remove str/blank?)
          (str/join "\n"))))
 
+(def ^:private injected-tag-names
+  ["system-reminder" "system_reminder" "system_instruction"
+   "local-command-stdout" "local-command-caveat"
+   "ide_selection" "ide_file" "ide_opened_file"
+   "user-prompt-submit-hook"])
+
+(def ^:private injected-tags-re
+  (re-pattern (str "(?s)<(" (str/join "|" injected-tag-names) ")>.*?</\\1>")))
+
+(defn- strip-injected-tags
+  "Strips known injected XML-style context blocks from message text.
+   Only removes tags in the explicit allowlist to avoid clobbering legitimate content."
+  [s]
+  (when s
+    (-> s
+        (str/replace injected-tags-re "")
+        str/trim)))
+
 (defn- format-turn-as-markdown
   "Formats a turn's messages as readable markdown.
    Skips messages with no text content (tool_use, tool_result, thinking)."
   [messages]
   (->> messages
        (keep (fn [{:keys [role content]}]
-               (let [text (extract-text content)]
+               (let [text (strip-injected-tags (extract-text content))]
                  (when-not (str/blank? text)
                    (str "**" (or role "unknown") "**\n" text)))))
        (str/join "\n\n")))
-
-(defn- strip-injected-tags
-  "Strips injected XML-style context blocks from message text.
-   Covers tags with hyphens or underscores in the name, e.g.:
-   <system_instruction>, <system-reminder>, <ide_selection>, etc."
-  [s]
-  (when s
-    (-> s
-        (str/replace #"(?s)<[a-zA-Z][a-zA-Z0-9]*[-_][^>]*>.*?</[a-zA-Z][a-zA-Z0-9]*[-_][^>]*>" "")
-        str/trim)))
 
 (defn- extract-first-user-prompt
   "Extracts a truncated first user message as a fallback session summary.
