@@ -13,6 +13,7 @@
         cfg      (assoc config :metrics registry)
         conn     (db/connect (:datomic-uri cfg))]
     (db/ensure-schema conn)
+    (db/recompute-tag-counts! conn)
     (vs/ensure-collection! (:qdrant-url cfg))
     (let [server (web/start {:port (:port cfg)
                              :conn conn

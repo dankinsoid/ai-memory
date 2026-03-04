@@ -12,12 +12,12 @@
 - [x] Taxonomy navigation: root, children, subtree, full tree
 - [x] Tag-based queries: by-tag, intersection, union, subtree (`tag/query.clj`)
 - [x] Browse with node counts
-- [x] Tag resolution: string → ref, auto-create missing (`tag/resolve.clj`)
+- [x] Tag auto-create on write path (`tag/core.clj` — `ensure-tag!` called inline, `tag/resolve.clj` deleted)
 - [x] Tests (20 tests)
 
 ### Agent Retrieval Flow (doc/agent-tag-flow.md)
-- [x] `:tag/node-count` materialized counter + atomic tx function (`schema.edn`, `db/core.clj`)
-- [x] Count maintenance in write pipeline (`graph/node.clj` — create + update)
+- [x] `:tag/node-count` materialized counter recomputed at startup (`db/core.clj` — `recompute-tag-counts!`)
+- [x] `:node/tags` flat string set on nodes (`db.type/string, cardinality/many, indexed`) — replaced `:node/tag-refs` (ref)
 - [x] `taxonomy [db path max-depth]` — depth-limited tree with counts per node
 - [x] `count-by-tag-sets [db tag-sets]` — `[[tags] ...] → [{:tags :count} ...]` without pulling nodes
 - [x] `fetch-by-tag-sets [db tag-sets opts]` — batch `by-tags` with `:limit`
@@ -90,7 +90,7 @@
 ## Blob Storage (ADR-010)
 - [x] Blob = Node model: `:node.type/conversation`, `:node.type/document` with `:node/blob-dir`
 - [x] Schema: `:node/created-at`, `:node/updated-at` (indexed), `:node/blob-dir`, `:node/sources` (many)
-- [x] Auto-timestamps: `create-node` sets both, `reinforce-node`/`update-tag-refs` bump `updated-at`
+- [x] Auto-timestamps: `create-node` sets both, `reinforce-node`/`update-tags` bump `updated-at`
 - [x] Directory structure: `data/blobs/{YYYY-MM-DD}_{slug}/meta.edn` + section files
 - [x] Filesystem ops: write/read meta.edn and sections (`blob/store.clj`)
 - [x] Lazy access: meta first, section by index

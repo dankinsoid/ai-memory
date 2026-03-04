@@ -225,11 +225,11 @@
   (let [tempid (d/tempid :db.part/user)]
     (tag/ensure-tag! conn "entity")
     (let [tx @(d/transact conn
-                [{:db/id          tempid
-                  :node/content   content
-                  :node/weight    1.0
-                  :node/cycle     tick
-                  :node/tag-refs  [[:tag/name "entity"]]}])]
+                [{:db/id         tempid
+                  :node/content  content
+                  :node/weight   1.0
+                  :node/cycle    tick
+                  :node/tags     ["entity"]}])]
       (d/resolve-tempid (:db-after tx) (:tempids tx) tempid))))
 
 (deftest entity-find-by-content-test

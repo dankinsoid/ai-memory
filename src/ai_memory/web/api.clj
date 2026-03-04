@@ -5,7 +5,7 @@
             [ai-memory.graph.write :as write]
             [ai-memory.graph.delete :as delete]
             [ai-memory.tag.query :as tag-query]
-            [ai-memory.tag.resolve :as tag-resolve]
+            [ai-memory.tag.core :as tag]
             [ai-memory.decay.core :as decay]
             [ai-memory.blob.store :as blob-store]
             [ai-memory.blob.exec :as blob-exec]
@@ -32,7 +32,7 @@
    :content (:node/content n)
    :type    (infer-d3-type n)
    :weight  (:node/weight n)
-   :tags    (mapv :tag/name (:node/tag-refs n))})
+   :tags    (vec (:node/tags n))})
 
 (defn- node->d3-with-ew [tick n]
   (assoc (node->d3 n)
@@ -51,7 +51,7 @@
   "Returns full graph for D3 visualization."
   [conn _req]
   (let [db    (db/db conn)
-        nodes (d/q '[:find [(pull ?e [* {:node/tag-refs [:tag/name]}]) ...]
+        nodes (d/q '[:find [(pull ?e [* :node/tags]) ...]
                       :where [?e :node/content]]
                     db)
         edges (edge/find-all db)]
@@ -102,8 +102,7 @@
 
 (def ^:private node-pull-spec-full
   [:db/id :node/content :node/weight :node/cycle :node/created-at :node/updated-at
-   :node/blob-dir :node/session-id :node/sources
-   {:node/tag-refs [:tag/name :tag/node-count]}])
+   :node/blob-dir :node/session-id :node/sources :node/tags])
 
 (defn get-top-nodes
   "Returns highest effective-weight nodes as graph entry points."
@@ -309,36 +308,35 @@
   (let [db       (db/db conn)
         eid      (find-session-fact db session-id)
         tag-strs (distinct (concat ["session"] (when project [(str "project/" project)]) tags))]
-    (if eid
-      (do (node/update-content! conn cfg eid session-summary)
-          (let [tag-refs (tag-resolve/resolve-tags conn tag-strs)]
-            (node/update-tag-refs conn eid tag-refs)))
-      (let [tag-refs (tag-resolve/resolve-tags conn tag-strs)]
+    (let [tags (mapv str/trim tag-strs)]
+      (doseq [t tags] (tag/ensure-tag! conn t))
+      (if eid
+        (do (node/update-content! conn cfg eid session-summary)
+            (node/update-tags conn eid tags))
         (node/create-node conn cfg
           {:content    session-summary
-           :tag-refs   tag-refs
+           :tags       tags
            :session-id session-id})))))
 
 (defn- find-project-fact [db project]
   (d/q '[:find ?e .
          :in $ ?pname
          :where
-         [?t1 :tag/name "project"]
-         [?e :node/tag-refs ?t1]
-         [?t2 :tag/name ?pname]
-         [?e :node/tag-refs ?t2]]
+         [?e :node/tags "project"]
+         [?e :node/tags ?pname]]
        db (str "project/" project)))
 
 (defn- upsert-project-fact! [conn cfg project summary tags]
   (let [db       (db/db conn)
         eid      (find-project-fact db project)
-        tag-strs (distinct (concat ["project" (str "project/" project)] tags))]
+        tag-strs (mapv str/trim (distinct (concat ["project" (str "project/" project)] tags)))]
+    (doseq [t tag-strs] (tag/ensure-tag! conn t))
     (if eid
       (do (node/update-content! conn cfg eid summary)
-          (node/update-tag-refs conn eid (tag-resolve/resolve-tags conn tag-strs)))
+          (node/update-tags conn eid tag-strs))
       (node/create-node conn cfg
-        {:content  summary
-         :tag-refs (tag-resolve/resolve-tags conn tag-strs)}))))
+        {:content summary
+         :tags    tag-strs}))))
 
 (defn project-update [conn cfg req]
   (let [{:keys [project summary tags]} (:body-params req)]
@@ -416,15 +414,15 @@
                     (:project body)     (assoc :project (:project body))
                     (:path body)        (assoc :source-path (:path body)))]
     (blob-store/write-meta! base blob-dir meta-data)
-    (let [tag-strs (distinct (:tags body))
-          tag-refs (tag-resolve/resolve-tags conn tag-strs)
-          blob-node (node/create-node conn cfg
-                      {:content   (:summary body)
-                       :tag-refs  tag-refs
-                       :blob-dir  blob-dir})]
-      {:status 201
-       :body   {:blob-dir blob-dir
-                :blob-id  (:node-eid blob-node)}})))
+    (let [tags (mapv str/trim (distinct (:tags body)))]
+      (doseq [t tags] (tag/ensure-tag! conn t))
+      (let [blob-node (node/create-node conn cfg
+                        {:content  (:summary body)
+                         :tags     tags
+                         :blob-dir blob-dir})]
+        {:status 201
+         :body   {:blob-dir blob-dir
+                  :blob-id  (:node-eid blob-node)}}))))
 
 ;; --- Session sync (called by UserPromptSubmit hook) ---
 
@@ -619,16 +617,17 @@
             (when-not datomic-dir
               (link-blob-dir! conn session-eid blob-dir-short))
             (when project
-              (let [tag-refs (tag-resolve/resolve-tags conn [(str "project/" project)])]
-                (node/update-tag-refs conn session-eid tag-refs))))
-          (let [tag-strs (cond-> ["session"]
-                           project (conj (str "project/" project)))
-                tag-refs (tag-resolve/resolve-tags conn tag-strs)]
+              (let [proj-tag (str "project/" project)]
+                (tag/ensure-tag! conn proj-tag)
+                (node/update-tags conn session-eid [proj-tag]))))
+          (let [tags (cond-> ["session"]
+                       project (conj (str "project/" project)))]
+            (doseq [t tags] (tag/ensure-tag! conn t))
             (node/create-node conn cfg
               {:content    (or session-summary
                                (extract-first-user-prompt messages)
                                "Session conversation")
-               :tag-refs   tag-refs
+               :tags       tags
                :blob-dir   blob-dir-short
                :session-id session-id})))
 

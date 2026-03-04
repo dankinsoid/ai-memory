@@ -10,17 +10,15 @@
    Returns {:deleted-id eid :blob-dir dir-name}. Throws if not found."
   [conn cfg eid]
   (let [db   (d/db conn)
-        node (d/pull db [:node/content :node/blob-dir {:node/tag-refs [:tag/name]}] eid)]
+        node (d/pull db [:node/content :node/blob-dir] eid)]
     (when-not (:node/content node)
       (throw (ex-info "Node not found" {:eid eid})))
     (let [blob-dir   (:node/blob-dir node)
-          tag-names  (mapv :tag/name (:node/tag-refs node))
           edges-from (d/q '[:find [?e ...] :in $ ?n :where [?e :edge/from ?n]] db eid)
           edges-to   (d/q '[:find [?e ...] :in $ ?n :where [?e :edge/to   ?n]] db eid)
           edge-eids  (distinct (concat edges-from edges-to))
           tx-data    (-> []
                          (into (map #(vector :db/retractEntity %) edge-eids))
-                         (into (map #(vector :fn/inc-tag-count % -1) tag-names))
                          (conj [:db/retractEntity eid]))]
       (db/transact! conn tx-data)
       (try (vs/delete-point! (:qdrant-url cfg) eid)

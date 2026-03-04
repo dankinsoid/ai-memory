@@ -18,8 +18,7 @@
   ([db tag-name] (by-tag db tag-name nil))
   ([db tag-name {:keys [since until]}]
    (if (or since until)
-     (let [where-cls (cond-> [['?t :tag/name '?name]
-                              ['?n :node/tag-refs '?t]
+     (let [where-cls (cond-> [['?n :node/tags '?name]
                               ['?n :node/updated-at '?updated]]
                        since (conj '[(>= ?updated ?since)])
                        until (conj '[(< ?updated ?until)]))
@@ -37,8 +36,7 @@
      (let [eids (d/q '[:find [?n ...]
                        :in $ ?name
                        :where
-                       [?t :tag/name ?name]
-                       [?n :node/tag-refs ?t]]
+                       [?n :node/tags ?name]]
                      db tag-name)]
        (pull-nodes db eids)))))
 
@@ -51,9 +49,8 @@
       (by-tag db (first tags))
       (let [tag-syms  (mapv #(symbol (str "?t" %)) (range (count tags)))
             where-cls (cond-> (into []
-                                    (mapcat (fn [sym name]
-                                              [[sym :tag/name name]
-                                               ['?n :node/tag-refs sym]])
+                                    (mapcat (fn [_sym name]
+                                              [['?n :node/tags name]])
                                             tag-syms tags))
                         (or since until) (conj ['?n :node/updated-at '?updated])
                         since            (conj '[(>= ?updated ?since)])
@@ -77,8 +74,7 @@
     (let [eids (d/q '[:find [?n ...]
                       :in $ [?name ...]
                       :where
-                      [?t :tag/name ?name]
-                      [?n :node/tag-refs ?t]]
+                      [?n :node/tags ?name]]
                     db tags)]
       (pull-nodes db eids))))
 
@@ -128,15 +124,13 @@
     (or (d/q '[:find (count ?n) .
                :in $ ?name
                :where
-               [?t :tag/name ?name]
-               [?n :node/tag-refs ?t]]
+               [?n :node/tags ?name]]
              db (first tags))
         0)
     (let [tag-syms  (mapv #(symbol (str "?t" %)) (range (count tags)))
           where-cls (into []
-                          (mapcat (fn [sym name]
-                                    [[sym :tag/name name]
-                                     ['?n :node/tag-refs sym]])
+                          (mapcat (fn [_sym name]
+                                    [['?n :node/tags name]])
                                   tag-syms tags))
           query     {:find  '[(count ?n) .]
                      :in    '[$]
@@ -220,13 +214,13 @@
 (defn- has-all-tags?
   "Returns true if node has ALL specified tag names."
   [tag-names node]
-  (let [node-tags (set (map :tag/name (:node/tag-refs node)))]
+  (let [node-tags (set (:node/tags node))]
     (every? node-tags tag-names)))
 
 (defn- has-any-of-tags?
   "Returns true if node has ANY of the specified tag names."
   [tag-names node]
-  (let [node-tags (set (map :tag/name (:node/tag-refs node)))]
+  (let [node-tags (set (:node/tags node))]
     (some node-tags tag-names)))
 
 (defn- in-date-range?
@@ -324,8 +318,7 @@
         actual (into {}
                      (d/q '[:find ?name (count ?n)
                             :where
-                            [?t :tag/name ?name]
-                            [?n :node/tag-refs ?t]]
+                            [?n :node/tags ?name]]
                           db))
         all-names (d/q '[:find [?name ...]
                          :where [?t :tag/name ?name]]
@@ -350,6 +343,5 @@
   (d/q '[:find [?name ...]
          :in $ ?eid
          :where
-         [?eid :node/tag-refs ?t]
-         [?t :tag/name ?name]]
+         [?eid :node/tags ?name]]
        db eid))

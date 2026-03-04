@@ -8,9 +8,10 @@
    Context state lives in RAM with TTL — no DB pollution."
   (:require [ai-memory.graph.node :as node]
             [ai-memory.graph.edge :as edge]
-            [ai-memory.tag.resolve :as tag-resolve]
+            [ai-memory.tag.core :as tag]
             [ai-memory.db.core :as db]
             [ai-memory.metrics :as metrics]
+            [clojure.string :as str]
             [clojure.tools.logging :as log])
   (:import [java.time Instant]))
 
@@ -91,25 +92,27 @@
         nil))))
 
 (defn- process-node
-  "Dedup check + create or reinforce. Resolves tags to entity refs.
+  "Dedup check + create or reinforce.
    Returns {:id entity-id :status :created/:reinforced}."
   [conn cfg node-data opts]
-  (let [db         (db/db conn)
-        tag-refs   (when (seq (:tags node-data))
-                     (tag-resolve/resolve-tags conn (:tags node-data)))
-        duplicate  (find-duplicate-node db cfg (:content node-data) node-data opts)]
+  (let [db        (db/db conn)
+        tags      (when (seq (:tags node-data))
+                    (let [names (mapv str/trim (:tags node-data))]
+                      (doseq [n names] (tag/ensure-tag! conn n))
+                      names))
+        duplicate (find-duplicate-node db cfg (:content node-data) node-data opts)]
     (if duplicate
       (let [eid (:db/id duplicate)]
         (node/reinforce-node conn cfg eid
                              (:content node-data)
                              1.0
                              (:reinforcement-factor opts))
-        (node/update-tag-refs conn eid tag-refs)
+        (node/update-tags conn eid tags)
         {:id eid :status :reinforced})
       (let [result (node/create-node conn cfg
                      (-> node-data
                          (dissoc :tags :node-type)
-                         (assoc :tag-refs tag-refs)))]
+                         (assoc :tags tags)))]
         {:id (:node-eid result) :status :created}))))
 
 (defn- create-batch-edges

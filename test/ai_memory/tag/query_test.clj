@@ -26,25 +26,21 @@
 ;; --- Helpers ---
 
 (defn- create-tagged-node!
-  "Creates a node with tag refs and increments materialized counts.
-   Optional opts map with :updated-at, :weight, :cycle.
+  "Creates a node with string tags. Optional opts map with :updated-at, :weight, :cycle.
    Returns Datomic entity ID."
   ([conn content tag-names] (create-tagged-node! conn content tag-names nil))
   ([conn content tag-names opts]
    (let [now    (java.util.Date.)
          tempid (d/tempid :db.part/user)]
-     (doseq [n tag-names]
-       (tag/ensure-tag! conn n))
-     (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
-           count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
-           node-map  {:db/id           tempid
-                      :node/content    content
-                      :node/weight     (or (:weight opts) 0.0)
-                      :node/cycle      (or (:cycle opts) 0)
-                      :node/tag-refs   tag-refs
-                      :node/created-at now
-                      :node/updated-at (or (:updated-at opts) now)}
-           tx @(d/transact conn (into [node-map] count-txs))]
+     (doseq [n tag-names] (tag/ensure-tag! conn n))
+     (let [node-map {:db/id           tempid
+                     :node/content    content
+                     :node/weight     (or (:weight opts) 0.0)
+                     :node/cycle      (or (:cycle opts) 0)
+                     :node/tags       (vec tag-names)
+                     :node/created-at now
+                     :node/updated-at (or (:updated-at opts) now)}
+           tx       @(d/transact conn [node-map])]
        (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
 
 (defn- set-tick! [conn tick-val]
@@ -89,6 +85,7 @@
     (create-tagged-node! *conn* "Fact 1" ["clj"])
     (create-tagged-node! *conn* "Fact 2" ["clj"])
     (create-tagged-node! *conn* "Fact 3" ["python"])
+    (db/recompute-tag-counts! *conn*)
     (let [results (query/browse (d/db *conn*) {})
           with-nodes (filterv #(pos? (or (:tag/node-count %) 0)) results)]
       ;; Total includes aspect tags, but only 2 have nodes
@@ -107,6 +104,7 @@
     (create-tagged-node! *conn* "A" ["clj"])
     (create-tagged-node! *conn* "B" ["python"])
     (create-tagged-node! *conn* "C" ["rust"])
+    (db/recompute-tag-counts! *conn*)
     (let [total   (+ 3 aspect-tag-count)
           page1   (query/browse (d/db *conn*) {:limit 2 :offset 0})
           page2   (query/browse (d/db *conn*) {:limit 2 :offset 2})
@@ -264,14 +262,14 @@
   (testing "weight sort puts reinforced old fact above newer unreinforced fact"
     ;; Simulate: tick is at 100
     (set-tick! *conn* 100)
-    ;; Old reinforced fact: weight=3.0, cycle=98 (recently reinforced)
-    ;; effective = 3.0 * 0.95^(100-98) = 3.0 * 0.9025 = 2.7075
+    ;; Old reinforced fact: weight=0.9, cycle=98
+    ;; effective = (100-98+1)^((0.9-1)/5) = 3^(-0.02) ≈ 0.978
     (create-tagged-node! *conn* "reinforced-old" ["clj"]
-                         {:weight 3.0 :cycle 98 :updated-at (days-ago 20)})
-    ;; New unreinforced fact: weight=1.0, cycle=99
-    ;; effective = 1.0 * 0.95^(100-99) = 1.0 * 0.95 = 0.95
+                         {:weight 0.9 :cycle 98 :updated-at (days-ago 20)})
+    ;; New unreinforced fact: weight=0.3, cycle=99
+    ;; effective = (100-99+1)^((0.3-1)/5) = 2^(-0.14) ≈ 0.907
     (create-tagged-node! *conn* "new-unreinforced" ["clj"]
-                         {:weight 1.0 :cycle 99 :updated-at (days-ago 1)})
+                         {:weight 0.3 :cycle 99 :updated-at (days-ago 1)})
     (let [results (query/fetch-by-tag-sets (d/db *conn*) nil
                     [["clj"]]
                     {:limit 50 :sort-by "weight"})

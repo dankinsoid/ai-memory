@@ -39,18 +39,15 @@
   ([conn content tag-names opts]
    (let [now    (java.util.Date.)
          tempid (d/tempid :db.part/user)]
-     (doseq [n tag-names]
-       (tag/ensure-tag! conn n))
-     (let [tag-refs  (mapv #(vector :tag/name %) tag-names)
-           count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
-           node-map  {:db/id           tempid
-                      :node/content    content
-                      :node/weight     1.0
-                      :node/cycle      0
-                      :node/tag-refs   tag-refs
-                      :node/created-at now
-                      :node/updated-at (or (:updated-at opts) now)}
-           tx @(d/transact conn (into [node-map] count-txs))]
+     (doseq [n tag-names] (tag/ensure-tag! conn n))
+     (let [node-map {:db/id           tempid
+                     :node/content    content
+                     :node/weight     1.0
+                     :node/cycle      0
+                     :node/tags       (vec tag-names)
+                     :node/created-at now
+                     :node/updated-at (or (:updated-at opts) now)}
+           tx       @(d/transact conn [node-map])]
        (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
 
 (defn- handler []
@@ -156,6 +153,7 @@
     (create-tagged-node! *conn* "Fact 1" ["clj"])
     (create-tagged-node! *conn* "Fact 2" ["clj"])
     (create-tagged-node! *conn* "Fact 3" ["python"])
+    (db/recompute-tag-counts! *conn*)
     (let [resp (call "tools/call"
                  :params {:name "memory_explore_tags"
                           :arguments {:limit 50}})

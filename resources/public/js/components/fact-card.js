@@ -4,7 +4,7 @@ import { weightColor, timeAgo, tagColor, tagBg } from '../lib/utils.js'
 
 export function FactCard({ fact }) {
   const content = fact['node/content'] || fact.content || ''
-  const tags = fact['node/tag-refs'] || fact.tags || []
+  const tags = fact['node/tags'] || fact.tags || []
   const weight = fact['node/effective-weight'] ?? fact['node/weight'] ?? fact.weight
   const updatedAt = fact['node/updated-at'] || fact.updated_at
   const id = fact['db/id'] || fact.id

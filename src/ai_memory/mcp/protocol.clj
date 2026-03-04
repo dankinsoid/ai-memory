@@ -164,10 +164,7 @@
   (let [eid     (:db/id fact)
         score   (:search/score fact)
         content (:node/content fact)
-        tags    (->> (:node/tag-refs fact)
-                     (map :tag/name)
-                     (filter some?)
-                     (str/join ", "))]
+        tags    (str/join ", " (:node/tags fact))]
     (str (format "%.2f" (double score))
          (when eid (str " [" eid "]"))
          " " content

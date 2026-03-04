@@ -5,7 +5,6 @@
   (:require [datomic.api :as d]
             [ai-memory.db.core :as db]
             [ai-memory.blob.store :as blob-store]
-            [ai-memory.tag.core :as tag]
             [ai-memory.embedding.core :as embedding]
             [ai-memory.embedding.vector-store :as vs]
             [clojure.java.io :as io]
@@ -14,21 +13,6 @@
   (:import [java.util Date UUID]))
 
 (defn- now [] (Date.))
-
-(defn- has-entity-tag?
-  "Checks tag-refs (lookup refs or pulled maps) for entity tag."
-  [tag-refs]
-  (some (fn [ref]
-          (cond
-            (vector? ref) (= (second ref) "entity")
-            (map? ref)    (= (:tag/name ref) "entity")
-            :else         false))
-        tag-refs))
-
-(defn- skip-embedding?
-  "Entity nodes (have entity tag) skip vectorization."
-  [{:keys [tag-refs]}]
-  (has-entity-tag? tag-refs))
 
 (defn- embed-async!
   "Embeds content in Qdrant using entity ID as point ID. Logs warning on failure, never throws."
@@ -55,37 +39,34 @@
       (log/warn e "Failed to vectorize file" blob-dir "/" file-path))))
 
 (defn create-node
-  "Creates a memory node in Datomic. Embeds content in Qdrant unless entity.
+  "Creates a memory node in Datomic and embeds content in Qdrant.
    Returns {:tx-result ... :node-eid <entity-id>}.
    `cfg` — {:openai-api-key, :qdrant-url}.
-   `tag-refs` — vec of lookup refs like [[:tag/name \"clj\"]].
+   `tags` — vec of tag name strings.
    Optional keys: :blob-dir (string), :sources (set of strings)."
-  [conn cfg {:keys [content tag-refs blob-dir sources session-id]}]
-  (let [tick         (db/next-tick (d/db conn))
-        tempid       (d/tempid :db.part/user)
-        ts           (now)
-        base-tx      (cond-> {:db/id           tempid
-                               :node/content    content
-                               :node/weight     0.0
-                               :node/cycle      tick
-                               :node/created-at ts
-                               :node/updated-at ts}
-                       (seq tag-refs) (assoc :node/tag-refs tag-refs)
-                       blob-dir       (assoc :node/blob-dir blob-dir)
-                       (seq sources)  (assoc :node/sources sources)
-                       session-id     (assoc :node/session-id session-id))
-        count-txs    (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) tag-refs)
-        tx-result    (db/transact! conn (into [base-tx] count-txs) tick)
-        eid          (d/resolve-tempid (:db-after tx-result) (:tempids tx-result) tempid)]
-    (when-not (skip-embedding? {:tag-refs tag-refs})
-      (embed-async! cfg eid content))
+  [conn cfg {:keys [content tags blob-dir sources session-id]}]
+  (let [tick      (db/next-tick (d/db conn))
+        tempid    (d/tempid :db.part/user)
+        ts        (now)
+        base-tx   (cond-> {:db/id           tempid
+                            :node/content    content
+                            :node/weight     0.0
+                            :node/cycle      tick
+                            :node/created-at ts
+                            :node/updated-at ts}
+                    (seq tags)    (assoc :node/tags tags)
+                    blob-dir      (assoc :node/blob-dir blob-dir)
+                    (seq sources) (assoc :node/sources sources)
+                    session-id    (assoc :node/session-id session-id))
+        tx-result (db/transact! conn [base-tx] tick)
+        eid       (d/resolve-tempid (:db-after tx-result) (:tempids tx-result) tempid)]
+    (embed-async! cfg eid content)
     {:tx-result tx-result
      :node-eid  eid}))
 
 (def node-pull-spec
   [:db/id :node/content :node/weight :node/cycle :node/sources
-   :node/blob-dir :node/updated-at
-   {:node/tag-refs [:tag/name]}])
+   :node/blob-dir :node/updated-at :node/tags])
 
 (defn find-by-id [db eid]
   (d/pull db '[*] eid))
@@ -133,22 +114,18 @@
                    :in $ ?content
                    :where
                    [?e :node/content ?content]
-                   [?e :node/tag-refs ?tag]
-                   [?tag :tag/name "entity"]]
+                   [?e :node/tags "entity"]]
                  db content)]
     (when eid
       (d/pull db '[*] eid))))
 
 (defn update-content!
-  "Updates node content and updated-at. Re-embeds in Qdrant unless entity."
+  "Updates node content and updated-at. Re-embeds in Qdrant."
   [conn cfg eid new-content]
-  (let [db   (d/db conn)
-        node (d/pull db [{:node/tag-refs [:tag/name]}] eid)]
-    (db/transact! conn
-       [[:db/add eid :node/content    new-content]
-        [:db/add eid :node/updated-at (now)]])
-    (when-not (skip-embedding? {:tag-refs (:node/tag-refs node)})
-      (embed-async! cfg eid new-content))))
+  (db/transact! conn
+     [[:db/add eid :node/content    new-content]
+      [:db/add eid :node/updated-at (now)]])
+  (embed-async! cfg eid new-content))
 
 (defn- apply-score
   "Asymptotic approach to 1.0 for positive score; linear decrease for negative.
@@ -159,11 +136,11 @@
     (max 0.0 (+ current (* score factor)))))
 
 (defn reinforce-node
-  "Reinforces existing node: bumps weight, cycle, updated-at. Re-embeds unless entity."
+  "Reinforces existing node: bumps weight, cycle, updated-at. Re-embeds in Qdrant."
   [conn cfg eid new-content score factor]
   (let [db   (d/db conn)
         tick (db/next-tick db)
-        node (d/pull db [:node/weight :node/blob-dir {:node/tag-refs [:tag/name]}] eid)
+        node (d/pull db [:node/weight] eid)
         current-weight (or (:node/weight node) 0.0)
         new-weight     (apply-score current-weight score factor)]
     (db/transact! conn
@@ -172,8 +149,7 @@
         [:db/add eid :node/cycle      tick]
         [:db/add eid :node/updated-at (now)]]
        tick)
-    (when-not (skip-embedding? {:tag-refs (:node/tag-refs node)})
-      (embed-async! cfg eid new-content))))
+    (embed-async! cfg eid new-content)))
 
 (defn reinforce-weight
   "Adjusts node base weight using score. Positive score: asymptotic toward 1.0.
@@ -212,49 +188,31 @@
          [?e :node/content]]
        db min-tick))
 
-(defn update-tag-refs
-  "Adds tag refs to an existing node (additive — cardinality/many).
-   Increments tag counts only for tags not already on the node. Updates updated-at."
-  [conn eid tag-refs]
-  (when (seq tag-refs)
-    (let [db       (d/db conn)
-          existing (set (d/q '[:find [?name ...]
-                               :in $ ?eid
-                               :where
-                               [?eid :node/tag-refs ?t]
-                               [?t :tag/name ?name]]
-                             db eid))
-          new-refs (remove #(existing (second %)) tag-refs)
-          count-txs (mapv (fn [ref] [:fn/inc-tag-count (second ref) 1]) new-refs)]
-      (db/transact! conn
-         (into [{:db/id           eid
-                 :node/tag-refs   tag-refs
-                 :node/updated-at (now)}]
-               count-txs)))))
+(defn update-tags
+  "Adds tags (strings) to an existing node (additive — cardinality/many). Updates updated-at."
+  [conn eid tags]
+  (when (seq tags)
+    (db/transact! conn
+       [{:db/id           eid
+         :node/tags       (vec tags)
+         :node/updated-at (now)}])))
 
 (defn replace-tags!
-  "Replaces all tags on a node with new-tag-names (seq of strings).
-   Decrements counts for removed tags, increments for added. Updates updated-at."
+  "Replaces all tags on a node with new-tag-names (seq of strings). Updates updated-at."
   [conn eid new-tag-names]
   (let [db            (d/db conn)
         current-names (set (d/q '[:find [?name ...]
                                   :in $ ?eid
-                                  :where
-                                  [?eid :node/tag-refs ?t]
-                                  [?t :tag/name ?name]]
+                                  :where [?eid :node/tags ?name]]
                                 db eid))
         new-names-set (set (map str/trim new-tag-names))
         to-add        (remove current-names new-names-set)
-        to-remove     (remove new-names-set current-names)]
-    (doseq [name to-add]
-      (tag/ensure-tag! conn name))
-    (let [retract-txs (mapv (fn [name] [:db/retract eid :node/tag-refs [:tag/name name]]) to-remove)
-          add-txs     (mapv (fn [name] [:db/add eid :node/tag-refs [:tag/name name]]) to-add)
-          dec-txs     (mapv (fn [name] [:fn/inc-tag-count name -1]) to-remove)
-          inc-txs     (mapv (fn [name] [:fn/inc-tag-count name 1]) to-add)]
-      (db/transact! conn
-        (into (concat retract-txs add-txs dec-txs inc-txs)
-              [[:db/add eid :node/updated-at (now)]])))))
+        to-remove     (remove new-names-set current-names)
+        retract-txs   (mapv (fn [name] [:db/retract eid :node/tags name]) to-remove)
+        add-txs       (mapv (fn [name] [:db/add eid :node/tags name]) to-add)]
+    (db/transact! conn
+      (conj (into retract-txs add-txs)
+            [:db/add eid :node/updated-at (now)]))))
 
 (defn set-weight!
   "Directly sets node base weight, clamped to [0.0, 1.0]. Updates updated-at."
@@ -265,20 +223,17 @@
        [:db/add eid :node/updated-at (now)]])))
 
 (defn reindex-all!
-  "Re-embeds all non-entity nodes into Qdrant. Also re-embeds compact.md for blob nodes.
-   Synchronous, sequential. Returns {:reindexed N :skipped M :files-reindexed K}."
+  "Re-embeds all nodes into Qdrant. Also re-embeds compact.md for blob nodes.
+   Synchronous, sequential. Returns {:reindexed N :files-reindexed K}."
   [db cfg]
-  (let [nodes (d/q '[:find [(pull ?e [:db/id :node/content :node/blob-dir
-                                      {:node/tag-refs [:tag/name]}]) ...]
+  (let [nodes (d/q '[:find [(pull ?e [:db/id :node/content :node/blob-dir]) ...]
                      :where [?e :node/content]]
                    db)
         base  (:blob-path cfg)]
     (reduce (fn [acc node]
-              (if (skip-embedding? {:tag-refs (:node/tag-refs node)})
-                (update acc :skipped inc)
-                (do
-                  (embed-async! cfg (:db/id node) (:node/content node))
-                  (let [acc' (update acc :reindexed inc)]
+              (do
+                (embed-async! cfg (:db/id node) (:node/content node))
+                (let [acc' (update acc :reindexed inc)]
                     (if-let [blob-dir-short (:node/blob-dir node)]
                       (let [resolved     (or (blob-store/resolve-blob-dir base blob-dir-short)
                                              blob-dir-short)
@@ -288,16 +243,15 @@
                                            (slurp compact-file))
                               (update acc' :files-reindexed inc))
                           acc'))
-                      acc')))))
-            {:reindexed 0 :skipped 0 :files-reindexed 0}
+                      acc'))))
+            {:reindexed 0 :files-reindexed 0}
             nodes)))
 
 (defn find-blobs
   "Finds blob nodes (have :node/blob-dir) sorted by created-at desc."
   [db {:keys [limit] :or {limit 20}}]
   (let [pull-expr [:db/id :node/content
-                   :node/created-at :node/updated-at :node/blob-dir
-                   {:node/tag-refs [:tag/name]}]
+                   :node/created-at :node/updated-at :node/blob-dir :node/tags]
         results   (d/q '[:find [(pull ?n pull-expr) ...]
                          :in $ pull-expr
                          :where
