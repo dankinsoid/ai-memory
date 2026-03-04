@@ -50,10 +50,15 @@ Hook reminders tell you when to call and which params to include.
 `title` — short session name, 2-5 words. Always English.
 Good: `blob storage architecture`, `fix auth bug`, `prompt rewrite`
 
-`summary` — 1-2 sentences describing what was done and key decisions. Always English. Each call replaces previous, so include full arc.
+`summary` — 1-2 sentences capturing the **essence** of the session: what problem was being solved, what approach was chosen, what key decisions were made. Always English. Each call replaces previous, so include full arc.
+
+No file names, function names, or implementation details in summary — those belong in the compact blob.
+
 Good: `Designed blob storage using Node model with filesystem sections. Chose lazy navigation over pre-indexed TOC.`
 Good: `Full adversarial debate on local vs server architecture. Chose hybrid .edn approach at 72% confidence.`
+Good: `Migrated tag system from Datomic refs to strings, removing tag hierarchy. Production migration pending.`
 Bad: `blob storage architecture` (too short, use title for this)
+Bad: `Replaced :node/tag-refs with :node/tags across 17 files. Deleted tag/resolve.clj, removed fn/inc-tag-count.` (technical details, no essence)
 
 `tags` — topic tags for the session (e.g. `["refactoring", "architecture"]`). Merged with automatic `session` tag. Omit if nothing notable.
 
