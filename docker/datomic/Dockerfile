@@ -15,4 +15,4 @@ WORKDIR /opt/datomic
 
 EXPOSE 4334 4335 4336
 
-CMD ["bin/transactor", "config/dev-transactor.properties"]
+CMD ["bin/transactor", "-Xms256m", "config/dev-transactor.properties"]
