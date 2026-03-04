@@ -3,13 +3,32 @@
             [datomic.api :as d]
             [ai-memory.db.core :as db]
             [ai-memory.graph.edge :as edge]
-            [ai-memory.graph.node :as node]
             [ai-memory.graph.write :as write]
+            [ai-memory.store.protocols :as p]
+            [ai-memory.store.datomic-store :as datomic-store]
             [ai-memory.tag.core :as tag]))
 
 ;; --- In-memory Datomic fixture (no TEI/Qdrant) ---
 
 (def ^:dynamic *conn* nil)
+(def ^:dynamic *fact-store* nil)
+
+;; Stub vector store and embedding for tests — no real embedding calls needed
+(def ^:private stub-vector-store
+  (reify p/VectorStore
+    (ensure-store! [_ _dim])
+    (upsert!       [_ _id _vec _payload])
+    (search        [_ _qvec _top-k _opts] [])
+    (delete!       [_ _id])
+    (delete-all!   [_])
+    (store-info    [_] {:reachable? false})))
+
+(def ^:private stub-embedding
+  (reify p/EmbeddingProvider
+    (embed-query    [_ _text] (vec (repeat 1536 0.0)))
+    (embed-document [_ _text] (vec (repeat 1536 0.0)))
+    (embed-batch    [_ texts] (mapv (fn [_] (vec (repeat 1536 0.0))) texts))
+    (embedding-dim  [_] 1536)))
 
 (defn- test-uri []
   (str "datomic:mem://write-test-" (d/squuid)))
@@ -19,7 +38,8 @@
         conn (db/connect uri)]
     (db/ensure-schema conn)
     (write/reset-contexts!)
-    (binding [*conn* conn]
+    (binding [*conn* conn
+              *fact-store* (datomic-store/create conn)]
       (try
         (f)
         (finally
@@ -56,7 +76,7 @@
     (let [a (create-test-node! *conn* "Clojure is a Lisp")
           b (create-test-node! *conn* "Clojure runs on JVM")
           c (create-test-node! *conn* "Clojure has immutable data")]
-      (#'write/create-batch-edges *conn* [a b c])
+      (#'write/create-batch-edges *fact-store* [a b c])
       (let [edges (all-edges *conn*)]
         (is (= 6 (count edges)))
         (is (some? (edges-between *conn* a b)))
@@ -69,7 +89,7 @@
 (deftest batch-edges-single-node-test
   (testing "single node creates no edges"
     (let [a (create-test-node! *conn* "Solo node")]
-      (#'write/create-batch-edges *conn* [a])
+      (#'write/create-batch-edges *fact-store* [a])
       (is (= 0 (count (all-edges *conn*)))))))
 
 (deftest context-edges-test
@@ -79,7 +99,7 @@
           c (create-test-node! *conn* "Third fact")
           entries [[a] [b]]
           opts {:association-factor 0.7 :min-association-weight 0.05}
-          cnt (#'write/create-context-edges *conn* entries 2 [c] opts)]
+          cnt (#'write/create-context-edges *fact-store* entries 2 [c] opts)]
       (is (= 2 (:edges cnt)))
       (is (some? (edges-between *conn* c b)))
       (is (some? (edges-between *conn* c a)))
@@ -92,7 +112,7 @@
           c    (create-test-node! *conn* "New fact")
           entries [[a] [] [] [] []]
           opts {:association-factor 0.7 :min-association-weight 0.05}]
-      (#'write/create-context-edges *conn* entries 5 [c] opts)
+      (#'write/create-context-edges *fact-store* entries 5 [c] opts)
       (let [db       (d/db *conn*)
             edge-id  (edge/find-edge-between db c a)
             edge-ent (d/pull db [:edge/weight] [:edge/id edge-id])]
@@ -106,7 +126,7 @@
           c (create-test-node! *conn* "Recent fact")
           entries (vec (cons [a] (repeat 19 [])))
           opts {:association-factor 0.7 :min-association-weight 0.05}]
-      (#'write/create-context-edges *conn* entries 20 [c] opts)
+      (#'write/create-context-edges *fact-store* entries 20 [c] opts)
       (is (= 0 (count (all-edges *conn*)))))))
 
 (deftest different-contexts-no-edges-test
@@ -114,7 +134,7 @@
     (let [_a (create-test-node! *conn* "Context A fact")
           b  (create-test-node! *conn* "Context B fact")
           opts {:association-factor 0.7 :min-association-weight 0.05}]
-      (#'write/create-context-edges *conn* [] 0 [b] opts)
+      (#'write/create-context-edges *fact-store* [] 0 [b] opts)
       (is (= 0 (count (all-edges *conn*)))))))
 
 (deftest edge-dedup-strengthens-test
@@ -137,7 +157,7 @@
       (let [ctx       (#'write/get-context "test-ctx")
             entries   (:entries ctx)
             opts      {:association-factor 0.7 :min-association-weight 0.05}
-            cnt       (#'write/create-context-edges *conn* entries 1 [b] opts)]
+            cnt       (#'write/create-context-edges *fact-store* entries 1 [b] opts)]
         (is (= 1 (:edges cnt)))
         (is (some? (edges-between *conn* b a)))
         (is (nil? (edges-between *conn* a b)))))))
@@ -165,7 +185,7 @@
           c    (create-test-node! *conn* "New fact")
           _    (set-tick! *conn* 10)
           opts {:association-factor 0.7 :min-association-weight 0.05}
-          cnt  (#'write/create-global-edges *conn* [c] opts)]
+          cnt  (#'write/create-global-edges *fact-store* [c] opts)]
       ;; c→a (Δ=2, w=0.49) and c→b (Δ=1, w=0.7)
       (is (= 2 (:edges cnt)))
       (is (some? (edges-between *conn* c a)))
@@ -181,7 +201,7 @@
           c    (create-test-node! *conn* "New fact")
           _    (set-tick! *conn* 10)
           opts {:association-factor 0.7 :min-association-weight 0.05}]
-      (#'write/create-global-edges *conn* [c] opts)
+      (#'write/create-global-edges *fact-store* [c] opts)
       (let [db      (d/db *conn*)
             edge-ca (d/pull db [:edge/weight] [:edge/id (edges-between *conn* c a)])
             edge-cb (d/pull db [:edge/weight] [:edge/id (edges-between *conn* c b)])]
@@ -199,7 +219,7 @@
           c    (create-test-node! *conn* "New fact")
           _    (set-tick! *conn* 10)
           opts {:association-factor 0.7 :min-association-weight 0.05}
-          cnt  (#'write/create-global-edges *conn* [c] opts)]
+          cnt  (#'write/create-global-edges *fact-store* [c] opts)]
       ;; Δ=10, 0.7^10 ≈ 0.028 < 0.05 → no edge
       (is (= 0 (:edges cnt)))
       (is (nil? (edges-between *conn* c old))))))
@@ -211,7 +231,7 @@
           _    (set-tick! *conn* 10)
           opts {:association-factor 0.7 :min-association-weight 0.05}]
       ;; c is in node-ids AND in recent (cycle=10 >= min-tick)
-      (#'write/create-global-edges *conn* [c] opts)
+      (#'write/create-global-edges *fact-store* [c] opts)
       ;; should only have c→a, not c→c
       (is (some? (edges-between *conn* c a)))
       (is (nil? (edges-between *conn* c c))))))
@@ -233,29 +253,31 @@
       (d/resolve-tempid (:db-after tx) (:tempids tx) tempid))))
 
 (deftest entity-find-by-content-test
-  (testing "find-entity-by-content returns entity by exact match"
+  (testing "find-node-by-content returns entity by exact match"
     (let [eid (create-entity-node! *conn* "user" 0)
-          db  (d/db *conn*)]
-      (is (= eid (:db/id (node/find-entity-by-content db "user"))))
-      (is (nil? (node/find-entity-by-content db "User")))
-      (is (nil? (node/find-entity-by-content db "user preferences"))))))
+          fs  *fact-store*]
+      (is (= eid (:db/id (p/find-node-by-content fs "user"))))
+      (is (nil? (p/find-node-by-content fs "User")))
+      (is (nil? (p/find-node-by-content fs "user preferences"))))))
 
 (deftest entity-dedup-exact-match-test
   (testing "entity nodes dedup via exact content match, not vector search"
-    (let [eid (create-entity-node! *conn* "Clojure" 1)
-          db  (d/db *conn*)
+    (let [eid       (create-entity-node! *conn* "Clojure" 1)
           node-data {:content "Clojure" :tags ["entity"]}
-          opts {:dedup-threshold 0.85 :reinforcement-delta 0.2}
-          result (#'write/find-duplicate-node db {} "Clojure" node-data opts)]
+          opts      {:dedup-threshold 0.85 :reinforcement-factor 0.5}
+          result    (#'write/find-duplicate-node
+                      *fact-store* stub-vector-store stub-embedding
+                      "Clojure" node-data opts)]
       (is (some? result))
       (is (= eid (:db/id result))))))
 
 (deftest entity-not-found-creates-new-test
   (testing "entity with no match creates new node"
-    (let [db        (d/db *conn*)
-          node-data {:content "new-entity" :tags ["entity"]}
-          opts      {:dedup-threshold 0.85 :reinforcement-delta 0.2}
-          result    (#'write/find-duplicate-node db {} "new-entity" node-data opts)]
+    (let [node-data {:content "new-entity" :tags ["entity"]}
+          opts      {:dedup-threshold 0.85 :reinforcement-factor 0.5}
+          result    (#'write/find-duplicate-node
+                      *fact-store* stub-vector-store stub-embedding
+                      "new-entity" node-data opts)]
       (is (nil? result)))))
 
 (deftest entity-hub-via-batch-edges-test
@@ -263,10 +285,10 @@
     (let [;; First write: entity "user" + fact, linked by batch edges
           e1 (create-entity-node! *conn* "user" 1)
           f1 (create-test-node! *conn* "user prefers functional style" 1)
-          _ (#'write/create-batch-edges *conn* [e1 f1])
+          _ (#'write/create-batch-edges *fact-store* [e1 f1])
           ;; Second write: same entity (reused via dedup) + new fact
           f2 (create-test-node! *conn* "user is 31 years old" 2)
-          _ (#'write/create-batch-edges *conn* [e1 f2])]
+          _ (#'write/create-batch-edges *fact-store* [e1 f2])]
       ;; e1 is hub: connected to both facts
       (is (some? (edges-between *conn* e1 f1)))
       (is (some? (edges-between *conn* f1 e1)))

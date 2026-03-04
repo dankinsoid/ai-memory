@@ -60,41 +60,41 @@
                :headers {"Content-Type" "application/json"}
                :body    "{\"error\":\"Unauthorized\"}"})))))))
 
-(defn app [conn cfg]
+(defn app [conn cfg stores]
   (let [handler (ring/ring-handler
                   (ring/router
                     [["/" {:get (fn [_] (-> (resp/resource-response "public/index.html")
                                          (resp/content-type "text/html")))}]
                      ["/api" {:middleware [wrap-normalize-keys]}
-                      ["/health" {:get (fn [req] (api/get-health cfg req))}]
-                      ["/diagnostics" {:get (fn [req] (api/get-diagnostics cfg req))}]
-                      ["/stats" {:get (fn [req] (api/get-stats conn req))}]
-                      ["/graph" {:get (fn [req] (api/get-graph conn req))}]
-                      ["/graph/top-nodes" {:get (fn [req] (api/get-top-nodes conn cfg req))}]
-                      ["/graph/neighborhood" {:get (fn [req] (api/get-graph-neighborhood conn cfg req))}]
-                      ["/facts/:id" {:get    (fn [req] (api/get-fact-detail conn cfg req))
-                                     :patch  (fn [req] (api/update-fact conn cfg req))
-                                     :delete (fn [req] (api/delete-fact conn cfg req))}]
-                      ["/admin/reset" {:post (fn [req] (api/reset-db conn cfg req))}]
-                      ["/admin/reindex" {:post (fn [req] (api/reindex-vectors conn cfg req))}]
-                      ["/admin/promote-eternal" {:post (fn [req] (api/promote-eternal conn cfg req))}]
-                      ["/nodes" {:get  (fn [req] (api/list-nodes conn req))
-                                 :post (fn [req] (api/create-node conn cfg req))}]
-                      ["/remember" {:post (fn [req] (api/remember conn cfg req))}]
-                      ["/reinforce" {:post (fn [req] (api/reinforce conn cfg req))}]
-                      ["/recall" {:post (fn [req] (api/recall conn cfg req))}]
-                      ["/tags" {:get  (fn [req] (api/browse-tags conn cfg req))}]
-                      ["/tags/count" {:post (fn [req] (api/count-facts conn cfg req))}]
-                      ["/tags/facts" {:post (fn [req] (api/get-facts conn cfg req))}]
-                      ["/blobs" {:get (fn [req] (api/list-blobs conn cfg req))}]
-                      ["/blobs/read" {:post (fn [req] (api/read-blob conn cfg req))}]
-                      ["/blobs/exec" {:post (fn [req] (api/exec-blob conn cfg req))}]
-                      ["/blobs/file" {:post (fn [req] (api/store-file conn cfg req))}]
-                      ["/session/sync" {:post (fn [req] (api/session-sync conn cfg req))}]
-                      ["/session/continue" {:post (fn [req] (api/session-continue conn cfg req))}]
-                      ["/session/chain" {:post (fn [req] (api/session-chain conn cfg req))}]
-                      ["/session" {:post (fn [req] (api/session-update conn cfg req))}]
-                      ["/project" {:post (fn [req] (api/project-update conn cfg req))}]]
+                      ["/health" {:get (fn [req] (api/get-health stores req))}]
+                      ["/diagnostics" {:get (fn [req] (api/get-diagnostics stores req))}]
+                      ["/stats" {:get (fn [req] (api/get-stats conn stores req))}]
+                      ["/graph" {:get (fn [req] (api/get-graph conn stores req))}]
+                      ["/graph/top-nodes" {:get (fn [req] (api/get-top-nodes stores req))}]
+                      ["/graph/neighborhood" {:get (fn [req] (api/get-graph-neighborhood conn stores req))}]
+                      ["/facts/:id" {:get    (fn [req] (api/get-fact-detail stores req))
+                                     :patch  (fn [req] (api/update-fact stores req))
+                                     :delete (fn [req] (api/delete-fact stores cfg req))}]
+                      ["/admin/reset" {:post (fn [req] (api/reset-db stores cfg req))}]
+                      ["/admin/reindex" {:post (fn [req] (api/reindex-vectors stores cfg req))}]
+                      ["/admin/promote-eternal" {:post (fn [req] (api/promote-eternal stores req))}]
+                      ["/nodes" {:get  (fn [req] (api/list-nodes req))
+                                 :post (fn [req] (api/create-node stores req))}]
+                      ["/remember" {:post (fn [req] (api/remember stores cfg req))}]
+                      ["/reinforce" {:post (fn [req] (api/reinforce stores cfg req))}]
+                      ["/recall" {:post (fn [req] (api/recall stores req))}]
+                      ["/tags" {:get  (fn [req] (api/browse-tags stores req))}]
+                      ["/tags/count" {:post (fn [req] (api/count-facts stores cfg req))}]
+                      ["/tags/facts" {:post (fn [req] (api/get-facts stores cfg req))}]
+                      ["/blobs" {:get (fn [req] (api/list-blobs stores req))}]
+                      ["/blobs/read" {:post (fn [req] (api/read-blob cfg req))}]
+                      ["/blobs/exec" {:post (fn [req] (api/exec-blob cfg req))}]
+                      ["/blobs/file" {:post (fn [req] (api/store-file stores cfg req))}]
+                      ["/session/sync" {:post (fn [req] (api/session-sync conn stores cfg req))}]
+                      ["/session/continue" {:post (fn [req] (api/session-continue conn stores cfg req))}]
+                      ["/session/chain" {:post (fn [req] (api/session-chain conn stores req))}]
+                      ["/session" {:post (fn [req] (api/session-update conn stores cfg req))}]
+                      ["/project" {:post (fn [req] (api/project-update stores cfg req))}]]
                      ["/mcp" {:handler (mcp/streamable-handler
                                           {:base-url  (str "http://localhost:" (:port cfg))
                                            :api-token (:api-token cfg)})}]]
@@ -108,5 +108,5 @@
       (:metrics cfg)    (ring-collector/wrap-metrics (:metrics cfg) {:path "/metrics"})
       (:api-token cfg)  (wrap-bearer-auth (:api-token cfg)))))
 
-(defn start [{:keys [port conn cfg]}]
-  (jetty/run-jetty (app conn cfg) {:port port :join? false}))
+(defn start [{:keys [port conn cfg stores]}]
+  (jetty/run-jetty (app conn cfg stores) {:port port :join? false}))

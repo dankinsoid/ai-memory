@@ -1,6 +1,6 @@
 (ns ai-memory.scheduler
   "Periodic background tasks. Uses JDK ScheduledExecutorService."
-  (:require [ai-memory.tag.query :as tag-query]
+  (:require [ai-memory.store.protocols :as p]
             [clojure.tools.logging :as log])
   (:import [java.util.concurrent Executors ScheduledExecutorService TimeUnit]
            [java.time LocalTime Duration]))
@@ -17,14 +17,16 @@
 
 (defn start
   "Starts scheduler. Returns the ScheduledExecutorService (for shutdown)."
-  [conn]
+  [fact-store]
   (let [^ScheduledExecutorService executor (Executors/newSingleThreadScheduledExecutor)]
     ;; Reconcile tag counts daily at 3 AM
     (.scheduleAtFixedRate executor
       (fn []
         (try
-          (let [result (tag-query/reconcile-counts! conn)]
-            (log/info "Tag count reconciliation:" result))
+          (let [start (System/nanoTime)]
+            (p/reconcile-tag-counts! fact-store)
+            (log/info "Tag count reconciliation completed in"
+                      (/ (double (- (System/nanoTime) start)) 1e6) "ms"))
           (catch Exception e
             (log/error e "Tag count reconciliation failed"))))
       (ms-until-hour 3)
