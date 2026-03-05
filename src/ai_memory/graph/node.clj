@@ -88,10 +88,6 @@
 (def ^:private min-score 0.2)
 (def ^:private min-file-score 0.15)
 
-(def ^:private search-pull-spec
-  [:db/id :node/content :node/weight :node/cycle :node/blob-dir :node/updated-at
-   {:node/tag-refs [:tag/name]}])
-
 (defn search
   "Finds nodes semantically similar to `text`.
    Searches both fact vectors (long IDs) and blob file vectors (UUID IDs).
