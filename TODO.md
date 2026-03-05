@@ -7,24 +7,21 @@
 - [x] Datomic schema + seed tags (`schema.edn`, `seed-tags.edn`)
 - [x] Prometheus metrics (`metrics.clj`)
 
-## Tag Taxonomy (ADR-009 — primary retrieval)
-- [x] Tag CRUD: create, ensure, find by path/name (`tag/core.clj`)
-- [x] Taxonomy navigation: root, children, subtree, full tree
-- [x] Tag-based queries: by-tag, intersection, union, subtree (`tag/query.clj`)
-- [x] Browse with node counts
-- [x] Tag resolution: string → ref, auto-create missing (`tag/resolve.clj`)
+## Flat Tag Set (ADR-009 — primary retrieval)
+- [x] Tag CRUD: create, ensure (`tag/core.clj`)
+- [x] Tag-based queries: by-tag, intersection, union, date range (`tag/query.clj`)
+- [x] Browse flat tag list with materialized counts
+- [x] Tag auto-create on write path (`tag/core.clj` — `ensure-tag!` called inline)
+- [x] `:node/tags` flat string set on nodes (`db.type/string, cardinality/many, indexed`)
 - [x] Tests (20 tests)
 
 ### Agent Retrieval Flow (doc/agent-tag-flow.md)
-- [x] `:tag/node-count` materialized counter + atomic tx function (`schema.edn`, `db/core.clj`)
-- [x] Count maintenance in write pipeline (`graph/node.clj` — create + update)
-- [x] `taxonomy [db path max-depth]` — depth-limited tree with counts per node
+- [x] `:tag/node-count` materialized counter recomputed at startup (`db/core.clj` — `recompute-tag-counts!`)
 - [x] `count-by-tag-sets [db tag-sets]` — `[[tags] ...] → [{:tags :count} ...]` without pulling nodes
 - [x] `fetch-by-tag-sets [db tag-sets opts]` — batch `by-tags` with `:limit`
 - [x] `browse` uses materialized counts (O(1) per tag)
 - [x] Read query metrics: `read-duration`, `read-total` (`metrics.clj`)
-- [x] MCP handlers: `handle-browse-tags`, `handle-count-facts`, `handle-get-facts`
-- [x] REST routes: `POST /api/tags/count`, `POST /api/tags/facts`, `GET /api/tags?depth=N`
+- [x] MCP handlers: `handle-explore-tags`, `handle-get-facts`
 - [x] `reconcile-counts!` — recomputes all counts from actual data (`tag/query.clj`)
 - [x] Scheduler: daily reconciliation at 03:00 (`scheduler.clj`)
 - [x] Tests (16 tests, 36 assertions)
@@ -44,6 +41,7 @@
 - [x] `memory_reinforce` MCP tool — explicit fact weight feedback (-1 to 1)
 - [ ] Edge reinforcement via `memory_reinforce` — strengthen/weaken associations when fact reached via edges
 - [ ] Activate graph-based retrieval once enough edge data accumulates
+- [ ] Weight/decay strategy: нет выработанной стратегии когда и как агент должен reinforcement-ить факты, какой обучающий сигнал реально полезен, стоит ли показывать веса агенту (сейчас убраны из session-start)
 
 ### Graph API & MCP
 - [ ] API endpoint: get related facts for a given fact (follow edges, return neighbors with weights)
@@ -89,7 +87,7 @@
 ## Blob Storage (ADR-010)
 - [x] Blob = Node model: `:node.type/conversation`, `:node.type/document` with `:node/blob-dir`
 - [x] Schema: `:node/created-at`, `:node/updated-at` (indexed), `:node/blob-dir`, `:node/sources` (many)
-- [x] Auto-timestamps: `create-node` sets both, `reinforce-node`/`update-tag-refs` bump `updated-at`
+- [x] Auto-timestamps: `create-node` sets both, `reinforce-node`/`update-tags` bump `updated-at`
 - [x] Directory structure: `data/blobs/{YYYY-MM-DD}_{slug}/meta.edn` + section files
 - [x] Filesystem ops: write/read meta.edn and sections (`blob/store.clj`)
 - [x] Lazy access: meta first, section by index
@@ -101,7 +99,9 @@
 - [x] `memory_read_blob` MCP tool — execute bash in blob dir via ProcessBuilder
 - [x] Removed SSHFS preflight hook and direct blob path exposure
 
-## Project Identity
+## Git Integration
+- [x] Auto-capture git context (branch, start-commit, end-commit, remote) in session blob meta.edn (`web/api.clj`)
+- [ ] Show git branch in session context (MEMORY.md Recent Sessions section)
 - [ ] Stable project ID via git root commit hash (`git rev-list --max-parents=0 HEAD`)
 - [ ] Fallback to folder name when no git
 - [ ] Handle project renames: map old folder name → stable ID

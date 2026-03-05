@@ -5,11 +5,11 @@
             [clojure.tools.logging :as log]))
 
 (def ^:private collection-name "nodes")
-(def ^:private vector-size 1536) ;; OpenAI text-embedding-3-small
 
 (defn ensure-collection!
-  "Creates the collection if it doesn't exist."
-  [base-url]
+  "Creates the collection if it doesn't exist.
+   `dim` — embedding dimension (e.g. 1536 for OpenAI text-embedding-3-small)."
+  [base-url dim]
   (try
     (http/get (str base-url "/collections/" collection-name))
     (log/info "Qdrant collection" collection-name "already exists")
@@ -17,9 +17,9 @@
       (http/put (str base-url "/collections/" collection-name)
                 {:content-type :json
                  :body (json/generate-string
-                        {:vectors {:size     vector-size
+                        {:vectors {:size     dim
                                    :distance "Cosine"}})})
-      (log/info "Created Qdrant collection" collection-name))))
+      (log/info "Created Qdrant collection" collection-name "with dim" dim))))
 
 (defn upsert-point!
   "Upserts a single node vector. `point-id` — Datomic entity ID (long) or UUID string.
@@ -60,13 +60,14 @@
                      {:points [point-id]})}))
 
 (defn delete-all-points!
-  "Drops and recreates the collection — wipes all vectors."
-  [base-url]
+  "Drops and recreates the collection — wipes all vectors.
+   `dim` — embedding dimension used to recreate the collection."
+  [base-url dim]
   (try
     (http/delete (str base-url "/collections/" collection-name)
                  {:content-type :json})
     (catch Exception _))
-  (ensure-collection! base-url))
+  (ensure-collection! base-url dim))
 
 (defn collection-info
   "Returns Qdrant collection stats: reachable?, status, vector-count, points-count.

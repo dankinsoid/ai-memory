@@ -62,10 +62,11 @@ memory_session({
 updated load/save skills
 ```
 
-`summary` — 1-2 sentences describing what was done and key decisions:
+`summary` — 1-2 sentences capturing the **essence**: what problem, what approach, what decisions. No file names, function names, or counts — those go in compact.
 ```
 Reworked /load and /save skills to use new blob storage. Added compact summary generation with vectorization.
 ```
+Bad: `Updated SKILL.md, save.bb, session-start.bb; removed 3 functions, added memory_session call` (implementation noise, not essence)
 
 ## 3. Confirm to user
 

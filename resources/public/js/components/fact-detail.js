@@ -126,7 +126,7 @@ export function FactDetail() {
   }
 
   const content = fact?.['node/content'] || fact?.content || ''
-  const tags = fact?.['node/tag-refs'] || fact?.tags || []
+  const tags = fact?.['node/tags'] || fact?.tags || []
   const tagNames = tags.map(t => typeof t === 'string' ? t : (t['tag/name'] || t.name || ''))
 
   return html`

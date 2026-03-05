@@ -85,11 +85,17 @@
 (def tags-data (api-get "/api/tags" {"limit" "50"}))
 
 (def fact-filters
-  (cond-> [{:tags ["pref"]}
-           {:tags ["universal"]}
-           {:tags ["session"] :sort_by "date" :limit 5}]
-    project-name (conj {:tags ["project" project-name]})
-    project-name (conj {:tags [project-name] :exclude_tags ["session"]})))
+  (if project-name
+    (let [ptag (str "project/" project-name)]
+      [{:tags ["pref"]}
+       {:tags ["universal"]}
+       {:tags ["project" ptag]}
+       {:tags [ptag] :exclude_tags ["session"]}
+       {:tags ["session" ptag] :sort_by "date" :limit 3}
+       {:tags ["session"] :exclude_tags [ptag] :sort_by "date" :limit 4}])
+    [{:tags ["pref"]}
+     {:tags ["universal"]}
+     {:tags ["session"] :sort_by "date" :limit 5}]))
 
 (def facts-data (api-post "/api/tags/facts" {:filters fact-filters}))
 
@@ -98,13 +104,11 @@
 (defn- format-fact [f]
   (let [content  (get f (keyword "node/content"))
         blob-dir (get f (keyword "node/blob-dir"))
-        tags     (->> (get f (keyword "node/tag-refs"))
-                      (map #(get % (keyword "tag/name"))))]
+        tags     (get f (keyword "node/tags"))]
     (str "- " content
          (when blob-dir (str " [blob: " blob-dir "]"))
          (when (seq tags) (str " {" (str/join ", " tags) "}"))
-         (when-let [ew (get f (keyword "node/effective-weight"))]
-           (str " w:" (format "%.2f" (double ew)))))))
+         )))
 
 (defn format-facts [results filter-pred label]
   (when-let [group (first (filter filter-pred results))]
@@ -113,15 +117,28 @@
         (str "## " label "\n"
              (str/join "\n" (map format-fact facts)))))))
 
+(defn format-session-line [f]
+  (let [content  (get f (keyword "node/content"))
+        blob-dir (get f (keyword "node/blob-dir"))
+        lines    (some-> content (str/split #"\n"))
+        title    (first lines)
+        summary  (second lines)]
+    (str "- " (or title "(no summary)")
+         (when summary (str " — " summary))
+         (when blob-dir (str " [blob: " blob-dir "]")))))
+
 (defn format-project-section [results project-name]
-  (let [summary-facts (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["project" project-name]) results))) [])
-        project-facts (or (:facts (first (filter #(= (get-in % [:filter :tags]) [project-name]) results))) [])
-        summary-ids   (set (map :db/id summary-facts))
-        other-facts   (remove #(summary-ids (:db/id %)) project-facts)
-        all-facts     (concat summary-facts other-facts)]
-    (when (seq all-facts)
+  (let [ptag           (str "project/" project-name)
+        summary-facts  (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["project" ptag]) results))) [])
+        project-facts  (or (:facts (first (filter #(= (get-in % [:filter :tags]) [ptag]) results))) [])
+        project-sessions (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["session" ptag]) results))) [])
+        summary-ids    (set (map :db/id summary-facts))
+        other-facts    (remove #(summary-ids (:db/id %)) project-facts)]
+    (when (or (seq project-sessions) (seq summary-facts) (seq other-facts))
       (str "## Project: " project-name "\n"
-           (str/join "\n" (map format-fact all-facts))))))
+           (when (seq project-sessions)
+             (str (str/join "\n" (map format-session-line project-sessions)) "\n"))
+           (str/join "\n" (map format-fact (concat summary-facts other-facts)))))))
 
 (defn format-tag [t]
   (str (get t (keyword "tag/name"))
@@ -141,20 +158,10 @@
            (when (seq other)
              (str/join ", " (map format-tag other)))))))
 
-(defn format-sessions [facts]
+(defn format-sessions [facts label]
   (when (seq facts)
-    (str "## Recent Sessions\n"
-         (str/join "\n"
-           (map (fn [f]
-                  (let [content  (get f (keyword "node/content"))
-                        blob-dir (get f (keyword "node/blob-dir"))
-                        lines    (some-> content (str/split #"\n"))
-                        title    (first lines)
-                        summary  (second lines)]
-                    (str "- " (or title "(no summary)")
-                         (when summary (str " — " summary))
-                         (when blob-dir (str " [blob: " blob-dir "]")))))
-                facts)))))
+    (str "## " label "\n"
+         (str/join "\n" (map format-session-line facts)))))
 
 (defn format-timestamp []
   (let [now    (java.time.ZonedDateTime/now)
@@ -184,9 +191,15 @@
       sessions-section
       (when-not no-sessions?
         (let [session-group (first (filter
-                                     (fn [r] (= (get-in r [:filter :tags]) ["session"]))
-                                     results))]
-          (format-sessions (:facts session-group))))
+                                     (fn [r] (and (= (get-in r [:filter :tags]) ["session"])
+                                                  (nil? (get-in r [:filter :exclude_tags]))))
+                                     results))
+              cross-project-group (first (filter
+                                           (fn [r] (and (= (get-in r [:filter :tags]) ["session"])
+                                                        (seq (get-in r [:filter :exclude_tags]))))
+                                           results))
+              facts (or (:facts cross-project-group) (:facts session-group))]
+          (format-sessions facts "Other Projects")))
 
       tags-section    (format-tags tags-data)
       timestamp       (format-timestamp)

@@ -71,7 +71,7 @@
                                :session_id      {:type        "string"
                                                  :description "Session ID for context-based linking across calls"}
                                :project         {:type        "string"
-                                                 :description "Project name. Tags facts with this."}}}}
+                                                 :description "Project name. Adds project/<name> tag to each node."}}}}
 
    {:name        "memory_store_file"
     :description "Store a file (code, document, image) as a blob. Provide content directly or a file path."
@@ -113,7 +113,7 @@
                                :project    {:type "string" :description "Project name"}
                                :title      {:type "string" :description "Short session title, 2-5 words (e.g. 'blob storage architecture', 'fix auth bug')"}
                                :summary    {:type "string" :description "Session arc summary, 1-2 sentences describing what was done and key decisions (e.g. 'Designed blob storage using Node model with filesystem sections. Chose lazy navigation over pre-indexed TOC.')"}
-                               :tags       {:type "array" :items {:type "string"} :description "Topic tags for this session (e.g. [\"architecture\", \"refactoring\"]). Merged with automatic 'session' and project tags."}
+                               :tags       {:type "array" :items {:type "string"} :description "Topic tags for this session (e.g. [\"architecture\", \"refactoring\"]). Merged with automatic 'session' tag."}
                                :chunk_title {:type "string" :description "Short title for current conversation chunk (e.g. 'designed-blob-architecture'). Renames _current.md to a numbered file."}
                                :compact    {:type "string" :description "Detailed multi-paragraph session summary for /save. Stored as compact.md in the blob."}}
                   :required   ["session_id"]}}
@@ -152,29 +152,23 @@
         content  (:node/content fact)
         sources  (:node/sources fact)
         blob-dir (:node/blob-dir fact)
-        ew       (:node/effective-weight fact)
         refs     (cond-> []
                    (seq sources) (into (map #(str "src: " %) sources))
                    blob-dir      (conj (str "blob: " blob-dir)))]
     (str "- "
          (when eid (str "[" eid "] "))
          content
-         (when (seq refs) (str " [" (str/join ", " refs) "]"))
-         (when ew (str " w:" (format "%.2f" (double ew)))))))
+         (when (seq refs) (str " [" (str/join ", " refs) "]")))))
 
 (defn- render-scored-fact [fact]
   (let [eid     (:db/id fact)
         score   (:search/score fact)
-        ew      (:node/effective-weight fact)
         content (:node/content fact)
-        tags    (->> (:node/tag-refs fact)
-                     (map :tag/name)
-                     (str/join ", "))]
+        tags    (str/join ", " (:node/tags fact))]
     (str (format "%.2f" (double score))
          (when eid (str " [" eid "]"))
          " " content
-         (when (seq tags) (str " [" tags "]"))
-         (when ew (str " w:" (format "%.2f" (double ew)))))))
+         (when (seq tags) (str " [" tags "]")))))
 
 (defn- filter-header [{:keys [id tags query]}]
   (let [parts (cond-> []
