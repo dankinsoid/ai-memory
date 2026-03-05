@@ -42,7 +42,7 @@
                                                                      :tags  {:type "array" :items {:type "string"}
                                                                              :description "Tag names — facts must have ALL (intersection)"}
                                                                      :query {:type "string"
-                                                                             :description "Semantic vector search query. Prefer tags/sort_by/since for structured lookups."}
+                                                                             :description "Semantic vector search query. Always use English. Prefer tags/sort_by/since for structured lookups."}
                                                                      :since {:type "string"
                                                                              :description "Date range start (ISO date, datetime, or relative: 7d, 2w, 1m, today, yesterday)"}
                                                                      :until {:type "string"

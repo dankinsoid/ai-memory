@@ -85,5 +85,5 @@ Retrieve before: design decisions, unfamiliar areas, starting a significant subt
 2. `memory_get_facts` if counts manageable
 
 Supports semantic search via `query` param — use when you know *what* but not *how it's tagged*.
-Combine `query` with `tags` to narrow scope.
+Always write `query` in English. Combine `query` with `tags` to narrow scope.
 <!-- ai-memory:end -->

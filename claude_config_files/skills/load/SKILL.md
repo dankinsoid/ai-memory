@@ -16,6 +16,7 @@ Parse ARGUMENTS to determine which session to load:
    The current session ID is in SessionStart context. Determine the project name from the git repo name. The script picks up prev-session cache files for that project only, creates continuation edges, then traverses the chain.
 2. **Free text** → translate the user's request into `memory_get_facts` filter params.
    Always include `tags: ["session"]` (+ project tag if known). Use `query` only when the user describes session content — for recency or time ranges, structured params suffice.
+   Always write `query` in English regardless of what language the user used.
    Pick best match from results (skip current session), extract its `[blob: dir-name]`.
 3. **Blob dir** (matches `*_session-*`) → use directly
 
