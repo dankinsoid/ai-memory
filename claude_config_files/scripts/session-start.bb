@@ -5,14 +5,16 @@
 ;; Calls ai-memory HTTP API and outputs formatted context to stdout,
 ;; which becomes a system-reminder visible to the agent.
 ;;
-;; Loads: preferences, universal facts, project facts, tags overview,
-;; recent sessions, timestamp. Lightweight — /load for deep recovery.
+;; Loads facts in priority order per scope (universal, project):
+;;   1. critical-rule  2. rule  3. preference  4. remaining
+;; Cascading exclude_tags ensure server-side disjointness.
+;; Global dedup by :db/id across scopes.
 ;;
 ;; Env-var toggles (set any to disable):
 ;;   AI_MEMORY_DISABLED=1     — master switch (all hooks)
 ;;   AI_MEMORY_NO_READ=1      — don't inject any context
 ;;   AI_MEMORY_NO_SESSIONS=1  — skip recent sessions section
-;;   AI_MEMORY_NO_FACTS=1     — skip facts sections (pref/universal/project)
+;;   AI_MEMORY_NO_FACTS=1     — skip facts sections
 
 (require '[cheshire.core :as json]
          '[babashka.http-client :as http]
@@ -68,11 +70,9 @@
 (def input (json/parse-string (slurp *in*) true))
 (def cwd (:cwd input))
 
-;; Skip on resume — context already in window
 (when (= (:source input) "resume")
   (System/exit 0))
 
-;; Skip if reads are disabled globally
 (when (or (System/getenv "AI_MEMORY_DISABLED") (System/getenv "AI_MEMORY_NO_READ"))
   (System/exit 0))
 
@@ -80,24 +80,87 @@
 
 (def project-name (derive-project cwd))
 
-;; --- Fetch data from API ---
+;; --- Priority tiers & budgets ---
+
+(def priority-tiers ["critical-rule" "rule" "preference"])
+(def tier-limit 10)
+(def universal-budget 20)
+(def project-budget 30)
+
+;; --- Filter generation ---
+;; Each tier excludes all higher-priority tiers (cascading),
+;; so results are disjoint without client-side dedup within a scope.
+
+(defn scope-filters
+  "Generate priority-tiered filters for a scope.
+   Returns filters for: critical-rule, rule, preference, catch-all."
+  [scope-tag base-excludes budget]
+  (let [tier-filters
+        (loop [tiers priority-tiers, prev-tiers [], acc []]
+          (if (empty? tiers)
+            acc
+            (let [tier     (first tiers)
+                  excludes (into base-excludes prev-tiers)]
+              (recur (rest tiers)
+                     (conj prev-tiers tier)
+                     (conj acc (cond-> {:tags [tier scope-tag] :limit tier-limit}
+                                 (seq excludes) (assoc :exclude_tags (vec excludes))))))))
+        ;; Catch-all: exclude all tiers + base
+        all-excludes (into base-excludes priority-tiers)]
+    (conj tier-filters
+          (cond-> {:tags [scope-tag] :limit budget}
+            (seq all-excludes) (assoc :exclude_tags (vec all-excludes))))))
+
+;; --- Build all filters ---
 
 (def tags-data (api-get "/api/tags" {"limit" "50"}))
 
 (def fact-filters
   (if project-name
     (let [ptag (str "project/" project-name)]
-      [{:tags ["pref"]}
-       {:tags ["universal"]}
-       {:tags ["project" ptag]}
-       {:tags [ptag] :exclude_tags ["session"]}
-       {:tags ["session" ptag] :sort_by "date" :limit 3}
-       {:tags ["session"] :exclude_tags [ptag] :sort_by "date" :limit 4}])
-    [{:tags ["pref"]}
-     {:tags ["universal"]}
-     {:tags ["session"] :sort_by "date" :limit 5}]))
+      (vec (concat
+        ;; Universal scope: no base excludes
+        (scope-filters "universal" [] universal-budget)
+        ;; Project summary
+        [{:tags ["project" ptag]}]
+        ;; Project scope: exclude session + universal
+        (scope-filters ptag ["session" "universal"] project-budget)
+        ;; Sessions
+        [{:tags ["session" ptag] :sort_by "date" :limit 7}])))
+    (vec (concat
+      (scope-filters "universal" [] universal-budget)
+      [{:tags ["session"] :sort_by "date" :limit 7}]))))
 
 (def facts-data (api-post "/api/tags/facts" {:filters fact-filters}))
+
+;; --- Helpers ---
+
+(defn find-result
+  "Find a result group matching a filter spec (tags + exclude_tags)."
+  [results filter-spec]
+  (first (filter #(and (= (get-in % [:filter :tags]) (:tags filter-spec))
+                       (= (get-in % [:filter :exclude_tags]) (:exclude_tags filter-spec)))
+                 results)))
+
+(defn build-scope
+  "Collect facts for a scope in priority order. Dedup by seen-ids, respect budget.
+   Returns {:tier-groups [[tier facts]...], :seen-ids #{...}}."
+  [results scope-tag base-excludes budget seen-ids]
+  (let [filters    (scope-filters scope-tag base-excludes budget)
+        tier-names (conj (vec priority-tiers) nil)
+        pairs      (map vector tier-names (map #(find-result results %) filters))]
+    (loop [ps pairs, seen seen-ids, acc [], left budget]
+      (if (or (empty? ps) (<= left 0))
+        {:tier-groups acc :seen-ids seen}
+        (let [[tier result] (first ps)
+              new (->> (or (:facts result) [])
+                       (remove #(contains? seen (:db/id %)))
+                       (take left)
+                       vec)]
+          (recur (rest ps)
+                 (into seen (map :db/id new))
+                 (if (seq new) (conj acc [tier new]) acc)
+                 (- left (count new))))))))
 
 ;; --- Format output ---
 
@@ -107,15 +170,34 @@
         tags     (get f (keyword "node/tags"))]
     (str "- " content
          (when blob-dir (str " [blob: " blob-dir "]"))
-         (when (seq tags) (str " {" (str/join ", " tags) "}"))
-         )))
+         (when (seq tags) (str " {" (str/join ", " tags) "}")))))
 
-(defn format-facts [results filter-pred label]
-  (when-let [group (first (filter filter-pred results))]
-    (let [facts (:facts group)]
-      (when (seq facts)
-        (str "## " label "\n"
-             (str/join "\n" (map format-fact facts)))))))
+(defn- format-fact-with-tier [tier f]
+  (let [prefix  (case tier
+                  "critical-rule" "[!] "
+                  "rule"          "[rule] "
+                  "preference"    "[pref] "
+                  "")
+        content  (get f (keyword "node/content"))
+        blob-dir (get f (keyword "node/blob-dir"))]
+    (str "- " prefix content
+         (when blob-dir (str " [blob: " blob-dir "]")))))
+
+(defn- format-tier-groups
+  "Format tier-groups into lines. Returns nil if empty."
+  [tier-groups]
+  (let [lines (mapcat (fn [[tier facts]]
+                        (map (partial format-fact-with-tier tier) facts))
+                      tier-groups)]
+    (when (seq lines) (str/join "\n" lines))))
+
+(defn- split-tier-groups
+  "Split tier-groups into {:rules [[tier facts]...], :facts [[nil facts]...]}."
+  [tier-groups]
+  (let [{rules true facts false}
+        (group-by (fn [[tier _]] (some? tier)) tier-groups)]
+    {:rules (vec (or rules []))
+     :facts (vec (or facts []))}))
 
 (defn format-session-line [f]
   (let [content  (get f (keyword "node/content"))
@@ -127,18 +209,10 @@
          (when summary (str " — " summary))
          (when blob-dir (str " [blob: " blob-dir "]")))))
 
-(defn format-project-section [results project-name]
-  (let [ptag           (str "project/" project-name)
-        summary-facts  (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["project" ptag]) results))) [])
-        project-facts  (or (:facts (first (filter #(= (get-in % [:filter :tags]) [ptag]) results))) [])
-        project-sessions (or (:facts (first (filter #(= (get-in % [:filter :tags]) ["session" ptag]) results))) [])
-        summary-ids    (set (map :db/id summary-facts))
-        other-facts    (remove #(summary-ids (:db/id %)) project-facts)]
-    (when (or (seq project-sessions) (seq summary-facts) (seq other-facts))
-      (str "## Project: " project-name "\n"
-           (when (seq project-sessions)
-             (str (str/join "\n" (map format-session-line project-sessions)) "\n"))
-           (str/join "\n" (map format-fact (concat summary-facts other-facts)))))))
+(defn format-sessions [facts label]
+  (when (seq facts)
+    (str "## " label "\n"
+         (str/join "\n" (map format-session-line facts)))))
 
 (defn format-tag [t]
   (str (get t (keyword "tag/name"))
@@ -152,66 +226,90 @@
           other   (->> other
                        (remove #(#{"session" "universal"} (get % (keyword "tag/name"))))
                        (sort-by (keyword "tag/node-count") (fn [a b] (compare (or b 0) (or a 0)))))]
-      (str "## Tags\n"
+      (str "## Top Tags\n"
            (when (seq aspect)
-             (str "Aspect: " (str/join ", " (map format-tag aspect)) "\n"))
+             (str "Fixed: " (str/join ", " (map format-tag aspect)) "\n"))
            (when (seq other)
-             (str/join ", " (map format-tag other)))))))
-
-(defn format-sessions [facts label]
-  (when (seq facts)
-    (str "## " label "\n"
-         (str/join "\n" (map format-session-line facts)))))
+             (str "Dynamic: " (str/join ", " (map format-tag other))))))))
 
 (defn format-timestamp []
-  (let [now    (java.time.ZonedDateTime/now)
-        fmt    (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm (EEE)")]
+  (let [now (java.time.ZonedDateTime/now)
+        fmt (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm (EEE)")]
     (.format now fmt)))
 
 ;; --- Assemble output ---
 
 (let [results (:results facts-data)
+      seen    (atom #{})
 
-      pref-section
-      (when-not no-facts?
-        (format-facts results
-          (fn [r] (= (get-in r [:filter :tags]) ["pref"]))
-          "Preferences"))
-
+      ;; Universal scope
       universal-section
       (when-not no-facts?
-        (format-facts results
-          (fn [r] (= (get-in r [:filter :tags]) ["universal"]))
-          "Universal"))
+        (let [{:keys [tier-groups seen-ids]}
+              (build-scope results "universal" [] universal-budget @seen)
+              {:keys [rules facts]} (split-tier-groups tier-groups)
+              rules-lines (when (seq rules)
+                            (str "### Rules\n" (format-tier-groups rules)))
+              facts-lines (when (seq facts)
+                            (str "### Facts\n" (format-tier-groups facts)))
+              body (str/join "\n" (remove nil? [rules-lines facts-lines]))]
+          (reset! seen seen-ids)
+          (when (seq body)
+            (str "## Universal\n" body))))
 
+      ;; Project scope
       project-section
       (when (and project-name (not no-facts?))
-        (format-project-section results project-name))
+        (let [ptag (str "project/" project-name)
+              ;; Project summary (separate, not budgeted)
+              summary-spec  {:tags ["project" ptag]}
+              summary-facts (or (:facts (find-result results summary-spec)) [])
+              _ (swap! seen into (map :db/id summary-facts))
+              ;; Project sessions
+              session-spec  {:tags ["session" ptag]}
+              session-facts (or (:facts (find-result results session-spec)) [])
+              _ (swap! seen into (map :db/id session-facts))
+              ;; Prioritized project facts
+              {:keys [tier-groups seen-ids]}
+              (build-scope results ptag ["session" "universal"] project-budget @seen)]
+          (reset! seen seen-ids)
+          (let [{:keys [rules facts]} (split-tier-groups tier-groups)
+                session-lines (when (seq session-facts)
+                                (str "### Sessions\n"
+                                     (str/join "\n" (map format-session-line session-facts))))
+                summary-lines (when (seq summary-facts)
+                                (str/join "\n" (map format-fact summary-facts)))
+                rules-lines   (when (seq rules)
+                                (str "### Rules\n" (format-tier-groups rules)))
+                facts-lines   (when (seq facts)
+                                (str "### Facts\n" (format-tier-groups facts)))
+                parts (remove nil?
+                        [session-lines
+                         (when (or summary-lines rules-lines)
+                           (str/join "\n" (remove nil? [summary-lines rules-lines])))
+                         facts-lines])]
+            (when (seq parts)
+              (str "## Project: " project-name "\n"
+                   (str/join "\n" parts))))))
 
-      sessions-section
-      (when-not no-sessions?
-        (let [session-group (first (filter
-                                     (fn [r] (and (= (get-in r [:filter :tags]) ["session"])
-                                                  (nil? (get-in r [:filter :exclude_tags]))))
-                                     results))
-              cross-project-group (first (filter
-                                           (fn [r] (and (= (get-in r [:filter :tags]) ["session"])
-                                                        (seq (get-in r [:filter :exclude_tags]))))
-                                           results))
-              facts (or (:facts cross-project-group) (:facts session-group))]
-          (format-sessions facts "Other Projects")))
+      ;; Other project sessions — disabled for now, revisit later
+      sessions-section nil
+      #_(when-not no-sessions?
+        (let [cross-spec {:tags ["session"] :exclude_tags [(str "project/" project-name)]}
+              no-proj-spec {:tags ["session"]}
+              facts (or (:facts (find-result results cross-spec))
+                        (:facts (find-result results no-proj-spec))
+                        [])
+              deduped (remove #(contains? @seen (:db/id %)) facts)]
+          (swap! seen into (map :db/id deduped))
+          (format-sessions deduped "Other Projects")))
 
-      tags-section    (format-tags tags-data)
-      timestamp       (format-timestamp)
+      tags-section (format-tags tags-data)
+      timestamp    (format-timestamp)
 
-      blob-section
-      "## Blobs\nUse `memory_read_blob` to explore blob contents."
-
-      sections (remove nil? [pref-section
-                             universal-section
+      sections (remove nil? [universal-section
                              project-section
                              sessions-section
-                             blob-section
                              tags-section])]
 
   (when (seq sections)

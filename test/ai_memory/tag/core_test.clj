@@ -46,11 +46,11 @@
   (testing "all-tags returns all created tags (plus seeded aspect tags)"
     (tag/ensure-tag! *conn* "clj")
     (tag/ensure-tag! *conn* "python")
-    (tag/ensure-tag! *conn* "pref")
+    (tag/ensure-tag! *conn* "preference")
     (let [tags     (tag/all-tags (d/db *conn*))
           names    (set (map :tag/name tags))]
       (is (= (+ 3 aspect-tag-count) (count tags)))
-      (is (every? names ["clj" "python" "pref"])))))
+      (is (every? names ["clj" "python" "preference"])))))
 
 (deftest all-tags-only-aspect-test
   (testing "all-tags returns seeded aspect tags when no user tags created"

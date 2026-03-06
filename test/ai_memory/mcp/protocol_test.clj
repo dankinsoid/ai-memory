@@ -131,7 +131,7 @@
   (testing "renders flat tag list as name count lines"
     (let [tags [{:tag/name "clj" :tag/node-count 87}
                 {:tag/name "python" :tag/node-count 31}
-                {:tag/name "pref" :tag/node-count 12}]]
+                {:tag/name "preference" :tag/node-count 12}]]
       (is (= "clj 87\npython 31\npref 12"
              (protocol/render-tag-list tags))))))
 
