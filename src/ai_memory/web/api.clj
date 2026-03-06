@@ -752,10 +752,6 @@
             compact-result
             (when (and compact session-eid)
               (blob-store/write-section! base blob-dir "compact.md" compact)
-              (let [meta (blob-store/read-meta base blob-dir)]
-                (when meta
-                  (blob-store/write-meta! base blob-dir
-                    (assoc meta :compact-summary compact))))
               (node/embed-file! (vector-store stores) (embedding stores)
                                 session-eid blob-dir-short "compact.md" compact)
               "stored")]
