@@ -219,19 +219,28 @@
   (str (get t (keyword "tag/name"))
        " (" (or (get t (keyword "tag/node-count")) 0) ")"))
 
+;; Full list of aspect tags (fixed vocabulary, always shown)
+(def all-aspect-tags
+  ["api" "architecture" "comparison" "data-model" "debugging" "decision"
+   "idea" "insight" "pattern" "performance" "pitfall" "preference"
+   "testing" "tooling" "workflow"])
+
 (defn format-tags [tags]
-  (when (seq tags)
-    (let [{aspect true other false}
-          (group-by #(= "aspect" (get % (keyword "tag/tier"))) tags)
-          aspect  (sort-by (keyword "tag/name") aspect)
-          other   (->> other
-                       (remove #(#{"session" "universal"} (get % (keyword "tag/name"))))
-                       (sort-by (keyword "tag/node-count") (fn [a b] (compare (or b 0) (or a 0)))))]
-      (str "## Top Tags\n"
-           (when (seq aspect)
-             (str "Fixed: " (str/join ", " (map format-tag aspect)) "\n"))
-           (when (seq other)
-             (str "Dynamic: " (str/join ", " (map format-tag other))))))))
+  (let [tag-map    (into {} (map (fn [t] [(get t (keyword "tag/name")) t]) tags))
+        ;; Build full aspect list: use API data if available, else synthesize with count 0
+        aspect     (map (fn [name]
+                          (or (get tag-map name)
+                              {(keyword "tag/name") name (keyword "tag/node-count") 0}))
+                        all-aspect-tags)
+        aspect-set (set all-aspect-tags)
+        other      (->> tags
+                        (remove #(aspect-set (get % (keyword "tag/name"))))
+                        (remove #(#{"session" "universal"} (get % (keyword "tag/name"))))
+                        (sort-by (keyword "tag/node-count") (fn [a b] (compare (or b 0) (or a 0)))))]
+    (str "## Top Tags\n"
+         "Fixed: " (str/join ", " (map format-tag aspect)) "\n"
+         (when (seq other)
+           (str "Dynamic: " (str/join ", " (map format-tag other)))))))
 
 (defn format-timestamp []
   (let [now (java.time.ZonedDateTime/now)
