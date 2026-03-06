@@ -136,10 +136,11 @@
 ;; --- Helpers ---
 
 (defn find-result
-  "Find a result group matching a filter spec (tags + exclude_tags)."
+  "Find a result group matching a filter spec (tags + exclude_tags).
+   API returns :exclude-tags (dashed) while we send :exclude_tags (underscored)."
   [results filter-spec]
   (first (filter #(and (= (get-in % [:filter :tags]) (:tags filter-spec))
-                       (= (get-in % [:filter :exclude_tags]) (:exclude_tags filter-spec)))
+                       (= (get-in % [:filter :exclude-tags]) (:exclude_tags filter-spec)))
                  results)))
 
 (defn build-scope
