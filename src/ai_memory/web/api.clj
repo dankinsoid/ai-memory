@@ -7,7 +7,6 @@
             [ai-memory.decay.core :as decay]
             [ai-memory.blob.store :as blob-store]
             [ai-memory.blob.exec :as blob-exec]
-            [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.tools.logging :as log])
   (:import [java.util Date UUID]
@@ -561,29 +560,6 @@
   (when cwd
     (last (str/split cwd #"/"))))
 
-(defn- sh-out
-  "Runs a shell command, returns trimmed stdout or nil on error/empty."
-  [& args]
-  (try
-    (let [result (apply shell/sh args)]
-      (when (zero? (:exit result))
-        (let [out (str/trim (:out result))]
-          (when (seq out) out))))
-    (catch Exception _ nil)))
-
-(defn- detect-git-context
-  "Detects git branch, commit, and remote from cwd.
-   Returns map with :branch, :end-commit, :remote (all optional) or nil."
-  [cwd]
-  (when cwd
-    (let [branch (sh-out "git" "-C" cwd "rev-parse" "--abbrev-ref" "HEAD")
-          commit (sh-out "git" "-C" cwd "rev-parse" "--short" "HEAD")
-          remote (sh-out "git" "-C" cwd "remote" "get-url" "origin")]
-      (when commit
-        (cond-> {:end-commit commit}
-          (and branch (not= "HEAD" branch)) (assoc :branch branch)
-          remote                             (assoc :remote remote))))))
-
 (defn- merge-git-context
   "Merges new git context with existing, preserving start-commit and remote."
   [existing-git new-git]
@@ -650,7 +626,7 @@
             session-summary (when session-eid
                               (:node/content (p/find-node fs session-eid)))
 
-            git-context (merge-git-context (:git existing-meta) (detect-git-context cwd))
+            git-context (merge-git-context (:git existing-meta) (:git body))
 
             meta-data (merge
                         (or existing-meta

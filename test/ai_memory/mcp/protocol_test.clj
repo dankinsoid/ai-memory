@@ -132,7 +132,7 @@
     (let [tags [{:tag/name "clj" :tag/node-count 87}
                 {:tag/name "python" :tag/node-count 31}
                 {:tag/name "preference" :tag/node-count 12}]]
-      (is (= "clj 87\npython 31\npref 12"
+      (is (= "clj 87\npython 31\npreference 12"
              (protocol/render-tag-list tags))))))
 
 (deftest render-tag-list-empty-test

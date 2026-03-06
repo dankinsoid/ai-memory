@@ -24,16 +24,30 @@
          '[clojure.java.io :as io]
          '[clojure.string :as str])
 
+(defn git-sh [cwd & args]
+  (try
+    (let [result (apply process/sh "git" "-C" cwd args)]
+      (when (zero? (:exit result))
+        (let [out (str/trim (:out result))]
+          (when-not (str/blank? out) out))))
+    (catch Exception _ nil)))
+
 (defn git-project-name [cwd]
   (when cwd
-    (try
-      (let [result (process/sh "git" "-C" cwd "remote" "get-url" "origin")]
-        (when (zero? (:exit result))
-          (-> (str/trim (:out result))
-              (str/replace #"\.git$" "")
-              (str/split #"[/:]")
-              last)))
-      (catch Exception _ nil))))
+    (some-> (git-sh cwd "remote" "get-url" "origin")
+            (str/replace #"\.git$" "")
+            (str/split #"[/:]")
+            last)))
+
+(defn git-context [cwd]
+  (when cwd
+    (let [branch (git-sh cwd "rev-parse" "--abbrev-ref" "HEAD")
+          commit (git-sh cwd "rev-parse" "--short" "HEAD")
+          remote (git-sh cwd "remote" "get-url" "origin")]
+      (when commit
+        (cond-> {:end_commit commit}
+          (and branch (not= "HEAD" branch)) (assoc :branch branch)
+          remote                             (assoc :remote remote))))))
 
 (defn derive-project [cwd]
   (or (git-project-name cwd)
@@ -94,7 +108,8 @@
                           (:last-uuid (read-string (slurp state-file))))
               entries   (parse-jsonl transcript)
               messages  (delta-messages entries last-uuid)
-              project   (derive-project cwd)]
+              project   (derive-project cwd)
+              git       (git-context cwd)]
 
           (when (seq messages)
             (let [response
@@ -106,7 +121,8 @@
                                            (cond-> {:session_id session-id
                                                     :cwd        cwd
                                                     :messages   messages}
-                                             project (assoc :project project)))})
+                                             project (assoc :project project)
+                                             git     (assoc :git git)))})
                     (catch Exception e
                       (binding [*out* *err*]
                         (println "session-sync: POST failed:" (.getMessage e)))
