@@ -1,0 +1,13 @@
+{
+  "name": "ai-memory-marketplace",
+  "owner": {
+    "name": "Danil Kyashkin"
+  },
+  "plugins": [
+    {
+      "name": "ai-memory",
+      "source": "./plugins/ai-memory",
+      "description": "Long-term memory system for AI agents — facts, sessions, blobs via MCP"
+    }
+  ]
+}
