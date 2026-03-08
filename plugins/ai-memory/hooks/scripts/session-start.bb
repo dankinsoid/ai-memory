@@ -82,7 +82,7 @@
 
 ;; --- Priority tiers & budgets ---
 
-(def priority-tiers ["critical-rule" "rule" "preference"])
+(def priority-tiers ["critical-rule" "rule" "preference" "conventions"])
 (def tier-limit 10)
 (def universal-budget 20)
 (def project-budget 30)
@@ -93,7 +93,7 @@
 
 (defn scope-filters
   "Generate priority-tiered filters for a scope.
-   Returns filters for: critical-rule, rule, preference, catch-all."
+   Returns filters for: critical-rule, rule, preference, conventions, catch-all."
   [scope-tag base-excludes budget]
   (let [tier-filters
         (loop [tiers priority-tiers, prev-tiers [], acc []]
@@ -222,7 +222,7 @@
 ;; Full list of aspect tags (fixed vocabulary, always shown)
 (def all-aspect-tags
   ["api" "architecture" "comparison" "data-model" "debugging" "decision"
-   "idea" "insight" "pattern" "performance" "pitfall" "preference"
+   "idea" "insight" "pattern" "performance" "pitfall" "preference" "conventions"
    "testing" "tooling" "workflow"])
 
 (defn format-tags [tags]

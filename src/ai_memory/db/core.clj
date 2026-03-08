@@ -14,7 +14,7 @@
 
 (def aspect-tags
   "Tier 2 (aspect) tags — fixed vocabulary for knowledge categorization."
-  ["architecture" "pattern" "idea" "decision" "preference"
+  ["architecture" "pattern" "idea" "decision" "preference" "conventions"
    "debugging" "pitfall" "api" "data-model" "tooling"
    "workflow" "performance" "comparison" "testing" "insight"])
 

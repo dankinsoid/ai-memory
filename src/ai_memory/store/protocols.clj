@@ -39,6 +39,7 @@
   (find-nodes-by-any-tags [this tags])
   (find-nodes-by-session [this session-id])
   (find-node-by-eid      [this id])
+  (find-node-by-blob-dir [this blob-dir])
   (find-nodes-by-date    [this since until])
   (count-nodes-by-tag-sets [this tag-sets])
   (node-tags             [this eid])

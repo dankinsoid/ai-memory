@@ -101,7 +101,8 @@
           names (set (map :name (get-in resp [:result :tools])))]
       (is (= #{"memory_explore_tags" "memory_get_facts"
                "memory_remember" "memory_reinforce"
-               "memory_store_file" "memory_read_blob"
+               "memory_store_file" "memory_update_fact"
+               "memory_update_blob" "memory_read_blob"
                "memory_session" "memory_project"}
              names)))))
 

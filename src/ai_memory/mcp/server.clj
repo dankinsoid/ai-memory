@@ -57,6 +57,28 @@
             :as              :json
             :throw-exceptions false})))
 
+(defn handle-update-fact [{:keys [base-url api-token]} {:keys [id] :as params}]
+  (let [resp (http/patch (str base-url "/api/facts/" id)
+               {:content-type     :json
+                :body             (json/generate-string (dissoc params :id))
+                :headers          (auth-headers api-token)
+                :as               :json
+                :throw-exceptions false})]
+    (if (<= 200 (:status resp) 299)
+      (:body resp)
+      {:error (str "HTTP " (:status resp))})))
+
+(defn handle-update-blob [{:keys [base-url api-token]} params]
+  (let [resp (http/patch (str base-url "/api/blobs/file")
+               {:content-type     :json
+                :body             (json/generate-string params)
+                :headers          (auth-headers api-token)
+                :as               :json
+                :throw-exceptions false})]
+    (if (<= 200 (:status resp) 299)
+      (:body resp)
+      {:error (str "HTTP " (:status resp))})))
+
 (defn handle-read-blob [{:keys [base-url api-token]} params]
   (api-post base-url "/api/blobs/exec" params api-token))
 

@@ -73,7 +73,7 @@
                       ["/graph/top-nodes" {:get (fn [req] (api/get-top-nodes stores req))}]
                       ["/graph/neighborhood" {:get (fn [req] (api/get-graph-neighborhood conn stores req))}]
                       ["/facts/:id" {:get    (fn [req] (api/get-fact-detail stores req))
-                                     :patch  (fn [req] (api/update-fact stores req))
+                                     :patch  (fn [req] (api/update-fact stores cfg req))
                                      :delete (fn [req] (api/delete-fact stores cfg req))}]
                       ["/admin/reset" {:post (fn [req] (api/reset-db stores cfg req))}]
                       ["/admin/reindex" {:post (fn [req] (api/reindex-vectors stores cfg req))}]
@@ -89,7 +89,8 @@
                       ["/blobs" {:get (fn [req] (api/list-blobs stores req))}]
                       ["/blobs/read" {:post (fn [req] (api/read-blob cfg req))}]
                       ["/blobs/exec" {:post (fn [req] (api/exec-blob cfg req))}]
-                      ["/blobs/file" {:post (fn [req] (api/store-file stores cfg req))}]
+                      ["/blobs/file" {:post  (fn [req] (api/store-file stores cfg req))
+                                     :patch (fn [req] (api/update-blob stores cfg req))}]
                       ["/session/sync" {:post (fn [req] (api/session-sync conn stores cfg req))}]
                       ["/session/continue" {:post (fn [req] (api/session-continue conn stores cfg req))}]
                       ["/session/chain" {:post (fn [req] (api/session-chain conn stores req))}]

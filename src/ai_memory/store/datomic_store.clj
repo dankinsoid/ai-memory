@@ -211,6 +211,12 @@
           node (when eid (d/pull (d/db conn) node-pull-spec eid))]
       (when (:node/content node) node)))
 
+  (find-node-by-blob-dir [_ blob-dir]
+    (let [db  (d/db conn)
+          eid (d/q '[:find ?e . :in $ ?bd :where [?e :node/blob-dir ?bd]]
+                   db blob-dir)]
+      (when eid (d/pull db node-pull-spec eid))))
+
   (find-nodes-by-date [_ since until]
     (let [db        (d/db conn)
           where-cls (cond-> [['?n :node/updated-at '?updated]]

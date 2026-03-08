@@ -201,8 +201,10 @@
           {:status 404 :body {:error "Not found"}})))))
 
 (defn update-fact
-  "PATCH /api/facts/:id — updates content, tags, and/or weight. All fields optional."
-  [stores req]
+  "PATCH /api/facts/:id — updates content, tags, and/or weight.
+   Uses reinforce-node! to bump weight/cycle (same as dedup pipeline).
+   All fields optional."
+  [stores cfg req]
   (let [fs     (fact-store stores)
         vs     (vector-store stores)
         emb    (embedding stores)
@@ -210,19 +212,24 @@
         body   (:body-params req)
         content (:content body)
         tags    (:tags body)
-        weight  (:weight body)]
+        weight  (:weight body)
+        factor  (or (:reinforcement-factor cfg) 0.5)]
     (if-not id
       {:status 400 :body {:error "id required"}}
       (do
-        (when (and content (not (str/blank? content)))
-          (p/update-node-content! fs id content)
-          ;; Re-embed updated content
-          (try
-            (let [vector (p/embed-document emb content)]
-              (p/upsert! vs id vector {}))
-            (catch Exception e
-              (log/warn e "Failed to re-embed updated node" id))))
+        (if (and content (not (str/blank? content)))
+          ;; Content changed — reinforce with new content (bumps weight + cycle)
+          (do
+            (p/reinforce-node! fs id content 1.0 factor)
+            (try
+              (let [vector (p/embed-document emb content)]
+                (p/upsert! vs id vector {}))
+              (catch Exception e
+                (log/warn e "Failed to re-embed updated node" id))))
+          ;; No content change — still reinforce weight to mark as accessed
+          (p/reinforce-weight! fs id 1.0 factor))
         (when (some? tags)
+          (doseq [t tags] (p/ensure-tag! fs t))
           (p/replace-node-tags! fs id tags))
         (when (some? weight)
           (p/set-node-weight! fs id weight))
@@ -469,6 +476,57 @@
         {:status 201
          :body   {:blob-dir blob-dir
                   :blob-id  blob-id}}))))
+
+(defn update-blob
+  "PATCH /api/blobs/file — updates blob content and/or metadata.
+   Reinforce the associated node (same as dedup pipeline)."
+  [stores cfg req]
+  (let [fs      (fact-store stores)
+        vs      (vector-store stores)
+        emb     (embedding stores)
+        body    (:body-params req)
+        base    (:blob-path cfg)
+        blob-dir (:blob-dir body)
+        factor  (or (:reinforcement-factor cfg) 0.5)]
+    (if (str/blank? blob-dir)
+      {:status 400 :body {:error "blob-dir required"}}
+      (let [node (p/find-node-by-blob-dir fs blob-dir)]
+        (if-not node
+          {:status 404 :body {:error (str "No node found for blob-dir: " blob-dir)}}
+          (let [eid     (:db/id node)
+                summary (:summary body)
+                content (:content body)
+                tags    (:tags body)
+                meta    (blob-store/read-meta base blob-dir)]
+            ;; Update blob file on disk if content provided
+            (when (and content (not (str/blank? content)))
+              ;; Overwrite first section (index 0) — the main content file
+              (when-let [section-file (blob-store/read-section-by-index base blob-dir 0)]
+                (blob-store/write-section! base blob-dir
+                  (get-in section-file [:meta :file]) content)))
+            ;; Update meta.edn if summary or tags changed
+            (when (or summary tags)
+              (let [updated-meta (cond-> (or meta {})
+                                   summary (assoc :summary summary)
+                                   tags    (assoc :tags tags))]
+                (blob-store/write-meta! base blob-dir updated-meta)))
+            ;; Reinforce node — bump weight/cycle like dedup
+            (if (and summary (not (str/blank? summary)))
+              (do
+                (p/reinforce-node! fs eid summary 1.0 factor)
+                (try
+                  (let [vector (p/embed-document emb summary)]
+                    (p/upsert! vs eid vector {}))
+                  (catch Exception e
+                    (log/warn e "Failed to re-embed blob node" eid))))
+              (p/reinforce-weight! fs eid 1.0 factor))
+            ;; Update tags on node
+            (when (some? tags)
+              (doseq [t tags] (p/ensure-tag! fs t))
+              (p/replace-node-tags! fs eid tags))
+            {:status 200
+             :body   {:blob-dir blob-dir
+                      :blob-id  eid}}))))))
 
 ;; --- Session sync (called by UserPromptSubmit hook) ---
 

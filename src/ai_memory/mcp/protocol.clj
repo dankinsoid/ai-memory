@@ -85,6 +85,23 @@
                                :path    {:type ["string" "null"] :description "Absolute file path (server reads from disk)"}}
                   :required   ["title" "project" "summary" "tags"]}}
 
+   {:name        "memory_update_fact"
+    :description "Update an existing fact's content and/or tags. Reinforces the fact (bumps weight and access cycle, same as dedup). Use when a fact is outdated or needs correction."
+    :inputSchema {:type       "object"
+                  :properties {:id      {:type "integer" :description "Fact entity ID"}
+                               :content {:type "string"  :description "New fact content (replaces existing)"}
+                               :tags    {:type "array" :items {:type "string"} :description "New tags (replaces existing)"}}
+                  :required   ["id"]}}
+
+   {:name        "memory_update_blob"
+    :description "Update an existing blob's content, summary, and/or tags. Reinforces the associated fact node. Use when stored file content is outdated."
+    :inputSchema {:type       "object"
+                  :properties {:blob_dir {:type "string"  :description "Blob directory name (from [blob: dir-name] in facts)"}
+                               :summary  {:type "string"  :description "New summary (updates fact node content and re-embeds)"}
+                               :tags     {:type "array" :items {:type "string"} :description "New tags (replaces existing)"}
+                               :content  {:type "string"  :description "New file content (overwrites first section on disk)"}}
+                  :required   ["blob_dir"]}}
+
    {:name        "memory_read_blob"
     :description "Execute a bash command inside a blob directory. Use to read blob contents (ls, cat, head, grep). Returns stdout, stderr, and exit code."
     :inputSchema {:type       "object"
@@ -216,6 +233,13 @@
                       :type    (:type params)
                       :content (:content params)
                       :path    (:path params)}
+    :update-fact     {:id      (:id params)
+                      :content (:content params)
+                      :tags    (:tags params)}
+    :update-blob     {:blob-dir (:blob_dir params)
+                      :summary  (:summary params)
+                      :tags     (:tags params)
+                      :content  (:content params)}
     :read-blob       {:blob-dir (:blob_dir params)
                       :command  (:command params)}
     :reinforce       {:reinforcements (mapv (fn [r] {:id (:id r) :score (:score r)})
@@ -241,6 +265,8 @@
     :get-facts          (server/handle-get-facts cfg params)
     :remember           (server/handle-remember cfg params)
     :store-file         (server/handle-store-file cfg params)
+    :update-fact        (server/handle-update-fact cfg params)
+    :update-blob        (server/handle-update-blob cfg params)
     :read-blob          (server/handle-read-blob cfg params)
     :reinforce          (server/handle-reinforce cfg params)
     :session            (server/handle-session cfg params)
@@ -273,6 +299,8 @@
    "memory_get_facts"            :get-facts
    "memory_remember"             :remember
    "memory_store_file"           :store-file
+   "memory_update_fact"          :update-fact
+   "memory_update_blob"          :update-blob
    "memory_read_blob"            :read-blob
    "memory_reinforce"            :reinforce
    "memory_session"              :session
@@ -296,6 +324,10 @@
     :store-file  (if (:error result)
                    (str "error: " (:error result))
                    (str "blob: " (:blob-dir result)))
+    :update-fact (if (:error result) (str "error: " (:error result)) "ok")
+    :update-blob (if (:error result)
+                   (str "error: " (:error result))
+                   (str "updated blob: " (:blob-dir result)))
     :reinforce   (if (:error result) (str "error: " (:error result)) "ok")
     :session     (if (:error result) (str "error: " (:error result)) "ok")
     :project     (if (:error result) (str "error: " (:error result)) "ok")
