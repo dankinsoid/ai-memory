@@ -161,7 +161,7 @@
                         (when project-name (str ", project: \"" project-name "\""))
                         ", chunk_title, title, and summary."))
              (and need-summary? (not need-chunk?) (= prompt-count 1))
-             (conj (str "MANDATORY: After responding, call memory_session with session_id: \"" session-id "\""
+             (conj (str "After responding to this first message, call memory_session once with session_id: \"" session-id "\""
                         (when project-name (str ", project: \"" project-name "\""))
                         ", title, summary, and tags."
                         " Summary must describe the session intent, not repeat the user's message verbatim."))

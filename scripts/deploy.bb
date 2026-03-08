@@ -30,9 +30,11 @@
   (let [start-idx (.indexOf existing-text marker-start)
         end-idx   (.indexOf existing-text marker-end)]
     (if (and (>= start-idx 0) (>= end-idx 0))
-      (str (.substring existing-text 0 start-idx)
-           new-section
-           (.substring existing-text (+ end-idx (count marker-end))))
+      (let [before (.substring existing-text 0 start-idx)
+            after  (str/triml (.substring existing-text (+ end-idx (count marker-end))))]
+        (str before
+             (str/trimr new-section) "\n"
+             (if (seq after) (str "\n" after) "\n")))
       (str existing-text "\n\n" new-section "\n"))))
 
 (println "\n[prompt]")

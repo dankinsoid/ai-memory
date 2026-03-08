@@ -1,89 +1,50 @@
 <!-- ai-memory:start -->
 # External Memory (ai-memory)
 
-This is a supplemental long-term memory layer beyond Claude's built-in memory. It provides cross-project fact storage, semantic search, session blobs, and session syncing via an external MCP server.
-
-Read it before unfamiliar tasks; write to it when you learn something worth keeping.
+Read before unfamiliar tasks; write when you learn something worth keeping.
 
 ## When to Save
 
-Pass to `memory-scribe` when any of these occur:
-
-**Events** — concrete things that happened:
-- Implemented, added, removed, refactored something notable
-- Fixed a bug (what broke, what fixed it)
-- Reverted something (what and why)
-- Tried an approach that didn't work
-
-**Decisions** — choices made with rationale:
-- Tech choices, architecture decisions, design patterns chosen
-- Trade-offs accepted
-
-**Lessons** — things learned:
-- Pitfalls, surprising behaviors, non-obvious constraints
-- Things that contradicted expectations
-
-**Preferences** — user or project preferences:
-- Code style, workflow, tooling choices
-- "Always do X", "never do Y"
+Pass to `memory-scribe` when you observe: **events** (implementations, bug fixes, reverts, failed approaches), **decisions** (tech choices, trade-offs), **lessons** (pitfalls, surprises, non-obvious constraints), **preferences** (style, workflow, "always/never" rules).
 
 ```
 Task(subagent_type="memory-scribe", run_in_background=true,
      prompt="observation: <what happened>\ncontext: project=<name>, <1 sentence of situation>")
 ```
 
-Save **at the moment** — not at session end. One note per observation.
-**project** — always include in context. **language** — always English.
-
+Save **at the moment** — not at session end. One note per observation. Always include project. English only.
 Do NOT call `memory_remember` directly — always delegate to memory-scribe.
 
 ## Reinforcing
 
 After completing a task where retrieved facts influenced your work, call `memory_reinforce`.
-**Score**: -1 (actively misled) to 1 (essential, directly unblocked task).
-Only facts with **direct impact**. Retrieved but unused = skip. Score near 0 = skip.
+Score: -1 (misled) to 1 (essential). Only facts with **direct impact**. Unused or near-zero = skip.
 
 ## Session Metadata — `memory_session`
 
 Hook reminders tell you when to call and which params to include.
 
-`title` — short session name, 2-5 words. Always English.
-Good: `blob storage architecture`, `fix auth bug`, `prompt rewrite`
-
-`summary` — 1-2 sentences capturing the **essence** of the session: what problem was being solved, what approach was chosen, what key decisions were made. Always English. Each call replaces previous, so include full arc.
-
-No file names, function names, or implementation details in summary — those belong in the compact blob.
-
-Good: `Designed blob storage using Node model with filesystem sections. Chose lazy navigation over pre-indexed TOC.`
-Good: `Full adversarial debate on local vs server architecture. Chose hybrid .edn approach at 72% confidence.`
-Good: `Migrated tag system from Datomic refs to strings, removing tag hierarchy. Production migration pending.`
-Bad: `blob storage architecture` (too short, use title for this)
-Bad: `Replaced :node/tag-refs with :node/tags across 17 files. Deleted tag/resolve.clj, removed fn/inc-tag-count.` (technical details, no essence)
-
-`tags` — topic tags for the session (e.g. `["refactoring", "architecture"]`). Merged with automatic `session` tag. Omit if nothing notable.
+- `title` — 2-5 words, English. e.g. `blob storage architecture`, `fix auth bug`
+- `summary` — 1-2 sentences: problem, approach, key decisions. Each call replaces previous, so include full arc. No file/function names — those belong in compact blob.
+  - Good: `Designed blob storage using Node model with filesystem sections. Chose lazy navigation over pre-indexed TOC.`
+  - Bad: `blob storage architecture` (too short — use title for this)
+  - Bad: `Replaced :node/tag-refs with :node/tags across 17 files.` (implementation details, no essence)
+- `tags` — topic tags (e.g. `["refactoring", "architecture"]`). Merged with automatic `session` tag.
 
 ## Project Summaries — `memory_project`
 
-Call when the project's architecture, tech stack, goals, or structure become clear or change meaningfully:
-- First substantial session on a new project
-- After key architectural decisions (tech choice, data model, design patterns)
-- When project scope or goals shift noticeably
-
-`memory_project(project="my-project", summary="...")`
-
-One fact per project, upserted in-place. Keep summary concise (3-8 sentences): what the project is, its tech stack, current state, key constraints.
+Call when project architecture, tech stack, or goals become clear or change (first session, key decisions, scope shifts). One fact per project, upserted. 3-8 sentences: what, stack, state, constraints.
 
 ## Blobs
 
-Facts with `[blob: dir-name]` reference blob directories. `memory_read_blob` runs bash in a blob directory — treat it like any directory on the filesystem.
+Facts with `[blob: dir-name]` reference blob directories. `memory_read_blob` runs bash in a blob dir.
 
 ## Mid-Session Retrieval
 
-Retrieve before: design decisions, unfamiliar areas, starting a significant subtask, encountering an error.
+Retrieve before: design decisions, unfamiliar areas, significant subtasks, errors.
 
-1. `memory_explore_tags` with candidate tag sets to check counts
-2. `memory_get_facts` if counts manageable
+1. `memory_explore_tags` — check tag counts
+2. `memory_get_facts` — fetch if counts manageable
 
-Supports semantic search via `query` param — use when you know *what* but not *how it's tagged*.
-Always write `query` in English. Combine `query` with `tags` to narrow scope.
+Semantic search via `query` param — use when you know *what* but not *how it's tagged*. English queries. Combine `query` with `tags` to narrow scope.
 <!-- ai-memory:end -->
