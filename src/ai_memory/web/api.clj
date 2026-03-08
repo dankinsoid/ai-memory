@@ -4,6 +4,7 @@
             [ai-memory.graph.write :as write]
             [ai-memory.graph.delete :as delete]
             [ai-memory.tag.query :as tag-query]
+            [ai-memory.tag.resolve :as tag-resolve]
             [ai-memory.decay.core :as decay]
             [ai-memory.blob.store :as blob-store]
             [ai-memory.blob.exec :as blob-exec]
@@ -271,6 +272,21 @@
                          (embedding stores)
                          (:metrics cfg)
                          filters)}}))
+
+;; @ai-generated(guided)
+(defn resolve-tags [stores req]
+  (let [body       (:body-params req)
+        candidates (:candidates body)
+        threshold  (:threshold body)
+        top-k      (:top-k body)]
+    {:status 200
+     :body   {:results (tag-resolve/resolve-tags
+                         (fact-store stores)
+                         (embedding stores)
+                         candidates
+                         (cond-> {}
+                           threshold (assoc :threshold threshold)
+                           top-k     (assoc :top-k top-k)))}}))
 
 (defn recall [stores req]
   (let [body (:body-params req)

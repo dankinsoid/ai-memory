@@ -90,3 +90,7 @@
 
 (defn handle-project [{:keys [base-url api-token]} params]
   (api-post base-url "/api/project" params api-token))
+
+;; @ai-generated(guided)
+(defn handle-resolve-tags [{:keys [base-url api-token]} params]
+  (:results (api-post base-url "/api/tags/resolve" params api-token)))

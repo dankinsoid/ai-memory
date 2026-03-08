@@ -86,6 +86,7 @@
                       ["/tags" {:get  (fn [req] (api/browse-tags stores req))}]
                       ["/tags/count" {:post (fn [req] (api/count-facts stores cfg req))}]
                       ["/tags/facts" {:post (fn [req] (api/get-facts stores cfg req))}]
+                      ["/tags/resolve" {:post (fn [req] (api/resolve-tags stores req))}]
                       ["/blobs" {:get (fn [req] (api/list-blobs stores req))}]
                       ["/blobs/read" {:post (fn [req] (api/read-blob cfg req))}]
                       ["/blobs/exec" {:post (fn [req] (api/exec-blob cfg req))}]

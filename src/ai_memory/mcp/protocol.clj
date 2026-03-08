@@ -30,6 +30,14 @@
                                           :description "Skip first N tags when browsing (default 0). Ignored when tag_sets provided."
                                           :default     0}}}}
 
+   {:name        "memory_resolve_tags"
+    :description "Resolve candidate tag names to similar existing tags via vector similarity. Call before memory_remember to reuse existing tags instead of creating duplicates."
+    :inputSchema {:type       "object"
+                  :properties {:candidates {:type "array"
+                                            :items {:type "string"}
+                                            :description "Tag name candidates to resolve against existing tags"}}
+                  :required   ["candidates"]}}
+
    {:name        "memory_get_facts"
     :description "Fetch facts matching filters. Each filter can combine: tags (intersection), query (semantic search), date range, limit. Returns one result group per filter."
     :inputSchema {:type       "object"
@@ -148,11 +156,15 @@
 ;; --- Compact text rendering ---
 
 (defn render-tag-list
-  "Renders flat tag list as text. One line per tag: `name count`."
+  "Renders flat tag list as text. One line per tag: `name count [tier]`."
   [tags]
   (if (empty? tags)
     "(no tags)"
-    (str/join "\n" (map (fn [t] (str (:tag/name t) " " (or (:tag/node-count t) 0))) tags))))
+    (str/join "\n" (map (fn [t]
+                          (str (:tag/name t) " " (or (:tag/node-count t) 0)
+                               (when-let [tier (:tag/tier t)]
+                                 (str " [" (name tier) "]"))))
+                        tags))))
 
 (defn- tags-header [tags]
   (str/join " + " tags))
@@ -210,12 +222,30 @@
     (str/join "\n\n" (map render-one-group results))))
 
 
+;; @ai-generated(guided)
+(defn render-resolve-results
+  "Renders tag resolution as compact text: one line per candidate."
+  [results]
+  (if (empty? results)
+    "(no candidates)"
+    (str/join "\n"
+      (map (fn [{:keys [candidate matches]}]
+             (if (empty? matches)
+               (str candidate " → (no matches)")
+               (str candidate " → "
+                    (str/join ", "
+                      (map (fn [{:keys [tag score]}]
+                             (str tag " (" (format "%.2f" (double score)) ")"))
+                           matches)))))
+           results))))
+
 ;; --- Parameter conversion (snake_case JSON → kebab-case Clojure) ---
 
 (defn- convert-params
   "Explicit per-tool parameter conversion. Not a generic deep transform."
   [handler-key params]
   (case handler-key
+    :resolve-tags {:candidates (:candidates params)}
     :explore-tags {:tag-sets (:tag_sets params)
                    :limit    (or (:limit params) 50)
                    :offset   (or (:offset params) 0)}
@@ -261,6 +291,7 @@
 
 (defn- call-tool [cfg handler-key params]
   (case handler-key
+    :resolve-tags       (server/handle-resolve-tags cfg params)
     :explore-tags       (server/handle-explore-tags cfg params)
     :get-facts          (server/handle-get-facts cfg params)
     :remember           (server/handle-remember cfg params)
@@ -295,7 +326,8 @@
   (into {} (map (juxt :name (fn [t] (:handler-key t)))) tools))
 
 (def ^:private handler-keys
-  {"memory_explore_tags"          :explore-tags
+  {"memory_resolve_tags"          :resolve-tags
+   "memory_explore_tags"          :explore-tags
    "memory_get_facts"            :get-facts
    "memory_remember"             :remember
    "memory_store_file"           :store-file
@@ -308,6 +340,7 @@
 
 (defn- format-result [handler-key result]
   (case handler-key
+    :resolve-tags (render-resolve-results result)
     :explore-tags (case (:mode result)
                     :browse (render-tag-list (:data result))
                     :count  (render-counts (:data result)))

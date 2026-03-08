@@ -6,6 +6,7 @@ tools:
   - mcp__ai-memory__memory_get_facts
   - mcp__ai-memory__memory_reinforce
   - mcp__ai-memory__memory_explore_tags
+  - mcp__ai-memory__memory_resolve_tags
 ---
 
 # memory-scribe
@@ -53,12 +54,13 @@ memory_get_facts(filters=[{query: "<observation>", limit: 5}])
 
 ## Tags
 
-3-5 total. `memory_explore_tags()` to see existing tags.
-Tags describe **the fact's own content**, not the context in which it was learned or the session it came from.
+3-5 total. Tags describe **the fact's own content**, not the context in which it was learned or the session it came from.
 
-1. **Aspect** (1-2): pick from tags with `tier: aspect`.
+**MUST call `memory_explore_tags()` first** to see all tags with tiers and counts. Then call `memory_resolve_tags(candidates=[...])` to check your technical tag ideas against existing tags (use existing when score ≥ 0.85).
+
+1. **Aspect** (1-2): MUST pick from tags marked `[aspect]` in `memory_explore_tags` output. Never invent new aspect tags.
 2. **Project**: `project/<name>` if fact is about this project's architecture/decisions/pitfalls. `universal` if cross-project. Never both — they are mutually exclusive. Omit if unsure.
-3. **Technical** (2-3): technology, domain. Prefer existing tags.
+3. **Technical** (2-3): technology, domain. Pick from existing tags via `memory_resolve_tags`. A slightly imperfect existing tag beats a perfect new one.
 
 ## Done
 

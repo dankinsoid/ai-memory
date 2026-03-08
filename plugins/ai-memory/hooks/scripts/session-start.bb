@@ -219,24 +219,15 @@
   (str (get t (keyword "tag/name"))
        " (" (or (get t (keyword "tag/node-count")) 0) ")"))
 
-;; Full list of aspect tags (fixed vocabulary, always shown)
-(def all-aspect-tags
-  ["api" "architecture" "comparison" "data-model" "debugging" "decision"
-   "idea" "insight" "pattern" "performance" "pitfall" "preference" "conventions"
-   "testing" "tooling" "workflow"])
-
+;; Aspect tags determined by :tag/tier from server, not hardcoded
 (defn format-tags [tags]
-  (let [tag-map    (into {} (map (fn [t] [(get t (keyword "tag/name")) t]) tags))
-        ;; Build full aspect list: use API data if available, else synthesize with count 0
-        aspect     (map (fn [name]
-                          (or (get tag-map name)
-                              {(keyword "tag/name") name (keyword "tag/node-count") 0}))
-                        all-aspect-tags)
-        aspect-set (set all-aspect-tags)
-        other      (->> tags
-                        (remove #(aspect-set (get % (keyword "tag/name"))))
-                        (remove #(#{"session" "universal"} (get % (keyword "tag/name"))))
-                        (sort-by (keyword "tag/node-count") (fn [a b] (compare (or b 0) (or a 0)))))]
+  (let [aspect (->> tags
+                    (filter #(= "aspect" (get % (keyword "tag/tier"))))
+                    (sort-by (keyword "tag/name")))
+        other  (->> tags
+                    (remove #(= "aspect" (get % (keyword "tag/tier"))))
+                    (remove #(#{"session" "universal"} (get % (keyword "tag/name"))))
+                    (sort-by (keyword "tag/node-count") (fn [a b] (compare (or b 0) (or a 0)))))]
     (str "## Top Tags\n"
          "Fixed: " (str/join ", " (map format-tag aspect)) "\n"
          (when (seq other)
