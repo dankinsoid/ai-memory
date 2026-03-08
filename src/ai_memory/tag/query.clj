@@ -135,6 +135,12 @@
   (let [node-tags (set (:node/tags node))]
     (some node-tags tag-names)))
 
+(defn- count-matching-tags
+  "Returns the number of tag-names that the node has."
+  [tag-names node]
+  (let [node-tags (set (:node/tags node))]
+    (count (filter node-tags tag-names))))
+
 (defn- in-date-range?
   "Returns true if node's updated-at falls within [since, until)."
   [since until node]
@@ -143,8 +149,12 @@
          (or (nil? until) (.before updated until)))))
 
 (defn- execute-filter
-  "Executes a single filter. Returns {:filter <input> :facts [...] :total N}."
-  [fact-store vector-store embedding registry {:keys [id session-id tags query exclude-tags since until limit offset sort-by] :as filter-spec}]
+  "Executes a single filter. Returns {:filter <input> :facts [...] :total N}.
+   Tags filter: :tags (ALL must match), :any-tags (at least one must match).
+   When both provided: node must have ALL of :tags AND ANY of :any-tags.
+   When :any-tags present, results include :match-count and sort by overlap (desc)
+   as primary sort, with :sort-by as tiebreaker."
+  [fact-store vector-store embedding registry {:keys [id session-id tags any-tags query exclude-tags since until limit offset sort-by] :as filter-spec}]
   (cond
     ;; Direct session-id lookup
     session-id
@@ -173,10 +183,11 @@
           default-limit (or limit 10)
           ;; Fetch more from vector store to allow for post-filtering + offset
           search-limit  (* (+ default-limit (or offset 0))
-                           (if (or tags since until) 5 1))
+                           (if (or tags any-tags since until) 5 1))
           hits          (node/search fact-store vector-store embedding query search-limit)
           filtered      (cond->> hits
                           tags         (filter (partial has-all-tags? tags))
+                          any-tags     (filter (partial has-any-of-tags? any-tags))
                           exclude-tags (remove (partial has-any-of-tags? exclude-tags))
                           since-d      (filter (partial in-date-range? since-d nil))
                           until-d      (filter (partial in-date-range? nil until-d)))
@@ -187,16 +198,42 @@
        :facts  page
        :total  total})
 
-    ;; DB path — tag intersection + date filter
+    ;; DB path — tag intersection/union + date filter
     :else
     (let [since-d       (date/parse-date-param since)
           until-d       (date/parse-date-param until)
           default-limit (or limit 50)
+          ;; Fetch candidates: tags (intersection) narrowed by any-tags (union),
+          ;; or any-tags alone (union), or date/all fallback
           results       (cond
-                          (seq tags) (by-tags fact-store {:tags tags :since since-d :until until-d})
-                          (or since-d until-d) (by-date-range fact-store {:since since-d :until until-d})
+                          ;; Both: intersection first, then post-filter by any-tags
+                          (and (seq tags) (seq any-tags))
+                          (->> (by-tags fact-store {:tags tags :since since-d :until until-d})
+                               (filter (partial has-any-of-tags? any-tags)))
+
+                          ;; Only required tags: intersection (existing behavior)
+                          (seq tags)
+                          (by-tags fact-store {:tags tags :since since-d :until until-d})
+
+                          ;; Only any-tags: union, then post-filter by date
+                          (seq any-tags)
+                          (cond->> (by-any-tags fact-store {:tags any-tags})
+                            since-d (filter (partial in-date-range? since-d nil))
+                            until-d (filter (partial in-date-range? nil until-d)))
+
+                          (or since-d until-d)
+                          (by-date-range fact-store {:since since-d :until until-d})
+
                           :else (all-nodes fact-store))
-          sorted        (sort-facts fact-store sort-by results)
+          ;; When any-tags present, primary sort = overlap count (desc),
+          ;; tiebreaker = sort-by (date or weight)
+          sorted        (if (seq any-tags)
+                          (let [enriched (sort-facts fact-store sort-by results)]
+                            (->> enriched
+                                 (map #(assoc % :match-count
+                                              (count-matching-tags any-tags %)))
+                                 (sort-by :match-count #(compare %2 %1))))
+                          (sort-facts fact-store sort-by results))
           excluded      (cond->> sorted
                           exclude-tags (remove (partial has-any-of-tags? exclude-tags)))
           total         (count excluded)

@@ -39,7 +39,7 @@
                   :required   ["candidates"]}}
 
    {:name        "memory_get_facts"
-    :description "Fetch facts matching filters. Each filter can combine: tags (intersection), query (semantic search), date range, limit. Returns one result group per filter."
+    :description "Fetch facts matching filters. Each filter can combine: tags (all required), any_tags (at least one required), query (semantic search), date range, limit. Returns one result group per filter."
     :inputSchema {:type       "object"
                   :properties {:filters  {:type        "array"
                                           :items       {:type       "object"
@@ -49,6 +49,8 @@
                                                                                   :description "Fetch session fact by session ID"}
                                                                      :tags  {:type "array" :items {:type "string"}
                                                                              :description "Tag names — facts must have ALL (intersection)"}
+                                                                     :any_tags {:type "array" :items {:type "string"}
+                                                                                :description "Tag names — facts must have at least one (union). Results sorted by overlap count. Combinable with tags."}
                                                                      :query {:type "string"
                                                                              :description "Semantic vector search query. Always use English. Prefer tags/sort_by/since for structured lookups."}
                                                                      :since {:type "string"
@@ -155,16 +157,30 @@
 
 ;; --- Compact text rendering ---
 
+(defn- render-tag-line [t]
+  (str (:tag/name t) " " (or (:tag/node-count t) 0)))
+
 (defn render-tag-list
-  "Renders flat tag list as text. One line per tag: `name count [tier]`."
+  "Renders tag list grouped by tier. Tiered tags shown under 'tier:' headers,
+   untiered tags listed after. Compact format to save context tokens."
   [tags]
   (if (empty? tags)
     "(no tags)"
-    (str/join "\n" (map (fn [t]
-                          (str (:tag/name t) " " (or (:tag/node-count t) 0)
-                               (when-let [tier (:tag/tier t)]
-                                 (str " [" (name tier) "]"))))
-                        tags))))
+    (let [{tiered true untiered false}
+          (group-by #(some? (:tag/tier %)) tags)
+          ;; Group tiered tags by tier name
+          by-tier (group-by #(name (:tag/tier %)) tiered)
+          sections (cond-> []
+                     (seq by-tier)
+                     (into (mapcat (fn [[tier-name tier-tags]]
+                                     (cons (str tier-name ":")
+                                           (map render-tag-line tier-tags)))
+                                   (sort-by key by-tier)))
+                     (seq untiered)
+                     (conj "dynamic:")
+                     (seq untiered)
+                     (into (map render-tag-line untiered)))]
+      (str/join "\n" sections))))
 
 (defn- tags-header [tags]
   (str/join " + " tags))
@@ -177,15 +193,17 @@
                       results)))
 
 (defn- render-fact-line [fact]
-  (let [eid      (:db/id fact)
-        content  (:node/content fact)
-        sources  (:node/sources fact)
-        blob-dir (:node/blob-dir fact)
-        refs     (cond-> []
-                   (seq sources) (into (map #(str "src: " %) sources))
-                   blob-dir      (conj (str "blob: " blob-dir)))]
+  (let [eid         (:db/id fact)
+        content     (:node/content fact)
+        sources     (:node/sources fact)
+        blob-dir    (:node/blob-dir fact)
+        match-count (:match-count fact)
+        refs        (cond-> []
+                      (seq sources) (into (map #(str "src: " %) sources))
+                      blob-dir      (conj (str "blob: " blob-dir)))]
     (str "- "
          (when eid (str "[" eid "] "))
+         (when match-count (str "(" match-count "✓) "))
          content
          (when (seq refs) (str " [" (str/join ", " refs) "]")))))
 
@@ -199,11 +217,12 @@
          " " content
          (when (seq tags) (str " [" tags "]")))))
 
-(defn- filter-header [{:keys [id tags query]}]
+(defn- filter-header [{:keys [id tags any-tags query]}]
   (let [parts (cond-> []
-                id          (conj (str "id: " id))
-                (seq tags)  (conj (tags-header tags))
-                query       (conj (str "search: \"" query "\"")))]
+                id              (conj (str "id: " id))
+                (seq tags)      (conj (tags-header tags))
+                (seq any-tags)  (conj (str "any: " (str/join " | " any-tags)))
+                query           (conj (str "search: \"" query "\"")))]
     (if (seq parts) (str/join " | " parts) "all")))
 
 (defn- render-one-group [{:keys [filter facts]}]

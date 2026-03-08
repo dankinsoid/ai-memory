@@ -99,7 +99,8 @@
   (testing "tool names match expected"
     (let [resp  (call "tools/list")
           names (set (map :name (get-in resp [:result :tools])))]
-      (is (= #{"memory_explore_tags" "memory_get_facts"
+      (is (= #{"memory_explore_tags" "memory_resolve_tags"
+               "memory_get_facts"
                "memory_remember" "memory_reinforce"
                "memory_store_file" "memory_update_fact"
                "memory_update_blob" "memory_read_blob"
@@ -129,11 +130,17 @@
 ;; --- Render tag list ---
 
 (deftest render-tag-list-test
-  (testing "renders flat tag list as name count lines"
+  (testing "renders untiered tags under dynamic: header"
     (let [tags [{:tag/name "clj" :tag/node-count 87}
                 {:tag/name "python" :tag/node-count 31}
                 {:tag/name "preference" :tag/node-count 12}]]
-      (is (= "clj 87\npython 31\npreference 12"
+      (is (= "dynamic:\nclj 87\npython 31\npreference 12"
+             (protocol/render-tag-list tags)))))
+  (testing "renders tiered + untiered tags grouped by section"
+    (let [tags [{:tag/name "architecture" :tag/node-count 63 :tag/tier :aspect}
+                {:tag/name "debugging" :tag/node-count 21 :tag/tier :aspect}
+                {:tag/name "clj" :tag/node-count 5}]]
+      (is (= "aspect:\narchitecture 63\ndebugging 21\ndynamic:\nclj 5"
              (protocol/render-tag-list tags))))))
 
 (deftest render-tag-list-empty-test
@@ -143,7 +150,7 @@
 (deftest render-tag-list-nil-count-test
   (testing "renders tags with nil count as 0"
     (let [tags [{:tag/name "new-tag" :tag/node-count nil}]]
-      (is (= "new-tag 0" (protocol/render-tag-list tags))))))
+      (is (= "dynamic:\nnew-tag 0" (protocol/render-tag-list tags))))))
 
 (deftest render-counts-test
   (testing "renders counts as tag-set: N lines"
@@ -182,11 +189,12 @@
           text (get-in resp [:result :content 0 :text])
           lines (str/split-lines text)]
       (is (nil? (:error resp)))
-      ;; Includes user tags + seeded aspect tags
+      ;; Has aspect section header + aspect tags + blank line + user tags
       (is (> (count lines) 2))
-      (is (every? #(re-matches #"\S+ \d+" %) lines))
-      ;; Sorted by count desc: clj 2 first
-      (is (str/starts-with? (first lines) "clj")))))
+      ;; First line is "aspect:" section header
+      (is (str/includes? text "aspect:"))
+      ;; User tags (clj, python) appear after aspect section
+      (is (str/includes? text "clj 2")))))
 
 (deftest explore-tags-empty-test
   (testing "memory_explore_tags with no user tags returns seeded aspect tags"
@@ -197,7 +205,8 @@
           lines (str/split-lines text)]
       ;; Aspect tags are seeded, so not empty
       (is (pos? (count lines)))
-      (is (every? #(str/ends-with? % " 0") lines)))))
+      ;; Starts with "aspect:" section header
+      (is (str/starts-with? text "aspect:")))))
 
 (deftest explore-tags-count-test
   (testing "memory_explore_tags with tag_sets returns text counts"

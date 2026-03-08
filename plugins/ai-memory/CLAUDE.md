@@ -4,7 +4,11 @@ Read before unfamiliar tasks; write when you learn something worth keeping.
 
 ## Before Starting a Task
 
-Query memory for rules and conventions relevant to the task. Rule tags: `rule`, `critical-rule`, `preference`, `conventions`. Intersect with task topic.
+Query memory for rules relevant to the task topic. Use `any_tags` for rule types, `tags` for the topic:
+```json
+{"tags": ["<task-topic>"], "any_tags": ["rule", "critical-rule", "preference", "conventions"]}
+```
+Example: refactoring Go code → `tags: ["go"]`, debugging Flutter → `tags: ["debugging", "flutter-cljd"]`.
 
 ## Free Retrieval
 
