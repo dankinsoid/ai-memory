@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ai-memory": {
+      "type": "http",
+      "url": "http://46.101.153.18:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer ${AI_MEMORY_TOKEN}"
+      }
+    }
+  }
+}

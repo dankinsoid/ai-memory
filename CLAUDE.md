@@ -4,15 +4,24 @@ Long-term memory system for AI agents (MCP server). Clojure + Datomic + Qdrant.
 
 Early development — no backwards compatibility concerns, no production DB yet.
 
-## Source of Truth
+## Plugin (client-side)
 
-`claude_config_files/` → manually copied to `~/.claude/`:
-- `prompt.md` → global CLAUDE.md (Memory section)
-- `settings.json`, `skills/`, `scripts/` → corresponding dirs
+`plugins/ai-memory/` — Claude Code native plugin. Contains hooks, skills, agents, MCP config, and CLAUDE.md instructions.
 
-NEVER edit `~/.claude/` files directly - use `bb scripts/deploy.bb` to copy from `claude_config_files/` to `~/.claude/`.
+```bash
+# Install (once): register private repo as marketplace, then install
+/plugin marketplace add git@github.com:dankinsoid/ai-memory.git
+/plugin install ai-memory
 
-Always edit in this repo first, then copy.
+# Dev mode (single session, no install)
+claude --plugin-dir ./plugins/ai-memory
+```
+
+Requires `AI_MEMORY_TOKEN` env var for MCP server auth.
+
+Edit files in `plugins/ai-memory/` — changes take effect after plugin update.
+
+Legacy `claude_config_files/` and `scripts/deploy.bb` are deprecated.
 
 ## Commands
 
@@ -20,7 +29,6 @@ Always edit in this repo first, then copy.
 clj -M:dev          # REPL (nREPL + CIDER)
 clj -M:run          # Run service (port 8080)
 clj -M:test         # Tests (kaocha)
-bb scripts/deploy.bb  # Deploy
 ```
 
 Local dev: run service directly (`clj -M:run`), no Docker. Restart after code changes.
