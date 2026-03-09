@@ -44,21 +44,19 @@
 
 (defn reindex!
   "Re-embeds all nodes and tags into vector stores.
-   `stores`    — map with :fact-store, :vector-store, :tag-vector-store, :embedding
-   `blob-path` — filesystem base path for blobs
+   `ctx` — service context with :fact-store, :vector-store, :tag-vector-store, :embedding, :blob-path
    Returns merged result from node and tag reindexing."
-  [stores blob-path]
-  (let [node-result (node/reindex-all! (:fact-store stores)
-                                        (:vector-store stores)
-                                        (:embedding stores)
-                                        blob-path)
-        tag-result  (tags/seed! stores)]
+  [ctx]
+  (let [node-result (node/reindex-all! (:fact-store ctx)
+                                        (:vector-store ctx)
+                                        (:embedding ctx)
+                                        (:blob-path ctx))
+        tag-result  (tags/seed! ctx)]
     (merge node-result tag-result)))
 
 (defn reset-all!
   "Wipes all facts, edges, blobs, and vectors.
-   `stores`    — map with :fact-store, :vector-store
-   `blob-path` — filesystem base path
+   `ctx` — service context with :fact-store, :vector-store, :blob-path
    Returns {:deleted-nodes N :deleted-edges M :deleted-blobs B}."
-  [stores blob-path]
-  (delete/reset-all! (:fact-store stores) (:vector-store stores) blob-path))
+  [ctx]
+  (delete/reset-all! (:fact-store ctx) (:vector-store ctx) (:blob-path ctx)))

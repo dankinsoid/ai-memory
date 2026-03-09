@@ -11,12 +11,12 @@
 
 (defn store!
   "Creates a new blob: writes file to disk, creates fact node via facts service.
-   `stores`    — map with :fact-store, :vector-store, :tag-vector-store, :embedding
-   `blob-path` — filesystem base path for blobs
-   `data`      — {:title, :summary, :content or :path, :tags, :type, :project}
+   `ctx`  — service context with :fact-store, :vector-store, :tag-vector-store, :embedding, :blob-path
+   `data` — {:title, :summary, :content or :path, :tags, :type, :project}
    Returns {:blob-dir str, :blob-id eid}."
-  [stores blob-path data]
-  (let [blob-dir (blob-store/make-blob-dir-name blob-path (:title data))
+  [ctx data]
+  (let [blob-path (:blob-path ctx)
+        blob-dir (blob-store/make-blob-dir-name blob-path (:title data))
         ext      (cond
                    (:path data)    (last (str/split (:path data) #"\."))
                    (:content data) "md"
@@ -40,24 +40,23 @@
                     (:path data)    (assoc :source-path (:path data)))]
     (blob-store/write-meta! blob-path blob-dir meta-data)
     (let [tag-names (mapv str/trim (distinct (:tags data)))
-          result    (facts/create! stores {:content  (:summary data)
-                                           :tags     tag-names
-                                           :blob-dir blob-dir})
+          result    (facts/create! ctx {:content  (:summary data)
+                                         :tags     tag-names
+                                         :blob-dir blob-dir})
           blob-id   (:id result)]
       {:blob-dir blob-dir
        :blob-id  blob-id})))
 
 (defn update!
   "Updates blob content and/or metadata. Delegates node update to facts service.
-   `stores`    — map with :fact-store, :vector-store, :tag-vector-store, :embedding
-   `blob-path` — filesystem base path
-   `cfg`       — {:reinforcement-factor N}
-   `blob-dir`  — blob directory name
-   `data`      — {:summary, :content, :tags} — all optional
+   `ctx`      — service context with :fact-store, :blob-path, etc.
+   `blob-dir` — blob directory name
+   `data`     — {:summary, :content, :tags} — all optional
    Returns {:blob-dir str, :blob-id eid} or throws if not found."
-  [stores blob-path _cfg blob-dir data]
-  (let [fs   (:fact-store stores)
-        node (p/find-node-by-blob-dir fs blob-dir)]
+  [ctx blob-dir data]
+  (let [fs        (:fact-store ctx)
+        blob-path (:blob-path ctx)
+        node      (p/find-node-by-blob-dir fs blob-dir)]
     (when-not node
       (throw (ex-info "No node found for blob-dir" {:blob-dir blob-dir})))
     (let [eid     (:db/id node)
@@ -75,7 +74,7 @@
                              tags    (assoc :tags tags))]
           (blob-store/write-meta! blob-path blob-dir updated-meta)))
       ;; Delegate node update (content + tags, no reinforcement) to facts service
-      (facts/patch! stores eid
+      (facts/patch! ctx eid
                     (cond-> {}
                       summary (assoc :content summary)
                       (some? tags) (assoc :tags tags)))
@@ -84,10 +83,10 @@
 
 (defn list-blobs
   "Returns recent blob nodes.
-   `stores` — map with :fact-store
-   `opts`   — {:limit N}"
-  [stores opts]
-  (p/find-blob-nodes (:fact-store stores) opts))
+   `ctx`  — service context with :fact-store
+   `opts` — {:limit N}"
+  [ctx opts]
+  (p/find-blob-nodes (:fact-store ctx) opts))
 
 (defn read-blob
   "Reads blob content from filesystem. Returns metadata or a specific section.
@@ -104,9 +103,9 @@
 
 (defn exec-blob
   "Executes a command on a blob directory.
-   `cfg`     — full config map
+   `cfg`      — full config map (needs :blob-path and project-path)
    `blob-dir` — blob directory name
-   `command` — command string
+   `command`  — command string
    Returns execution result."
   [cfg blob-dir command]
   (blob-exec/exec-blob cfg blob-dir command))

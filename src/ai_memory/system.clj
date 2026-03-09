@@ -68,17 +68,22 @@
     (p/ensure-store! store dim)
     store))
 
-(defmethod ig/init-key :service/seed [_ {:keys [stores]}]
-  (tags/seed! stores)
+(defmethod ig/init-key :service/context
+  [_ {:keys [cfg] :as ctx}]
+  (-> ctx
+      (assoc :blob-path (:blob-path cfg))
+      (dissoc :cfg)))
+
+(defmethod ig/init-key :service/seed [_ {:keys [ctx]}]
+  (tags/seed! ctx)
   nil)
 
-(defmethod ig/init-key :web/server [_ {:keys [cfg conn stores metrics]}]
-  (let [full-cfg (assoc cfg :metrics metrics)]
-    (log/info "Starting web server on port" (:port cfg))
-    (web/start {:port   (:port cfg)
-                :conn   conn
-                :cfg    full-cfg
-                :stores stores})))
+(defmethod ig/init-key :web/server [_ {:keys [ctx conn cfg]}]
+  (log/info "Starting web server on port" (:port cfg))
+  (web/start {:port (:port cfg)
+              :conn conn
+              :ctx  ctx
+              :cfg  cfg}))
 
 (defmethod ig/halt-key! :web/server [_ server]
   (when server

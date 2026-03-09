@@ -26,24 +26,23 @@
 (defn upsert-session-fact!
   "Creates or updates the rolling session summary fact.
    Delegates node creation/update to facts service (which handles tags + embedding).
-   `stores`          — map with :fact-store, :vector-store, :tag-vector-store, :embedding
-   `cfg`             — {:reinforcement-factor N}
+   `ctx`             — service context
    `session-id`      — session UUID string
    `session-summary` — summary text
    `project`         — project name or nil
    `extra-tags`      — additional tags or nil"
-  [stores _cfg session-id session-summary project extra-tags]
-  (let [fs       (:fact-store stores)
+  [ctx session-id session-summary project extra-tags]
+  (let [fs       (:fact-store ctx)
         eid      (find-session-fact fs session-id)
         tag-vec  (->> (concat ["session"]
                               (when project [(str "project/" project)])
                               extra-tags)
                       distinct
                       (mapv str/trim))]
-    (:id (facts/patch! stores eid {:content    session-summary
-                                    :tags       tag-vec
-                                    :tag-mode   :merge
-                                    :session-id session-id}))))
+    (:id (facts/patch! ctx eid {:content    session-summary
+                                 :tags       tag-vec
+                                 :tag-mode   :merge
+                                 :session-id session-id}))))
 
 ;; --- Project facts ---
 
@@ -58,30 +57,28 @@
 (defn upsert-project-fact!
   "Creates or updates a project summary fact.
    Delegates node operations to facts service.
-   `stores`  — map with :fact-store, :vector-store, :tag-vector-store, :embedding
-   `cfg`     — {:reinforcement-factor N}
+   `ctx`     — service context
    `project` — project name
    `summary` — project summary text
    `tags`    — additional tags"
-  [stores _cfg project summary extra-tags]
-  (let [fs       (:fact-store stores)
+  [ctx project summary extra-tags]
+  (let [fs       (:fact-store ctx)
         eid      (find-project-fact fs project)
         tag-vec  (->> (concat ["project" (str "project/" project)] extra-tags)
                       distinct
                       (mapv str/trim))]
-    (:id (facts/patch! stores eid {:content  summary
-                                    :tags     tag-vec
-                                    :tag-mode :merge}))))
+    (:id (facts/patch! ctx eid {:content  summary
+                                 :tags     tag-vec
+                                 :tag-mode :merge}))))
 
 (defn project-update!
   "Updates project summary fact.
-   `stores`  — stores map
-   `cfg`     — {:reinforcement-factor N}
+   `ctx`     — service context
    `project` — project name
    `summary` — summary text
    `tags`    — additional tags"
-  [stores cfg project summary tags]
-  (upsert-project-fact! stores cfg project summary (or tags [])))
+  [ctx project summary tags]
+  (upsert-project-fact! ctx project summary (or tags [])))
 
 ;; --- Session sync (turns → blob) ---
 
@@ -173,11 +170,11 @@
 
 (defn sync!
   "Syncs conversation turns to blob storage, creates/links session node.
-   `stores`    — stores map
-   `blob-path` — filesystem base path
-   `data`      — {:session-id, :cwd, :project, :messages, :git}"
-  [stores blob-path data]
-  (let [fs         (:fact-store stores)
+   `ctx`  — service context with :fact-store, :blob-path, etc.
+   `data` — {:session-id, :cwd, :project, :messages, :git}"
+  [ctx data]
+  (let [fs         (:fact-store ctx)
+        blob-path  (:blob-path ctx)
         session-id (:session-id data)
         cwd        (:cwd data)
         messages   (:messages data)
@@ -244,17 +241,17 @@
         (when-not datomic-dir
           (link-blob-dir! fs session-eid blob-dir-short))
         (when project
-          (facts/patch! stores session-eid {:tags     [(str "project/" project)]
-                                            :tag-mode :merge})))
+          (facts/patch! ctx session-eid {:tags     [(str "project/" project)]
+                                          :tag-mode :merge})))
       (let [session-tags (cond-> ["session"]
                            project (conj (str "project/" project)))
             content      (or session-summary
                              (extract-first-user-prompt messages)
                              "Session conversation")]
-        (facts/create! stores {:content    content
-                               :tags       session-tags
-                               :blob-dir   blob-dir-short
-                               :session-id session-id})))
+        (facts/create! ctx {:content    content
+                             :tags       session-tags
+                             :blob-dir   blob-dir-short
+                             :session-id session-id})))
 
     {:blob-dir           blob-dir-short
      :turns-added        (count new-turn-texts)
@@ -263,11 +260,11 @@
 
 (defn update!
   "Updates session summary, chunk naming, and/or compact summary.
-   `stores`    — stores map
-   `blob-path` — filesystem base path
-   `data`      — {:session-id, :project, :title, :summary, :tags, :chunk-title, :compact}"
-  [stores blob-path data]
-  (let [fs          (:fact-store stores)
+   `ctx`  — service context with :fact-store, :blob-path, etc.
+   `data` — {:session-id, :project, :title, :summary, :tags, :chunk-title, :compact}"
+  [ctx data]
+  (let [fs          (:fact-store ctx)
+        blob-path   (:blob-path ctx)
         session-id  (:session-id data)
         project     (:project data)
         title       (:title data)
@@ -303,7 +300,7 @@
         summary-result
         (when summary
           (let [content (if title (str title "\n" summary) summary)]
-            (upsert-session-fact! stores {} session-id content project sess-tags))
+            (upsert-session-fact! ctx session-id content project sess-tags))
           ;; If node was just created by upsert, link blob-dir to it
           (when-not session-eid
             (when-let [new-eid (find-session-fact fs session-id)]
@@ -334,7 +331,7 @@
         compact-result
         (when (and compact session-eid)
           (blob-store/write-section! blob-path blob-dir "compact.md" compact)
-          (node/embed-file! (:vector-store stores) (:embedding stores)
+          (node/embed-file! (:vector-store ctx) (:embedding ctx)
                             session-eid blob-dir-short "compact.md" compact)
           "stored")]
 
@@ -348,20 +345,20 @@
 (defn continue!
   "Links two sessions via a continuation edge (new → prev).
    Self-heals: creates prev session fact if it doesn't exist yet.
-   `stores`          — stores map
+   `ctx`             — service context
    `prev-session-id` — previous session UUID
    `session-id`      — current session UUID
    `project`         — project name or nil"
-  [stores prev-session-id session-id project]
-  (let [fs       (:fact-store stores)
+  [ctx prev-session-id session-id project]
+  (let [fs       (:fact-store ctx)
         prev-eid (or (find-session-fact fs prev-session-id)
-                     (do (upsert-session-fact! stores {} prev-session-id
+                     (do (upsert-session-fact! ctx prev-session-id
                            (str "session " (subs prev-session-id 0 8)) project nil)
                          (find-session-fact fs prev-session-id)))]
     (when-not prev-eid
       (throw (ex-info "Failed to create prev session fact" {:prev-session-id prev-session-id})))
     (when-not (find-session-fact fs session-id)
-      (upsert-session-fact! stores {} session-id
+      (upsert-session-fact! ctx session-id
         (str "continuation of " prev-session-id) project nil))
     (let [new-eid  (find-session-fact fs session-id)
           prev-dir (:node/blob-dir (p/find-node fs prev-eid))]
@@ -394,11 +391,11 @@
 
 (defn chain
   "Traverses continuation chain from a session. Optionally strengthens first edge.
-   `stores`     — stores map
+   `ctx`        — service context
    `session-id` — session UUID
    `strengthen` — if true, promotes first continuation edge to eternal"
-  [stores session-id strengthen]
-  (let [fs  (:fact-store stores)
+  [ctx session-id strengthen]
+  (let [fs  (:fact-store ctx)
         eid (find-session-fact fs session-id)]
     (if-not eid
       []

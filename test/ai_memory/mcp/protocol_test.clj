@@ -36,12 +36,14 @@
   (let [uri        (test-uri)
         conn       (db/connect uri)
         _          (db/ensure-schema conn)
-        cfg        {:metrics nil :blob-path "/tmp/ai-memory-test-blobs"}
-        stores     {:fact-store        (datomic-store/create conn)
+        cfg        {:blob-path "/tmp/ai-memory-test-blobs"}
+        ctx        {:fact-store        (datomic-store/create conn)
                     :vector-store      stub-vector-store
                     :tag-vector-store  stub-vector-store
-                    :embedding         stub-embedding}
-        srv        (web/start {:port 0 :conn conn :cfg cfg :stores stores})
+                    :embedding         stub-embedding
+                    :metrics           nil
+                    :blob-path         "/tmp/ai-memory-test-blobs"}
+        srv        (web/start {:port 0 :conn conn :cfg cfg :ctx ctx})
         port       (-> srv .getConnectors first .getLocalPort)]
     (binding [*conn*     conn
               *base-url* (str "http://localhost:" port)

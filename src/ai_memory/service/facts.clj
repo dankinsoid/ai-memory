@@ -133,22 +133,20 @@
 
 (defn delete!
   "Deletes a fact from fact store, vector store, and filesystem.
-   `stores`    — map with :fact-store, :vector-store
-   `blob-path` — filesystem base path for blobs
-   `eid`       — entity id
+   `ctx` — service context with :fact-store, :vector-store, :blob-path
+   `eid` — entity id
    Returns {:deleted-id eid :blob-dir dir}. Throws if not found."
-  [stores blob-path eid]
-  (delete/delete-node! (:fact-store stores) (:vector-store stores) blob-path eid))
+  [ctx eid]
+  (delete/delete-node! (:fact-store ctx) (:vector-store ctx) (:blob-path ctx) eid))
 
 (defn search
   "Filtered fact retrieval via tag-query filters.
-   `stores`  — map with :fact-store, :vector-store, :embedding
-   `metrics` — prometheus registry or nil
+   `ctx`     — service context with :fact-store, :vector-store, :embedding, :metrics
    `filters` — filter spec for tag-query/fetch-by-filters"
-  [stores metrics filters]
+  [ctx filters]
   (let [tag-query (requiring-resolve 'ai-memory.tag.query/fetch-by-filters)]
-    (tag-query (:fact-store stores) (:vector-store stores)
-               (:embedding stores) metrics filters)))
+    (tag-query (:fact-store ctx) (:vector-store ctx)
+               (:embedding ctx) (:metrics ctx) filters)))
 
 (defn recall
   "Returns facts matching ALL given tags.
@@ -163,13 +161,12 @@
 
 (defn reinforce!
   "Batch reinforcement: bumps weight/cycle for multiple facts.
-   `stores`         — map with :fact-store
-   `cfg`            — {:reinforcement-factor N}
+   `ctx`            — service context with :fact-store
    `reinforcements` — [{:id eid :score N} ...]
    Returns {:reinforced N :details [...]}"
-  [stores cfg reinforcements]
-  (let [fs     (:fact-store stores)
-        factor (or (:reinforcement-factor cfg) 0.5)
+  [ctx reinforcements]
+  (let [fs     (:fact-store ctx)
+        factor 0.5
         results (mapv (fn [{:keys [id score]}]
                         (let [node      (p/find-node fs id)
                               current-w (or (:node/weight node) 0.0)

@@ -1,13 +1,13 @@
 ;; Integrant system config, read via aero.
 ;; aero tags: #env VAR, #or [a b], #long "8080"
 {:config/env
- {:datomic-uri  #or [#env DATOMIC_URI "datomic:mem://ai-memory-dev"]
-  :port         #long #or [#env PORT "8080"]
+ {:datomic-uri    #or [#env DATOMIC_URI "datomic:mem://ai-memory-dev"]
+  :port           #long #or [#env PORT "8080"]
   :openai-api-key #env OPENAI_API_KEY
-  :qdrant-url   #or [#env QDRANT_URL "http://localhost:6333"]
-  :blob-path    #or [#env BLOB_PATH nil]
-  :project-path #env PROJECT_PATH
-  :api-token    #env API_TOKEN}
+  :qdrant-url     #or [#env QDRANT_URL "http://localhost:6333"]
+  :blob-path      #or [#env BLOB_PATH nil]
+  :project-path   #env PROJECT_PATH
+  :api-token      #env API_TOKEN}
 
  :metrics/registry {}
 
@@ -30,20 +30,23 @@
   :embedding  #ig/ref :store/embedding
   :collection "tags"}
 
+ ;; Unified context for all services: stores + config values they need.
+ ;; Service functions receive this as first arg instead of separate stores/cfg/metrics.
+ :service/context
+ {:fact-store       #ig/ref :store/fact
+  :vector-store     #ig/ref :store/vectors
+  :tag-vector-store #ig/ref :store/tag-vectors
+  :embedding        #ig/ref :store/embedding
+  :metrics          #ig/ref :metrics/registry
+  :cfg              #ig/ref :config/env}
+
  :service/seed
- {:stores {:fact-store       #ig/ref :store/fact
-           :vector-store     #ig/ref :store/vectors
-           :tag-vector-store #ig/ref :store/tag-vectors
-           :embedding        #ig/ref :store/embedding}}
+ {:ctx #ig/ref :service/context}
 
  :web/server
- {:cfg     #ig/ref :config/env
-  :conn    #ig/ref :db/conn
-  :stores  {:fact-store       #ig/ref :store/fact
-            :vector-store     #ig/ref :store/vectors
-            :tag-vector-store #ig/ref :store/tag-vectors
-            :embedding        #ig/ref :store/embedding}
-  :metrics #ig/ref :metrics/registry}
+ {:ctx  #ig/ref :service/context
+  :conn #ig/ref :db/conn
+  :cfg  #ig/ref :config/env}
 
  :scheduler/reconcile
  {:fact-store #ig/ref :store/fact}}

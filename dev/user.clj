@@ -14,12 +14,7 @@
 (def reset-all ig-repl/reset-all)
 
 (defn conn [] (:db/conn system))
-(defn registry [] (:metrics/registry system))
-(defn stores []
-  {:fact-store       (:store/fact system)
-   :vector-store     (:store/vectors system)
-   :tag-vector-store (:store/tag-vectors system)
-   :embedding        (:store/embedding system)})
+(defn ctx [] (:service/context system))
 
 (defn reconcile-counts!
   "Manually trigger tag count reconciliation from REPL."

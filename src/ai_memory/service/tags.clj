@@ -37,11 +37,10 @@
 
 (defn count-by-sets
   "Counts facts for each tag set.
-   `stores`   — map with :fact-store
-   `metrics`  — prometheus registry or nil
+   `ctx`      — service context with :fact-store, :metrics
    `tag-sets` — vec of tag-name vecs"
-  [stores metrics tag-sets]
-  (tag-query/count-by-tag-sets (:fact-store stores) metrics tag-sets))
+  [ctx tag-sets]
+  (tag-query/count-by-tag-sets (:fact-store ctx) (:metrics ctx) tag-sets))
 
 (defn resolve-tags
   "Fuzzy tag resolution via vector similarity search in Qdrant.
