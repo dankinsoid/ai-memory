@@ -141,11 +141,8 @@
                     (pr-str {:last-uuid   (:uuid (last messages))
                              :chunk-bytes chunk-bytes}))
 
-              ;; Write prev-session cache for continuation linking.
-              ;; /load picks this up to know which session was last active.
-              (when project
-                (spit (str state-dir "/prev-session-" project ".edn")
-                      (pr-str {:session-id session-id
-                               :project    project}))))))))))
+              ;; prev-session cache is written by session-end.bb (SessionEnd/clear only).
+              ;; Stop hook must NOT write it — parallel sessions would overwrite each other.
+              )))))))
 
 (System/exit 0)

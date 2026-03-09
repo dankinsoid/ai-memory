@@ -23,7 +23,7 @@
 
 (def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
 (def api-token (System/getenv "AI_MEMORY_TOKEN"))
-(def context-chars 12000) ;; ~3000 words — enough to recover conversation context
+(def context-chars 4000) ;; ~1000 words — conversation tail for recovery
 
 (defn api-post [path body]
   (try
@@ -184,15 +184,21 @@
                         :strengthen true})
           chain      (:chain result)]
       (if (seq chain)
-        (do
+        (let [latest (first chain)
+              older  (rest chain)]
           (println "# Session Chain Recovery")
           (println)
           (println (str (count chain) " previous session(s) in chain."))
-          (doseq [{:keys [blob-dir content]} chain
-                  :when blob-dir]
+          ;; Older sessions: just show summary line from fact content
+          (doseq [{:keys [content]} older]
             (println)
             (println "---")
-            (println (str "## " (or content "(no summary)")))
+            (println (str "## " (or content "(no summary)"))))
+          ;; Most recent session: load full blob content
+          (when-let [blob-dir (:blob-dir latest)]
+            (println)
+            (println "---")
+            (println (str "## " (or (:content latest) "(no summary)")))
             (println)
             (print-blob-content blob-dir))
           (println)
