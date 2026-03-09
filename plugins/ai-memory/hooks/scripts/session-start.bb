@@ -113,6 +113,8 @@
 
 ;; --- Build all filters ---
 
+(def tags-data (api-get "/api/tags" {"limit" "50"}))
+
 (def fact-filters
   (if project-name
     (let [ptag (str "project/" project-name)]
@@ -303,11 +305,21 @@
           (swap! seen into (map :db/id deduped))
           (format-sessions deduped "Other Projects")))
 
+      ;; Aspect tags only (lightweight orientation)
+      aspects-section
+      (let [aspect-names (->> tags-data
+                              (filter #(= "aspect" (get % (keyword "tag/tier"))))
+                              (map #(get % (keyword "tag/name")))
+                              sort)]
+        (when (seq aspect-names)
+          (str "Aspect tags: " (str/join ", " aspect-names))))
+
       timestamp    (format-timestamp)
 
       sections (remove nil? [universal-section
                              project-section
-                             sessions-section])]
+                             sessions-section
+                             aspects-section])]
 
   (when (seq sections)
     (println (str "# Memory Context\n\n"
