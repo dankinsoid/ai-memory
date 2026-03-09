@@ -4,28 +4,26 @@
             [cheshire.core :as json]
             [clojure.tools.logging :as log]))
 
-(def ^:private collection-name "nodes")
-
 (defn ensure-collection!
   "Creates the collection if it doesn't exist.
    `dim` — embedding dimension (e.g. 1536 for OpenAI text-embedding-3-small)."
-  [base-url dim]
+  [base-url collection dim]
   (try
-    (http/get (str base-url "/collections/" collection-name))
-    (log/info "Qdrant collection" collection-name "already exists")
+    (http/get (str base-url "/collections/" collection))
+    (log/info "Qdrant collection" collection "already exists")
     (catch Exception _
-      (http/put (str base-url "/collections/" collection-name)
+      (http/put (str base-url "/collections/" collection)
                 {:content-type :json
                  :body (json/generate-string
                         {:vectors {:size     dim
                                    :distance "Cosine"}})})
-      (log/info "Created Qdrant collection" collection-name "with dim" dim))))
+      (log/info "Created Qdrant collection" collection "with dim" dim))))
 
 (defn upsert-point!
-  "Upserts a single node vector. `point-id` — Datomic entity ID (long) or UUID string.
+  "Upserts a single vector. `point-id` — Datomic entity ID (long) or UUID string.
    `vector` — seq of doubles, `payload` — map with metadata."
-  [base-url point-id vector payload]
-  (http/put (str base-url "/collections/" collection-name "/points")
+  [base-url collection point-id vector payload]
+  (http/put (str base-url "/collections/" collection "/points")
             {:content-type :json
              :body (json/generate-string
                     {:points [{:id      point-id
@@ -35,14 +33,14 @@
 (defn search
   "Returns top-k nearest point IDs with scores.
    Optional `filter-map` for Qdrant filtering (by tags, type, etc.)."
-  ([base-url query-vector top-k]
-   (search base-url query-vector top-k nil))
-  ([base-url query-vector top-k filter-map]
+  ([base-url collection query-vector top-k]
+   (search base-url collection query-vector top-k nil))
+  ([base-url collection query-vector top-k filter-map]
    (let [body (cond-> {:vector query-vector
                         :limit  top-k
                         :with_payload true}
                 filter-map (assoc :filter filter-map))
-         resp (http/post (str base-url "/collections/" collection-name "/points/search")
+         resp (http/post (str base-url "/collections/" collection "/points/search")
                          {:content-type :json
                           :body         (json/generate-string body)
                           :as           :json})]
@@ -52,9 +50,9 @@
                          :payload (:payload r)}))))))
 
 (defn delete-point!
-  "Removes a node vector by point ID."
-  [base-url point-id]
-  (http/post (str base-url "/collections/" collection-name "/points/delete")
+  "Removes a vector by point ID."
+  [base-url collection point-id]
+  (http/post (str base-url "/collections/" collection "/points/delete")
              {:content-type :json
               :body (json/generate-string
                      {:points [point-id]})}))
@@ -62,19 +60,19 @@
 (defn delete-all-points!
   "Drops and recreates the collection — wipes all vectors.
    `dim` — embedding dimension used to recreate the collection."
-  [base-url dim]
+  [base-url collection dim]
   (try
-    (http/delete (str base-url "/collections/" collection-name)
+    (http/delete (str base-url "/collections/" collection)
                  {:content-type :json})
     (catch Exception _))
-  (ensure-collection! base-url dim))
+  (ensure-collection! base-url collection dim))
 
 (defn collection-info
   "Returns Qdrant collection stats: reachable?, status, vector-count, points-count.
    On any error returns {:reachable? false :error <message>}."
-  [base-url]
+  [base-url collection]
   (try
-    (let [resp   (http/get (str base-url "/collections/" collection-name) {:as :json})
+    (let [resp   (http/get (str base-url "/collections/" collection) {:as :json})
           result (get-in resp [:body :result])]
       {:reachable?   true
        :status       (:status result)

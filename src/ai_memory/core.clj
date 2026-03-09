@@ -2,6 +2,7 @@
   (:require [ai-memory.config :as config]
             [ai-memory.db.core :as db]
             [ai-memory.store.protocols :as p]
+            [ai-memory.service.tags :as tags]
             [ai-memory.metrics :as metrics]
             [ai-memory.scheduler :as scheduler]
             [ai-memory.web.handler :as web]
@@ -17,6 +18,8 @@
     (let [stores (config/create-stores cfg conn)
           dim    (p/embedding-dim (:embedding stores))
           _      (p/ensure-store! (:vector-store stores) dim)
+          _      (p/ensure-store! (:tag-vector-store stores) dim)
+          _      (tags/seed! stores)
           server (web/start {:port   (:port cfg)
                              :conn   conn
                              :cfg    cfg

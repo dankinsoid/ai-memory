@@ -28,8 +28,9 @@
 
 (defn create-stores
   "Creates all storage layer instances from config and Datomic conn.
-   Returns {:fact-store :vector-store :embedding}."
+   Returns {:fact-store :vector-store :tag-vector-store :embedding}."
   [cfg conn]
-  {:fact-store   (datomic/create conn)
-   :vector-store (qdrant/create cfg)
-   :embedding    (openai-emb/create cfg)})
+  {:fact-store        (datomic/create conn)
+   :vector-store      (qdrant/create cfg "nodes")
+   :tag-vector-store  (qdrant/create cfg "tags")
+   :embedding         (openai-emb/create cfg)})

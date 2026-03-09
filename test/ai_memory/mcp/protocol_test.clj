@@ -37,9 +37,10 @@
         conn       (db/connect uri)
         _          (db/ensure-schema conn)
         cfg        {:metrics nil :blob-path "/tmp/ai-memory-test-blobs"}
-        stores     {:fact-store   (datomic-store/create conn)
-                    :vector-store stub-vector-store
-                    :embedding    stub-embedding}
+        stores     {:fact-store        (datomic-store/create conn)
+                    :vector-store      stub-vector-store
+                    :tag-vector-store  stub-vector-store
+                    :embedding         stub-embedding}
         srv        (web/start {:port 0 :conn conn :cfg cfg :stores stores})
         port       (-> srv .getConnectors first .getLocalPort)]
     (binding [*conn*     conn

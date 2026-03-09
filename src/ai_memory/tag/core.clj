@@ -1,7 +1,14 @@
 (ns ai-memory.tag.core
   "Flat atomic tags. :tag/name (unique/identity) is the tag identifier."
   (:require [datomic.api :as d]
-            [ai-memory.db.core :as db]))
+            [ai-memory.db.core :as db])
+  (:import [java.util UUID]))
+
+(defn tag-point-id
+  "Deterministic UUID for a tag name, used as Qdrant point ID.
+   Uses v3 (MD5-based) UUID with 'tag:' prefix to avoid collisions."
+  [tag-name]
+  (str (UUID/nameUUIDFromBytes (.getBytes (str "tag:" tag-name) "UTF-8"))))
 
 (defn ensure-tag!
   "Creates tag if it doesn't exist. Returns tag name."

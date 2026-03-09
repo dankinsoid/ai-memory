@@ -156,9 +156,10 @@
   ;; --- Tags ---
 
   (ensure-tag! [_ tag-name]
-    (when-not (d/entid (d/db conn) [:tag/name tag-name])
-      (db-core/transact! conn [{:tag/name tag-name}]))
-    tag-name)
+    (if (d/entid (d/db conn) [:tag/name tag-name])
+      false
+      (do (db-core/transact! conn [{:tag/name tag-name}])
+          true)))
 
   (all-tags [_]
     (d/q '[:find [(pull ?t [:tag/name :tag/node-count :tag/tier]) ...]

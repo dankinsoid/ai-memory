@@ -1,9 +1,9 @@
 (ns ai-memory.web.api-test
   (:require [clojure.test :refer [deftest is testing]]
-            [ai-memory.web.api]))
+            [ai-memory.service.sessions]))
 
-(def ^:private strip-injected-tags #'ai-memory.web.api/strip-injected-tags)
-(def ^:private format-turn-as-markdown #'ai-memory.web.api/format-turn-as-markdown)
+(def ^:private strip-injected-tags #'ai-memory.service.sessions/strip-injected-tags)
+(def ^:private format-turn-as-markdown #'ai-memory.service.sessions/format-turn-as-markdown)
 
 ;; --- strip-injected-tags ---
 

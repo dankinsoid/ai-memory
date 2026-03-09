@@ -8,6 +8,7 @@
    Context state lives in RAM with TTL — no DB pollution."
   (:require [ai-memory.store.protocols :as p]
             [ai-memory.graph.node :as node]
+            [ai-memory.service.tags :as tags]
             [ai-memory.metrics :as metrics]
             [clojure.string :as str]
             [clojure.tools.logging :as log])
@@ -101,11 +102,13 @@
 (defn- process-node
   "Dedup check + create or reinforce.
    Returns {:id entity-id :status :created/:reinforced}."
-  [fact-store vector-store embedding node-data opts]
-  (let [tags      (when (seq (:tags node-data))
+  [stores node-data opts]
+  (let [fact-store    (:fact-store stores)
+        vector-store  (:vector-store stores)
+        embedding     (:embedding stores)
+        tags      (when (seq (:tags node-data))
                     (let [names (mapv str/trim (:tags node-data))]
-                      (doseq [n names] (p/ensure-tag! fact-store n))
-                      names))
+                      (tags/ensure! stores names)))
         duplicate (find-duplicate-node fact-store vector-store embedding
                                        (:content node-data) node-data opts)]
     (if duplicate
@@ -206,16 +209,15 @@
 (defn remember
   "Writes memory nodes with automatic associations.
    Tick auto-increments on every DB write.
-   `fact-store`       — implements FactStore protocol
-   `vector-store`     — implements VectorStore protocol
-   `embedding`        — implements EmbeddingProvider protocol
+   `stores` — map with :fact-store, :vector-store, :tag-vector-store, :embedding
    `params`:
      :nodes      — vec of {:content, :tags}
      :context-id — string: session-scoped linking (RAM cache)
                    :global: link to all recent nodes (DB query by tick)
                    nil: no context edges, only batch"
-  [fact-store vector-store embedding params]
-  (let [registry   (:metrics params)
+  [stores params]
+  (let [fact-store  (:fact-store stores)
+        registry   (:metrics params)
         opts       (merge defaults params)
         start-ns   (System/nanoTime)
         context-id (:context-id params)
@@ -228,7 +230,7 @@
         ;; Phase: nodes
         results
         (metrics/timed registry metrics/write-duration {:phase "nodes"}
-          (mapv #(process-node fact-store vector-store embedding % opts) nodes))
+          (mapv #(process-node stores % opts) nodes))
 
         node-ids (mapv :id results)
 
