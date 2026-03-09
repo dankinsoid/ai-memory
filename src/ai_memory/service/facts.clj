@@ -127,32 +127,46 @@
 
 (defn remember!
   "Semantic upsert: dedup search → reinforce (found) or create (new).
-   For the remember pipeline — the fact was accessed/used, so weight/cycle are bumped.
-   Delegates content/tags/embedding to patch! (reinforced) or create! (new).
+   When :id is present, updates existing fact directly (skips dedup).
+   When :blob-content is present, creates/updates blob on disk.
    `stores`          — map with :fact-store, :vector-store, :tag-vector-store, :embedding
-   `node-data`       — {:content str, :tags [str], ...}
+   `node-data`       — {:content str, :tags [str], :id long?, :blob-content str?}
    `opts`            — {:reinforcement-factor N, :dedup-threshold N}
-   Returns {:id eid, :status :created|:reinforced}."
+   Returns {:id eid, :status :created|:reinforced|:patched}."
   [stores node-data opts]
-  (let [content   (:content node-data)
-        factor    (or (:reinforcement-factor opts) 0.5)
-        threshold (or (:dedup-threshold opts) 0.85)
-        tags      (when (seq (:tags node-data))
-                    (mapv str/trim (:tags node-data)))
-        duplicate (find-duplicate stores content node-data threshold)]
-    (if duplicate
-      (let [eid        (:db/id duplicate)
-            current-w  (or (:node/weight duplicate) 0.0)
+  (let [explicit-id (:id node-data)
+        content     (:content node-data)
+        factor      (or (:reinforcement-factor opts) 0.5)
+        tags        (when (seq (:tags node-data))
+                      (mapv str/trim (:tags node-data)))]
+    (if explicit-id
+      ;; Explicit ID → direct update, skip dedup
+      (let [current-w  (or (:node/weight (p/find-node-by-eid (:fact-store stores) explicit-id)) 0.0)
             new-w      (decay/apply-score current-w 1.0 factor)]
-        (patch! stores eid {:content  content
-                            :tags     tags
-                            :tag-mode :merge
-                            :weight   new-w})
-        {:id eid :status :reinforced})
-      (let [result (patch! stores nil (-> node-data
-                                          (dissoc :node-type)
-                                          (assoc :tags tags)))]
-        {:id (:id result) :status :created}))))
+        (patch! stores explicit-id
+                (cond-> {:tags     tags
+                         :tag-mode :merge
+                         :weight   new-w}
+                  content                  (assoc :content content)
+                  (:blob-content node-data) (assoc :blob-content (:blob-content node-data))))
+        {:id explicit-id :status :patched})
+      ;; No ID → dedup search → reinforce or create
+      (let [duplicate (when content
+                        (find-duplicate stores content node-data
+                                        (or (:dedup-threshold opts) 0.85)))]
+        (if duplicate
+          (let [eid        (:db/id duplicate)
+                current-w  (or (:node/weight duplicate) 0.0)
+                new-w      (decay/apply-score current-w 1.0 factor)]
+            (patch! stores eid {:content  content
+                                :tags     tags
+                                :tag-mode :merge
+                                :weight   new-w})
+            {:id eid :status :reinforced})
+          (let [result (patch! stores nil (-> node-data
+                                              (dissoc :node-type :id)
+                                              (assoc :tags tags)))]
+            {:id (:id result) :status :created}))))))
 
 (defn delete!
   "Deletes a fact from fact store, vector store, and filesystem.

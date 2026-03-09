@@ -70,32 +70,19 @@
                   :required   ["filters"]}}
 
    {:name        "memory_remember"
-    :description "Store memory facts. Facts are deduplicated and linked. Call after each meaningful turn."
+    :description "Store or update memory facts. New facts are deduplicated and linked. Provide id to update an existing fact (skips dedup)."
     :inputSchema {:type       "object"
                   :properties {:nodes           {:type        "array"
                                                  :items       {:type       "object"
-                                                               :properties {:content   {:type "string" :description "Fact content (1-3 sentences)"}
-                                                                            :tags      {:type "array" :items {:type "string"} :description "Tag names"}}
-                                                               :required   ["content" "tags"]}
-                                                 :description "Memory nodes to store"}
+                                                               :properties {:content      {:type "string" :description "Fact content (1-3 sentences). Required for new facts."}
+                                                                            :tags         {:type "array" :items {:type "string"} :description "Tag names. Required for new facts."}
+                                                                            :id           {:type "integer" :description "Existing fact entity ID — update instead of create (skips dedup)"}
+                                                                            :blob_content {:type "string" :description "File content to store on disk (creates blob for new facts, updates for existing)"}}}
+                                                 :description "Memory nodes to store or update"}
                                :session_id      {:type        "string"
                                                  :description "Session ID for context-based linking across calls"}
                                :project         {:type        "string"
                                                  :description "Project name. Adds project/<name> tag to each node."}}}}
-
-   {:name        "memory_upsert_fact"
-    :description "Create or update a fact/blob. Routing: id → update existing fact, blob_dir → update existing blob, blob_content/path → create new blob, else → create plain fact. Updates reinforce the node (bump weight/cycle)."
-    :inputSchema {:type       "object"
-                  :properties {:id           {:type "integer" :description "Existing fact entity ID to update"}
-                               :blob_dir     {:type "string"  :description "Existing blob directory to update (from [blob: dir-name] in facts)"}
-                               :content      {:type "string"  :description "Fact content text (1-3 sentences)"}
-                               :blob_content {:type "string"  :description "File content to store on disk (triggers blob creation for new facts)"}
-                               :tags         {:type "array" :items {:type "string"} :description "Tag names (replaces existing on update)"}
-                               :title        {:type "string"  :description "Blob title / descriptive name"}
-                               :summary      {:type "string"  :description "Blob summary, 1-2 sentences (becomes fact content for blobs)"}
-                               :project      {:type "string"  :description "Project name (adds project/<name> tag)"}
-                               :type         {:type "string"  :description "Blob type: file, code, image, document"}
-                               :path         {:type "string"  :description "Absolute file path instead of blob_content"}}}}
 
    {:name        "memory_read_blob"
     :description "Execute a bash command inside a blob directory. Use to read blob contents (ls, cat, head, grep). Returns stdout, stderr, and exit code."
@@ -255,21 +242,13 @@
                    :offset   (or (:offset params) 0)}
     :get-facts   {:filters (:filters params)}
     :remember    {:nodes      (mapv (fn [n]
-                                      {:content (:content n)
-                                       :tags    (:tags n)})
+                                      (cond-> {:content (:content n)
+                                               :tags    (:tags n)}
+                                        (:id n)           (assoc :id (:id n))
+                                        (:blob_content n) (assoc :blob-content (:blob_content n))))
                                     (:nodes params))
                   :context-id (:session_id params)
                   :project    (:project params)}
-    :upsert-fact     {:id           (:id params)
-                      :blob-dir     (:blob_dir params)
-                      :content      (:content params)
-                      :blob-content (:blob_content params)
-                      :tags         (:tags params)
-                      :title        (:title params)
-                      :summary      (:summary params)
-                      :project      (:project params)
-                      :type         (:type params)
-                      :path         (:path params)}
     :read-blob       {:blob-dir (:blob_dir params)
                       :command  (:command params)}
     :reinforce       {:reinforcements (mapv (fn [r] {:id (:id r) :score (:score r)})
@@ -295,7 +274,6 @@
     :explore-tags       (server/handle-explore-tags cfg params)
     :get-facts          (server/handle-get-facts cfg params)
     :remember           (server/handle-remember cfg params)
-    :upsert-fact        (server/handle-upsert-fact cfg params)
     :read-blob          (server/handle-read-blob cfg params)
     :reinforce          (server/handle-reinforce cfg params)
     :session            (server/handle-session cfg params)
@@ -328,7 +306,6 @@
    "memory_explore_tags"          :explore-tags
    "memory_get_facts"            :get-facts
    "memory_remember"             :remember
-   "memory_upsert_fact"          :upsert-fact
    "memory_read_blob"            :read-blob
    "memory_reinforce"            :reinforce
    "memory_session"              :session
@@ -350,10 +327,6 @@
     :remember    (if (:error result)
                    (str "error: " (:error result))
                    (str "ids: " (str/join " " (map :id (:nodes result)))))
-    :upsert-fact (cond
-                   (:error result)    (str "error: " (:error result))
-                   (:blob-dir result) (str "blob: " (:blob-dir result))
-                   :else              "ok")
     :reinforce   (if (:error result) (str "error: " (:error result)) "ok")
     :session     (if (:error result) (str "error: " (:error result)) "ok")
     :project     (if (:error result) (str "error: " (:error result)) "ok")

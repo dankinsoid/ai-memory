@@ -93,7 +93,6 @@
                       ["/blobs" {:get (fn [req] (api/list-blobs ctx req))}]
                       ["/blobs/read" {:post (fn [req] (api/read-blob ctx req))}]
                       ["/blobs/exec" {:post (fn [req] (api/exec-blob ctx req))}]
-                      ["/facts/upsert" {:post (fn [req] (api/upsert-fact ctx req))}]
                       ["/session/sync" {:post (fn [req] (api/session-sync ctx req))}]
                       ["/session/continue" {:post (fn [req] (api/session-continue ctx req))}]
                       ["/session/chain" {:post (fn [req] (api/session-chain ctx req))}]

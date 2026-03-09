@@ -49,9 +49,6 @@
 (defn handle-remember [{:keys [base-url api-token]} params]
   (api-post base-url "/api/remember" params api-token))
 
-(defn handle-upsert-fact [{:keys [base-url api-token]} params]
-  (api-post base-url "/api/facts/upsert" params api-token))
-
 (defn handle-read-blob [{:keys [base-url api-token]} params]
   (api-post base-url "/api/blobs/exec" params api-token))
 

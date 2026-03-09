@@ -159,28 +159,6 @@
         (catch Exception e
           {:status 400 :body {:error (.getMessage e)}})))))
 
-(defn upsert-fact [ctx req]
-  (let [{:keys [id blob-dir] :as params} (:body-params req)]
-    (try
-      (cond
-        id
-        {:status 200
-         :body   (facts/patch! ctx id params)}
-
-        blob-dir
-        (let [node (p/find-node-by-blob-dir (:fact-store ctx) blob-dir)]
-          (if-not node
-            {:status 404 :body {:error (str "No fact for blob-dir: " blob-dir)}}
-            {:status 200
-             :body   (facts/patch! ctx (:db/id node) params)}))
-
-        ;; No id or blob-dir → create (blob if blob-content/path present, plain fact otherwise)
-        :else
-        {:status 201
-         :body   (facts/create! ctx params)})
-      (catch Exception e
-        {:status 400 :body {:error (ex-message e)}}))))
-
 ;; --- Sessions ---
 
 (defn session-sync [ctx req]
