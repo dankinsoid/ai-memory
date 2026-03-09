@@ -4,6 +4,7 @@
    Delegates all fact node operations (create, update, embed, tags) to service.facts."
   (:require [ai-memory.store.protocols :as p]
             [ai-memory.service.facts :as facts]
+            [ai-memory.decay.core :as decay]
             [ai-memory.graph.node :as node]
             [ai-memory.blob.store :as blob-store]
             [clojure.string :as str])
@@ -39,13 +40,10 @@
                               extra-tags)
                       distinct
                       (mapv str/trim))]
-    (if eid
-      (facts/patch! stores eid {:content  session-summary
-                                :tags     tag-vec
-                                :tag-mode :merge})
-      (:id (facts/create! stores {:content    session-summary
-                                  :tags       tag-vec
-                                  :session-id session-id})))))
+    (:id (facts/patch! stores eid {:content    session-summary
+                                    :tags       tag-vec
+                                    :tag-mode   :merge
+                                    :session-id session-id}))))
 
 ;; --- Project facts ---
 
@@ -71,11 +69,9 @@
         tag-vec  (->> (concat ["project" (str "project/" project)] extra-tags)
                       distinct
                       (mapv str/trim))]
-    (if eid
-      (facts/patch! stores eid {:content  summary
-                                :tags     tag-vec
-                                :tag-mode :merge})
-      (:id (facts/create! stores {:content summary :tags tag-vec})))))
+    (:id (facts/patch! stores eid {:content  summary
+                                    :tags     tag-vec
+                                    :tag-mode :merge}))))
 
 (defn project-update!
   "Updates project summary fact.
@@ -369,7 +365,9 @@
         (str "continuation of " prev-session-id) project nil))
     (let [new-eid  (find-session-fact fs session-id)
           prev-dir (:node/blob-dir (p/find-node fs prev-eid))]
-      (p/find-or-create-edge! fs new-eid prev-eid 0.5 {:type :continuation})
+      (if-let [[edge-id current-w] (p/find-edge-between fs new-eid prev-eid)]
+        (p/update-edge-weight! fs edge-id (decay/apply-score current-w 1.0 0.5))
+        (p/create-edge! fs {:from new-eid :to prev-eid :weight 0.5 :type :continuation}))
       (cond-> {:status "linked" :edge-created true}
         prev-dir (assoc :prev-blob-dir prev-dir)))))
 

@@ -9,6 +9,7 @@
    Context state lives in RAM with TTL — no DB pollution."
   (:require [ai-memory.store.protocols :as p]
             [ai-memory.service.facts :as facts]
+            [ai-memory.decay.core :as decay]
             [ai-memory.metrics :as metrics])
   (:import [java.time Instant]))
 
@@ -74,6 +75,16 @@
   [factor min-weight]
   (long (Math/floor (/ (Math/log min-weight) (Math/log factor)))))
 
+(defn- find-or-create-edge!
+  "Upsert edge: if exists, reinforce weight via apply-score; if not, create new.
+   `initial-weight` serves as both initial weight for new edges and reinforcement factor for existing."
+  [fact-store from-eid to-eid initial-weight opts]
+  (if-let [[edge-id current-w] (p/find-edge-between fact-store from-eid to-eid)]
+    (let [new-w (decay/apply-score current-w 1.0 initial-weight)]
+      (p/update-edge-weight! fact-store edge-id new-w))
+    (p/create-edge! fact-store (cond-> {:from from-eid :to to-eid :weight initial-weight}
+                                 (:type opts) (assoc :type (:type opts))))))
+
 (defn- process-node
   "Delegates dedup + create/reinforce to facts/remember!.
    Returns {:id entity-id :status :created/:reinforced}."
@@ -88,8 +99,8 @@
                     j (range (inc i) (count node-ids))]
                 [(nth node-ids i) (nth node-ids j)])]
     (doseq [[a b] pairs]
-      (p/find-or-create-edge! fact-store a b 0.9 nil)
-      (p/find-or-create-edge! fact-store b a 0.9 nil))
+      (find-or-create-edge! fact-store a b 0.9 nil)
+      (find-or-create-edge! fact-store b a 0.9 nil))
     (let [edge-count (* 2 (count pairs))]
       {:edges   edge-count
        :pairs   (count pairs)
@@ -111,7 +122,7 @@
             new-id  node-ids
             prev-id batch-ids
             :when (not (node-id-set prev-id))]
-      (p/find-or-create-edge! fact-store new-id prev-id w nil)
+      (find-or-create-edge! fact-store new-id prev-id w nil)
       (swap! cnt inc))
     (let [edges @cnt]
       {:edges        edges
@@ -138,7 +149,7 @@
                   delta     (- tick (:node/cycle prev-node 0))
                   w         (association-weight association-factor delta)]
             :when (>= w min-association-weight)]
-      (p/find-or-create-edge! fact-store new-id prev-id w nil)
+      (find-or-create-edge! fact-store new-id prev-id w nil)
       (swap! cnt inc))
     (let [edges       @cnt
           recent-cnt  (count (seq recent-ext))]

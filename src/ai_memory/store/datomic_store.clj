@@ -10,14 +10,6 @@
 
 (defn- now [] (Date.))
 
-(defn- apply-score
-  "Asymptotic approach to 1.0 for positive score; linear decrease for negative.
-   current ∈ [0.0, 1.0). Result never reaches 1.0 via regular reinforce."
-  [current score factor]
-  (if (pos? score)
-    (+ current (* score factor (- 1.0 current)))
-    (max 0.0 (+ current (* score factor)))))
-
 (defrecord DatomicStore [conn]
   p/FactStore
 
@@ -80,34 +72,16 @@
       (db-core/transact! conn (conj (into retract-txs add-txs)
                                      [:db/add eid :node/updated-at (now)]))))
 
-  (set-node-weight! [_ eid weight]
-    (let [w (max 0.0 (min 1.0 (double weight)))]
-      (db-core/transact! conn [[:db/add eid :node/weight w]
-                                [:db/add eid :node/updated-at (now)]])))
+  (update-node-weight! [_ eid weight]
+    (let [db   (d/db conn)
+          tick (db-core/next-tick db)]
+      (db-core/transact! conn [[:db/add eid :node/weight     (double weight)]
+                                [:db/add eid :node/cycle      tick]
+                                [:db/add eid :node/updated-at (now)]]
+                          tick)))
 
   (set-node-blob-dir! [_ eid blob-dir]
     (db-core/transact! conn [[:db/add eid :node/blob-dir blob-dir]]))
-
-  (reinforce-node! [_ eid content score factor]
-    (let [db             (d/db conn)
-          tick           (db-core/next-tick db)
-          current-weight (or (:node/weight (d/pull db [:node/weight] eid)) 0.0)
-          new-weight     (apply-score current-weight score factor)]
-      (db-core/transact! conn [[:db/add eid :node/content    content]
-                                [:db/add eid :node/weight     new-weight]
-                                [:db/add eid :node/cycle      tick]
-                                [:db/add eid :node/updated-at (now)]]
-                          tick)))
-
-  (reinforce-weight! [_ eid score factor]
-    (let [db             (d/db conn)
-          tick           (db-core/next-tick db)
-          current-weight (or (:node/weight (d/pull db [:node/weight] eid)) 0.0)
-          new-weight     (apply-score current-weight score factor)]
-      (db-core/transact! conn [[:db/add eid :node/weight     new-weight]
-                                [:db/add eid :node/cycle      tick]
-                                [:db/add eid :node/updated-at (now)]]
-                          tick)))
 
   (delete-node! [_ eid]
     (let [db         (d/db conn)
@@ -272,12 +246,13 @@
          (d/db conn) from-eid))
 
   (find-edge-between [_ from-eid to-eid]
-    (d/q '[:find ?eid .
+    (d/q '[:find [?eid ?w]
            :in $ ?from-eid ?to-eid
            :where
            [?e :edge/from ?from-eid]
            [?e :edge/to ?to-eid]
-           [?e :edge/id ?eid]]
+           [?e :edge/id ?eid]
+           [?e :edge/weight ?w]]
          (d/db conn) from-eid to-eid))
 
   (find-typed-edge-from [_ from-eid edge-type]
@@ -286,19 +261,10 @@
            :where [?e :edge/from ?from-eid] [?e :edge/type ?etype]]
          (d/db conn) from-eid edge-type))
 
-  (find-or-create-edge! [this from-eid to-eid initial-weight opts]
-    (let [existing (p/find-edge-between this from-eid to-eid)]
-      (if existing
-        (p/strengthen-edge! this existing 1.0 initial-weight)
-        (p/create-edge! this (cond-> {:from from-eid :to to-eid :weight initial-weight}
-                               (:type opts) (assoc :type (:type opts)))))))
-
-  (strengthen-edge! [_ edge-id score factor]
-    (let [db      (d/db conn)
-          tick    (db-core/next-tick db)
-          current (or (:edge/weight (d/pull db [:edge/weight] [:edge/id edge-id])) 0.0)
-          new-w   (apply-score current score factor)]
-      (db-core/transact! conn [{:edge/id edge-id :edge/weight new-w :edge/cycle tick}] tick)))
+  (update-edge-weight! [_ edge-id weight]
+    (let [db   (d/db conn)
+          tick (db-core/next-tick db)]
+      (db-core/transact! conn [{:edge/id edge-id :edge/weight (double weight) :edge/cycle tick}] tick)))
 
   (promote-edge-eternal! [_ edge-id]
     (let [db   (d/db conn)

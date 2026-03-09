@@ -66,20 +66,24 @@
         (p/replace-node-tags! fs eid tag-names)))))
 
 (defn patch!
-  "Direct DB update: overwrites content/tags without affecting weight or cycle.
-   Use for technical metadata updates (session summaries, project facts, tag corrections).
-   Re-embeds content if changed.
+  "Upsert: if eid is non-nil, updates existing node; if nil, creates new node.
+   Re-embeds content if changed. Weight update bumps cycle (tick) as well.
    `stores` — map with :fact-store, :vector-store, :tag-vector-store, :embedding
-   `eid`    — entity id
-   `opts`   — {:content str, :tags [str], :tag-mode :replace|:merge}
-              All fields optional. tag-mode defaults to :replace."
-  [stores eid {:keys [content tags tag-mode]}]
-  (let [fs (:fact-store stores)]
-    (when (and content (not (str/blank? content)))
-      (p/update-node-content! fs eid content)
-      (embed-node! stores eid content))
-    (apply-tags! stores eid tags tag-mode)
-    {:status "patched"}))
+   `eid`    — entity id, or nil to create a new node
+   `opts`   — {:content str, :tags [str], :tag-mode :replace|:merge, :weight N,
+               :session-id str, :blob-dir str, :sources str}
+              tag-mode defaults to :replace. session-id/blob-dir/sources only used on create."
+  [stores eid {:keys [content tags tag-mode weight] :as opts}]
+  (if (nil? eid)
+    (create! stores opts)
+    (let [fs (:fact-store stores)]
+      (when (some? weight)
+        (p/update-node-weight! fs eid weight))
+      (when (and content (not (str/blank? content)))
+        (p/update-node-content! fs eid content)
+        (embed-node! stores eid content))
+      (apply-tags! stores eid tags tag-mode)
+      {:id eid :status :patched})))
 
 (defn- entity-node?
   "Entity nodes use exact content match for dedup instead of vector search."
@@ -107,23 +111,24 @@
    `opts`            — {:reinforcement-factor N, :dedup-threshold N}
    Returns {:id eid, :status :created|:reinforced}."
   [stores node-data opts]
-  (let [fs        (:fact-store stores)
-        content   (:content node-data)
+  (let [content   (:content node-data)
         factor    (or (:reinforcement-factor opts) 0.5)
         threshold (or (:dedup-threshold opts) 0.85)
         tags      (when (seq (:tags node-data))
                     (mapv str/trim (:tags node-data)))
         duplicate (find-duplicate stores content node-data threshold)]
     (if duplicate
-      (let [eid (:db/id duplicate)]
-        (p/reinforce-weight! fs eid 1.0 factor)
+      (let [eid        (:db/id duplicate)
+            current-w  (or (:node/weight duplicate) 0.0)
+            new-w      (decay/apply-score current-w 1.0 factor)]
         (patch! stores eid {:content  content
                             :tags     tags
-                            :tag-mode :merge})
+                            :tag-mode :merge
+                            :weight   new-w})
         {:id eid :status :reinforced})
-      (let [result (create! stores (-> node-data
-                                       (dissoc :node-type)
-                                       (assoc :tags tags)))]
+      (let [result (patch! stores nil (-> node-data
+                                          (dissoc :node-type)
+                                          (assoc :tags tags)))]
         {:id (:id result) :status :created}))))
 
 (defn delete!
@@ -166,8 +171,11 @@
   (let [fs     (:fact-store stores)
         factor (or (:reinforcement-factor cfg) 0.5)
         results (mapv (fn [{:keys [id score]}]
-                        (p/reinforce-weight! fs id score factor)
-                        {:id id :score score})
+                        (let [node      (p/find-node fs id)
+                              current-w (or (:node/weight node) 0.0)
+                              new-w     (decay/apply-score current-w score factor)]
+                          (p/update-node-weight! fs id new-w)
+                          {:id id :score score}))
                       reinforcements)]
     {:reinforced (count results)
      :details    results}))
