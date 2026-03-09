@@ -55,7 +55,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "mcp__ai-memory__.*",
+        "matcher": "mcp__plugin_ai-memory_ai-memory__.*",
         "hooks": [
           {
             "type": "command",

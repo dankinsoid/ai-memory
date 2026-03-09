@@ -63,9 +63,15 @@ ssh root@IP 'bash -s' < scripts/server-init.sh
 
 CI: push to `main` → GitHub Actions auto-deploys via SSH. Secrets: `DO_HOST`, `DO_USER`, `DO_SSH_KEY`.
 
+Blobs are located at `/var/lib/docker/volumes/ai-memory_blob-data/_data` on the host.
+
 ## Key ADRs
 
 `doc/adr/` — read before architectural changes. Key: ADR-009 (tag retrieval), ADR-010 (blob storage).
+
+## Commit Rules
+
+Before each commit to `main`, bump the plugin version in `plugins/ai-memory/.claude-plugin/plugin.json` (patch version unless the change warrants minor/major).
 
 ## TODO Tracking
 

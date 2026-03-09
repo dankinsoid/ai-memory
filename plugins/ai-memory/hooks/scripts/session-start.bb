@@ -84,8 +84,8 @@
 
 (def priority-tiers ["critical-rule" "rule" "preference" "conventions"])
 (def tier-limit 10)
-(def universal-budget 20)
-(def project-budget 30)
+(def universal-budget 5)
+(def project-budget 10)
 
 ;; --- Filter generation ---
 ;; Each tier excludes all higher-priority tiers (cascading),
@@ -105,15 +105,13 @@
                      (conj prev-tiers tier)
                      (conj acc (cond-> {:tags [tier scope-tag] :limit tier-limit}
                                  (seq excludes) (assoc :exclude_tags (vec excludes))))))))
-        ;; Catch-all: exclude all tiers + base
+        ;; Catch-all: exclude all tiers + base, sort by weight so proven facts come first
         all-excludes (into base-excludes priority-tiers)]
     (conj tier-filters
-          (cond-> {:tags [scope-tag] :limit budget}
+          (cond-> {:tags [scope-tag] :limit budget :sort_by "weight"}
             (seq all-excludes) (assoc :exclude_tags (vec all-excludes))))))
 
 ;; --- Build all filters ---
-
-(def tags-data (api-get "/api/tags" {"limit" "50"}))
 
 (def fact-filters
   (if project-name
@@ -123,13 +121,13 @@
         (scope-filters "universal" [] universal-budget)
         ;; Project summary
         [{:tags ["project" ptag]}]
-        ;; Project scope: exclude session + universal
+        ;; Project scope: exclude session + universal; sort catch-all by weight
         (scope-filters ptag ["session" "universal"] project-budget)
         ;; Sessions
-        [{:tags ["session" ptag] :sort_by "date" :limit 7}])))
+        [{:tags ["session" ptag] :sort_by "date" :limit 4}])))
     (vec (concat
       (scope-filters "universal" [] universal-budget)
-      [{:tags ["session"] :sort_by "date" :limit 7}]))))
+      [{:tags ["session"] :sort_by "date" :limit 4}]))))
 
 (def facts-data (api-post "/api/tags/facts" {:filters fact-filters}))
 
@@ -305,13 +303,11 @@
           (swap! seen into (map :db/id deduped))
           (format-sessions deduped "Other Projects")))
 
-      tags-section (format-tags tags-data)
       timestamp    (format-timestamp)
 
       sections (remove nil? [universal-section
                              project-section
-                             sessions-section
-                             tags-section])]
+                             sessions-section])]
 
   (when (seq sections)
     (println (str "# Memory Context\n\n"
