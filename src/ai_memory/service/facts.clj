@@ -2,9 +2,11 @@
 (ns ai-memory.service.facts
   "Domain operations on facts (memory nodes): CRUD, search, reinforcement.
    Orchestrates FactStore, VectorStore, and EmbeddingProvider protocols.
+   Blob disk I/O delegated to service.blobs (facts owns the lifecycle).
    All tag creation goes through service.tags/ensure!."
   (:require [ai-memory.store.protocols :as p]
             [ai-memory.service.tags :as tags]
+            [ai-memory.service.blobs :as blobs]
             [ai-memory.graph.node :as node]
             [ai-memory.graph.delete :as delete]
             [ai-memory.decay.core :as decay]
@@ -22,17 +24,27 @@
 
 (defn create!
   "Creates a new fact node with tags and vector embedding.
-   `stores` — map with :fact-store, :vector-store, :tag-vector-store, :embedding
+   Optionally creates a blob on disk when :blob-content or :path is present.
+   `stores` — map with :fact-store, :vector-store, :tag-vector-store, :embedding, :blob-path
    `data`   — {:content str, :tags [str], ...} passed to p/create-node!
-   Returns {:id eid :status :created}."
+              Blob params (optional): :blob-content (text) or :path (file), :title, :summary, :type, :project
+              When blob, :summary (or :content) becomes fact content; :blob-content goes to disk.
+   Returns {:id eid, :blob-dir str|nil, :status :created}."
   [stores data]
-  (let [tags (when (seq (:tags data))
-               (tags/ensure! stores (mapv str/trim (:tags data))))
-        result (p/create-node! (:fact-store stores)
-                               (assoc data :tags tags))
-        eid (:id result)]
-    (embed-node! stores eid (:content data))
-    {:id eid :status :created}))
+  (let [blob?    (or (:blob-content data) (:path data))
+        blob-dir (when blob?
+                   (blobs/write-to-disk! (:blob-path stores) data))
+        content  (if blob?
+                   (or (:summary data) (:content data))
+                   (:content data))
+        tags     (when (seq (:tags data))
+                   (tags/ensure! stores (mapv str/trim (:tags data))))
+        result   (p/create-node! (:fact-store stores)
+                                 (cond-> (assoc data :tags tags :content content)
+                                   blob-dir (assoc :blob-dir blob-dir)))
+        eid      (:id result)]
+    (embed-node! stores eid content)
+    {:id eid :blob-dir blob-dir :status :created}))
 
 (defn get-by-id
   "Returns a single fact with full metadata, edges, and effective weight.
@@ -68,22 +80,33 @@
 (defn patch!
   "Upsert: if eid is non-nil, updates existing node; if nil, creates new node.
    Re-embeds content if changed. Weight update bumps cycle (tick) as well.
-   `stores` — map with :fact-store, :vector-store, :tag-vector-store, :embedding
+   If the fact has a blob-dir, also updates blob on disk when :blob-content or :summary present.
+   `stores` — map with :fact-store, :vector-store, :tag-vector-store, :embedding, :blob-path
    `eid`    — entity id, or nil to create a new node
    `opts`   — {:content str, :tags [str], :tag-mode :replace|:merge, :weight N,
+               :blob-content str, :summary str,
                :session-id str, :blob-dir str, :sources str}
-              tag-mode defaults to :replace. session-id/blob-dir/sources only used on create."
-  [stores eid {:keys [content tags tag-mode weight] :as opts}]
+              tag-mode defaults to :replace. session-id/blob-dir/sources only used on create.
+              :blob-content updates file on disk. :summary updates blob meta + becomes fact content."
+  [stores eid {:keys [content tags tag-mode weight blob-content summary] :as opts}]
   (if (nil? eid)
     (create! stores opts)
-    (let [fs (:fact-store stores)]
+    (let [fs      (:fact-store stores)
+          ;; Check if fact has a blob — update disk if blob params provided
+          node-bd (when (or blob-content summary)
+                    (:node/blob-dir (p/find-node-by-eid fs eid)))
+          _       (when node-bd
+                    (blobs/update-on-disk! (:blob-path stores) node-bd
+                                           {:content blob-content :summary summary :tags tags}))
+          ;; For blobs: summary becomes fact content; for plain facts: content as-is
+          fact-content (if node-bd (or summary content) content)]
       (when (some? weight)
         (p/update-node-weight! fs eid weight))
-      (when (and content (not (str/blank? content)))
-        (p/update-node-content! fs eid content)
-        (embed-node! stores eid content))
+      (when (and fact-content (not (str/blank? fact-content)))
+        (p/update-node-content! fs eid fact-content)
+        (embed-node! stores eid fact-content))
       (apply-tags! stores eid tags tag-mode)
-      {:id eid :status :patched})))
+      {:id eid :blob-dir node-bd :status :patched})))
 
 (defn- entity-node?
   "Entity nodes use exact content match for dedup instead of vector search."

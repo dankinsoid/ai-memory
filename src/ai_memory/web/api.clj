@@ -7,6 +7,7 @@
             [ai-memory.service.blobs :as blobs]
             [ai-memory.service.sessions :as sessions]
             [ai-memory.service.admin :as admin]
+            [ai-memory.store.protocols :as p]
             [ai-memory.graph.write :as write]
             [ai-memory.web.visualization :as viz]
             [clojure.string :as str]))
@@ -136,7 +137,7 @@
 (defn list-blobs [ctx req]
   (let [limit (some-> (get-in req [:query-params "limit"]) parse-long)]
     {:status 200
-     :body   {:blobs (blobs/list-blobs ctx {:limit (or limit 20)})}}))
+     :body   {:blobs (p/find-blob-nodes (:fact-store ctx) {:limit (or limit 20)})}}))
 
 (defn read-blob [ctx req]
   (let [{:keys [blob-dir section]} (:body-params req)
@@ -158,22 +159,27 @@
         (catch Exception e
           {:status 400 :body {:error (.getMessage e)}})))))
 
-(defn store-file [ctx req]
-  {:status 201
-   :body   (blobs/store! ctx (:body-params req))})
-
-(defn update-blob [ctx req]
-  (let [{:keys [blob-dir summary content tags]} (:body-params req)]
-    (if (str/blank? blob-dir)
-      {:status 400 :body {:error "blob-dir required"}}
-      (try
+(defn upsert-fact [ctx req]
+  (let [{:keys [id blob-dir] :as params} (:body-params req)]
+    (try
+      (cond
+        id
         {:status 200
-         :body   (blobs/update! ctx blob-dir
-                                {:summary summary :content content :tags tags})}
-        (catch Exception e
-          (if (= "No node found for blob-dir" (ex-message e))
-            {:status 404 :body {:error (str "No node found for blob-dir: " blob-dir)}}
-            (throw e)))))))
+         :body   (facts/patch! ctx id params)}
+
+        blob-dir
+        (let [node (p/find-node-by-blob-dir (:fact-store ctx) blob-dir)]
+          (if-not node
+            {:status 404 :body {:error (str "No fact for blob-dir: " blob-dir)}}
+            {:status 200
+             :body   (facts/patch! ctx (:db/id node) params)}))
+
+        ;; No id or blob-dir → create (blob if blob-content/path present, plain fact otherwise)
+        :else
+        {:status 201
+         :body   (facts/create! ctx params)})
+      (catch Exception e
+        {:status 400 :body {:error (ex-message e)}}))))
 
 ;; --- Sessions ---
 
