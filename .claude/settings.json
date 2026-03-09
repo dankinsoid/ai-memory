@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(plugins/ai-memory/.claude-plugin/plugin.json)",
+      "Bash(clj -M:dev -e:*)",
+      "WebFetch(domain:clojars.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.datomic.com)",
+      "WebFetch(domain:docs.claude.com)",
+      "Bash(clj -M:run --mcp-eval:*)",
+      "Bash(clj -Sdeps:*)",
+      "Bash(clj -M:mcp:*)",
+      "Bash(clj -M:test:*)",
+      "Bash(clj -M:run:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker compose down:*)",
+      "Bash(ssh:*)",
+      "Bash(claude mcp list:*)",
+      "Bash(claude mcp get:*)"
+    ]
+  }
+}
