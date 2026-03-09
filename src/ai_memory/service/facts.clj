@@ -1,11 +1,10 @@
 ;; @ai-generated(guided)
 (ns ai-memory.service.facts
-  "Domain operations on facts (memory nodes): CRUD, search, reinforcement, remember pipeline.
+  "Domain operations on facts (memory nodes): CRUD, search, reinforcement.
    Orchestrates FactStore, VectorStore, and EmbeddingProvider protocols.
    All tag creation goes through service.tags/ensure!."
   (:require [ai-memory.store.protocols :as p]
             [ai-memory.service.tags :as tags]
-            [ai-memory.graph.write :as write]
             [ai-memory.graph.node :as node]
             [ai-memory.graph.delete :as delete]
             [ai-memory.decay.core :as decay]
@@ -54,27 +53,78 @@
          :effective-weight eff-w
          :edges            edges}))))
 
-(defn update!
-  "Updates a fact's content, tags, and/or weight. Reinforces on access.
+(defn- apply-tags!
+  "Ensures tags exist and applies them to a node.
+   `tag-mode` — :replace (default, removes old tags not in new set) or :merge (adds without removing)."
+  [stores eid tags tag-mode]
+  (when (some? tags)
+    (let [fs       (:fact-store stores)
+          tag-names (mapv str/trim tags)]
+      (tags/ensure! stores tag-names)
+      (if (= :merge tag-mode)
+        (p/update-node-tags! fs eid tag-names)
+        (p/replace-node-tags! fs eid tag-names)))))
+
+(defn patch!
+  "Direct DB update: overwrites content/tags without affecting weight or cycle.
+   Use for technical metadata updates (session summaries, project facts, tag corrections).
+   Re-embeds content if changed.
    `stores` — map with :fact-store, :vector-store, :tag-vector-store, :embedding
-   `cfg`    — {:reinforcement-factor N}
    `eid`    — entity id
-   `opts`   — {:content str, :tags [str], :weight double} — all optional"
-  [stores cfg eid {:keys [content tags weight]}]
-  (let [fs     (:fact-store stores)
-        factor (or (:reinforcement-factor cfg) 0.5)]
-    (if (and content (not (str/blank? content)))
-      (do
-        (p/reinforce-node! fs eid content 1.0 factor)
-        (embed-node! stores eid content))
-      (p/reinforce-weight! fs eid 1.0 factor))
-    (when (some? tags)
-      (let [tag-names (mapv str/trim tags)]
-        (tags/ensure! stores tag-names)
-        (p/replace-node-tags! fs eid tag-names)))
-    (when (some? weight)
-      (p/set-node-weight! fs eid weight))
-    {:status "updated"}))
+   `opts`   — {:content str, :tags [str], :tag-mode :replace|:merge}
+              All fields optional. tag-mode defaults to :replace."
+  [stores eid {:keys [content tags tag-mode]}]
+  (let [fs (:fact-store stores)]
+    (when (and content (not (str/blank? content)))
+      (p/update-node-content! fs eid content)
+      (embed-node! stores eid content))
+    (apply-tags! stores eid tags tag-mode)
+    {:status "patched"}))
+
+(defn- entity-node?
+  "Entity nodes use exact content match for dedup instead of vector search."
+  [node-data]
+  (some #(= % "entity") (:tags node-data)))
+
+(defn- find-duplicate
+  "Entity nodes: exact content match. Other nodes: vector similarity search."
+  [stores content node-data dedup-threshold]
+  (if (entity-node? node-data)
+    (p/find-node-by-content (:fact-store stores) content)
+    (try
+      (node/find-duplicate (:fact-store stores) (:vector-store stores)
+                           (:embedding stores) content dedup-threshold)
+      (catch Exception e
+        (log/warn e "Dedup search failed, will create new node")
+        nil))))
+
+(defn remember!
+  "Semantic upsert: dedup search → reinforce (found) or create (new).
+   For the remember pipeline — the fact was accessed/used, so weight/cycle are bumped.
+   Delegates content/tags/embedding to patch! (reinforced) or create! (new).
+   `stores`          — map with :fact-store, :vector-store, :tag-vector-store, :embedding
+   `node-data`       — {:content str, :tags [str], ...}
+   `opts`            — {:reinforcement-factor N, :dedup-threshold N}
+   Returns {:id eid, :status :created|:reinforced}."
+  [stores node-data opts]
+  (let [fs        (:fact-store stores)
+        content   (:content node-data)
+        factor    (or (:reinforcement-factor opts) 0.5)
+        threshold (or (:dedup-threshold opts) 0.85)
+        tags      (when (seq (:tags node-data))
+                    (mapv str/trim (:tags node-data)))
+        duplicate (find-duplicate stores content node-data threshold)]
+    (if duplicate
+      (let [eid (:db/id duplicate)]
+        (p/reinforce-weight! fs eid 1.0 factor)
+        (patch! stores eid {:content  content
+                            :tags     tags
+                            :tag-mode :merge})
+        {:id eid :status :reinforced})
+      (let [result (create! stores (-> node-data
+                                       (dissoc :node-type)
+                                       (assoc :tags tags)))]
+        {:id (:id result) :status :created}))))
 
 (defn delete!
   "Deletes a fact from fact store, vector store, and filesystem.
@@ -122,15 +172,6 @@
     {:reinforced (count results)
      :details    results}))
 
-(defn remember!
-  "Full write pipeline: dedup, edges, context linking.
-   `stores` — map with :fact-store, :vector-store, :tag-vector-store, :embedding
-   `cfg`    — {:metrics registry}
-   `params` — {:nodes [...] :context-id ... :project ...}
-   Returns {:nodes [...] :edges-created N ...}."
-  [stores cfg params]
-  (let [full-params (assoc params :metrics (:metrics cfg))]
-    (write/remember stores full-params)))
 
 (defn promote-eternal!
   "Promotes an edge to eternal (weight = 1.0, never decays).

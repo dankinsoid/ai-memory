@@ -4,6 +4,7 @@
             [ai-memory.db.core :as db]
             [ai-memory.graph.edge :as edge]
             [ai-memory.graph.write :as write]
+            [ai-memory.service.facts :as facts]
             [ai-memory.store.protocols :as p]
             [ai-memory.store.datomic-store :as datomic-store]
             [ai-memory.tag.core :as tag]))
@@ -263,21 +264,19 @@
 (deftest entity-dedup-exact-match-test
   (testing "entity nodes dedup via exact content match, not vector search"
     (let [eid       (create-entity-node! *conn* "Clojure" 1)
+          stores    {:fact-store *fact-store* :vector-store stub-vector-store
+                     :embedding stub-embedding}
           node-data {:content "Clojure" :tags ["entity"]}
-          opts      {:dedup-threshold 0.85 :reinforcement-factor 0.5}
-          result    (#'write/find-duplicate-node
-                      *fact-store* stub-vector-store stub-embedding
-                      "Clojure" node-data opts)]
+          result    (#'facts/find-duplicate stores "Clojure" node-data 0.85)]
       (is (some? result))
       (is (= eid (:db/id result))))))
 
 (deftest entity-not-found-creates-new-test
   (testing "entity with no match creates new node"
-    (let [node-data {:content "new-entity" :tags ["entity"]}
-          opts      {:dedup-threshold 0.85 :reinforcement-factor 0.5}
-          result    (#'write/find-duplicate-node
-                      *fact-store* stub-vector-store stub-embedding
-                      "new-entity" node-data opts)]
+    (let [stores    {:fact-store *fact-store* :vector-store stub-vector-store
+                     :embedding stub-embedding}
+          node-data {:content "new-entity" :tags ["entity"]}
+          result    (#'facts/find-duplicate stores "new-entity" node-data 0.85)]
       (is (nil? result)))))
 
 (deftest entity-hub-via-batch-edges-test

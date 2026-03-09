@@ -4,14 +4,12 @@
 ;; Current read path uses tag taxonomy only (see ADR-009).
 
 (ns ai-memory.graph.write
-  "Orchestrates memory write pipeline: dedup, batch edges, context edges.
+  "Orchestrates memory write pipeline: batch edges, context edges.
+   Delegates node dedup/create/reinforce to service.facts.
    Context state lives in RAM with TTL — no DB pollution."
   (:require [ai-memory.store.protocols :as p]
-            [ai-memory.graph.node :as node]
-            [ai-memory.service.tags :as tags]
-            [ai-memory.metrics :as metrics]
-            [clojure.string :as str]
-            [clojure.tools.logging :as log])
+            [ai-memory.service.facts :as facts]
+            [ai-memory.metrics :as metrics])
   (:import [java.time Instant]))
 
 ;; --- Defaults ---
@@ -76,61 +74,11 @@
   [factor min-weight]
   (long (Math/floor (/ (Math/log min-weight) (Math/log factor)))))
 
-(defn- entity-node? [node-data]
-  (some #(= % "entity") (:tags node-data)))
-
-(defn- embed-node!
-  "Embeds a node's content into the vector store. Logs warning on failure, never throws."
-  [vector-store embedding eid content]
-  (try
-    (let [vector (p/embed-document embedding content)]
-      (p/upsert! vector-store eid vector {}))
-    (catch Exception e
-      (log/warn e "Failed to vectorize node" eid))))
-
-(defn- find-duplicate-node
-  "Entity nodes: exact content match. Other nodes: vector search."
-  [fact-store vector-store embedding content node-data opts]
-  (if (entity-node? node-data)
-    (p/find-node-by-content fact-store content)
-    (try
-      (node/find-duplicate fact-store vector-store embedding content (:dedup-threshold opts))
-      (catch Exception e
-        (log/warn e "Dedup search failed, creating new node")
-        nil))))
-
 (defn- process-node
-  "Dedup check + create or reinforce.
+  "Delegates dedup + create/reinforce to facts/remember!.
    Returns {:id entity-id :status :created/:reinforced}."
   [stores node-data opts]
-  (let [fact-store    (:fact-store stores)
-        vector-store  (:vector-store stores)
-        embedding     (:embedding stores)
-        tags      (when (seq (:tags node-data))
-                    (let [names (mapv str/trim (:tags node-data))]
-                      (tags/ensure! stores names)))
-        duplicate (find-duplicate-node fact-store vector-store embedding
-                                       (:content node-data) node-data opts)]
-    (if duplicate
-      (let [eid (:db/id duplicate)]
-        (p/reinforce-node! fact-store eid
-                           (:content node-data)
-                           1.0
-                           (:reinforcement-factor opts))
-        (p/update-node-tags! fact-store eid tags)
-        ;; Re-embed after content update
-        (when-not (entity-node? node-data)
-          (embed-node! vector-store embedding eid (:content node-data)))
-        {:id eid :status :reinforced})
-      (let [result (p/create-node! fact-store
-                     (-> node-data
-                         (dissoc :tags :node-type)
-                         (assoc :tags tags)))
-            eid    (:id result)]
-        ;; Embed non-entity nodes
-        (when-not (entity-node? node-data)
-          (embed-node! vector-store embedding eid (:content node-data)))
-        {:id eid :status :created}))))
+  (facts/remember! stores node-data opts))
 
 (defn- create-batch-edges
   "Creates bidirectional edges between all nodes in the batch (initial-weight=0.9).

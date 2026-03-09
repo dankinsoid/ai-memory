@@ -7,6 +7,7 @@
             [ai-memory.service.blobs :as blobs]
             [ai-memory.service.sessions :as sessions]
             [ai-memory.service.admin :as admin]
+            [ai-memory.graph.write :as write]
             [ai-memory.web.visualization :as viz]
             [clojure.string :as str]))
 
@@ -55,11 +56,11 @@
         {:status 200 :body result}
         {:status 404 :body {:error "Not found"}}))))
 
-(defn update-fact [stores cfg req]
+(defn update-fact [stores _cfg req]
   (let [id (some-> (get-in req [:path-params :id]) parse-long)]
     (if-not id
       {:status 400 :body {:error "id required"}}
-      {:status 200 :body (facts/update! stores cfg id (:body-params req))})))
+      {:status 200 :body (facts/patch! stores id (:body-params req))})))
 
 (defn delete-fact [stores cfg req]
   (let [eid (some-> (get-in req [:path-params :id]) parse-long)]
@@ -128,7 +129,7 @@
   (let [body   (:body-params req)
         nodes  (:nodes body)
         result (when (seq nodes)
-                 (facts/remember! stores cfg body))]
+                 (write/remember stores (assoc body :metrics (:metrics cfg))))]
     {:status 201
      :body   (or result {:nodes [] :edges-created 0})}))
 
@@ -210,11 +211,11 @@
 
 ;; --- Project ---
 
-(defn project-update [stores _cfg req]
+(defn project-update [stores cfg req]
   (let [{:keys [project summary tags]} (:body-params req)]
     (if (or (str/blank? project) (str/blank? summary))
       {:status 400 :body {:error "project and summary are required"}}
-      (do (sessions/project-update! stores project summary tags)
+      (do (sessions/project-update! stores cfg project summary tags)
           {:status 200 :body {:project project}}))))
 
 ;; --- Admin ---
