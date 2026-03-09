@@ -1,31 +1,25 @@
 (ns user
-  (:require [ai-memory.core :as core]
-            [ai-memory.config :as config]
+  (:require [integrant.repl :as ig-repl]
+            [integrant.repl.state :refer [system]]
+            [ai-memory.system :as sys]
             [ai-memory.db.core :as db]
-            [ai-memory.scheduler :as scheduler]
             [ai-memory.tag.query :as tag-query]
             [datomic.api :as d]))
 
-(defonce system (atom nil))
+(ig-repl/set-prep! sys/read-config)
 
-(defn start []
-  (let [cfg (config/load-config)]
-    (reset! system (core/start-system cfg))
-    :started))
+(def go ig-repl/go)
+(def halt ig-repl/halt)
+(def reset ig-repl/reset)
+(def reset-all ig-repl/reset-all)
 
-(defn stop []
-  (when-let [{:keys [server scheduler]} @system]
-    (scheduler/stop scheduler)
-    (.stop server)
-    (reset! system nil)
-    :stopped))
-
-(defn restart []
-  (stop)
-  (start))
-
-(defn conn [] (:conn @system))
-(defn registry [] (:metrics @system))
+(defn conn [] (:db/conn system))
+(defn registry [] (:metrics/registry system))
+(defn stores []
+  {:fact-store       (:store/fact system)
+   :vector-store     (:store/vectors system)
+   :tag-vector-store (:store/tag-vectors system)
+   :embedding        (:store/embedding system)})
 
 (defn reconcile-counts!
   "Manually trigger tag count reconciliation from REPL."
@@ -33,9 +27,9 @@
   (tag-query/reconcile-counts! (conn)))
 
 (comment
-  (start)
-  (stop)
-  (restart)
+  (go)
+  (halt)
+  (reset)
   (reconcile-counts!)
 
   ;; Get current db value

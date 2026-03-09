@@ -1,0 +1,49 @@
+;; Integrant system config, read via aero.
+;; aero tags: #env VAR, #or [a b], #long "8080"
+{:config/env
+ {:datomic-uri  #or [#env DATOMIC_URI "datomic:mem://ai-memory-dev"]
+  :port         #long #or [#env PORT "8080"]
+  :openai-api-key #env OPENAI_API_KEY
+  :qdrant-url   #or [#env QDRANT_URL "http://localhost:6333"]
+  :blob-path    #or [#env BLOB_PATH nil]
+  :project-path #env PROJECT_PATH
+  :api-token    #env API_TOKEN}
+
+ :metrics/registry {}
+
+ :db/conn
+ {:cfg #ig/ref :config/env}
+
+ :store/fact
+ {:conn #ig/ref :db/conn}
+
+ :store/embedding
+ {:cfg #ig/ref :config/env}
+
+ :store/vectors
+ {:cfg        #ig/ref :config/env
+  :embedding  #ig/ref :store/embedding
+  :collection "nodes"}
+
+ :store/tag-vectors
+ {:cfg        #ig/ref :config/env
+  :embedding  #ig/ref :store/embedding
+  :collection "tags"}
+
+ :service/seed
+ {:stores {:fact-store       #ig/ref :store/fact
+           :vector-store     #ig/ref :store/vectors
+           :tag-vector-store #ig/ref :store/tag-vectors
+           :embedding        #ig/ref :store/embedding}}
+
+ :web/server
+ {:cfg     #ig/ref :config/env
+  :conn    #ig/ref :db/conn
+  :stores  {:fact-store       #ig/ref :store/fact
+            :vector-store     #ig/ref :store/vectors
+            :tag-vector-store #ig/ref :store/tag-vectors
+            :embedding        #ig/ref :store/embedding}
+  :metrics #ig/ref :metrics/registry}
+
+ :scheduler/reconcile
+ {:fact-store #ig/ref :store/fact}}
