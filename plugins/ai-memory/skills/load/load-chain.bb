@@ -18,7 +18,6 @@
 
 (require '[cheshire.core :as json]
          '[babashka.http-client :as http]
-         '[babashka.fs :as fs]
          '[clojure.string :as str])
 
 (def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
@@ -157,28 +156,8 @@
     flag
     (let [session-id flag
           project    value  ;; optional 2nd arg: project name for isolation
-          ;; Check for prev-session cache files from Stop/SessionEnd hooks.
-          ;; If found, create continuation edge before traversing chain.
-          ;; Skip cache files that reference the current session.
-          ;; When project is provided, only process that project's cache file.
-          state-dir  (str (System/getenv "HOME") "/.claude/hooks/state")
-          cache-files (if project
-                        (let [f (fs/path state-dir (str "prev-session-" project ".edn"))]
-                          (when (fs/exists? f) [f]))
-                        (fs/glob state-dir "prev-session-*.edn"))
-          _          (doseq [f cache-files]
-                       (try
-                         (let [cache   (read-string (slurp (str f)))
-                               proj    (:project cache)
-                               prev-id (:session-id cache)]
-                           (when (and prev-id proj
-                                      (not= prev-id session-id))
-                             (api-post "/api/session/continue"
-                               {:prev_session_id prev-id
-                                :session_id      session-id
-                                :project         proj})
-                             (fs/delete f)))
-                         (catch Exception _ nil)))
+          ;; Continuation edges are created by session-start.bb (on clear).
+          ;; Here we just traverse the existing chain.
           result     (api-post "/api/session/chain"
                        {:session_id session-id
                         :strengthen true})
@@ -204,28 +183,34 @@
           (println)
           (println "---")
           (println "Continuation edge strengthened."))
-        ;; Fallback: no chain found — load most recent session blob from memory
-        ;; Filter by project tag if provided, to avoid cross-project contamination.
+        ;; No chain found — show candidates for user to choose from.
+        ;; Output structured list; the agent (SKILL.md) will present these
+        ;; as choices via AskUserQuestion.
         (let [resp     (api-post "/api/tags/facts"
-                         {:filters [{:tags    (cond-> ["session"] project (conj project))
-                                     :sort_by "date" :limit 5}]})
+                         {:filters [{:tags    (cond-> ["session"] project (conj (str "project/" project)))
+                                     :sort_by "date" :limit 8}]})
               facts    (:facts (first (:results resp)))
-              ;; Only facts with blob-dir, skip current session
-              ;; blob-dir uses short UUID prefix (first 8 chars)
               sid-prefix (subs session-id 0 (min 8 (count session-id)))
-              prev     (->> facts
-                            (filter #(get % (keyword "node/blob-dir")))
-                            (remove #(str/includes?
-                                       (get % (keyword "node/blob-dir"))
-                                       sid-prefix))
-                            first)]
-          (if-let [blob-dir (get prev (keyword "node/blob-dir"))]
+              candidates (->> facts
+                              (filter #(get % (keyword "node/blob-dir")))
+                              (remove #(str/includes?
+                                         (get % (keyword "node/blob-dir"))
+                                         sid-prefix)))]
+          (if (seq candidates)
             (do
-              (println "# Session Recovery")
+              (println "# CHOOSE_SESSION")
               (println)
-              (println (str "*Loaded from: " blob-dir "*"))
+              (println "No continuation chain found. Recent sessions:")
               (println)
-              (print-blob-content blob-dir))
+              (doseq [[i f] (map-indexed vector candidates)]
+                (let [content  (get f (keyword "node/content"))
+                      blob-dir (get f (keyword "node/blob-dir"))
+                      lines    (some-> content (str/split #"\n"))
+                      title    (first lines)
+                      summary  (second lines)]
+                  (println (str (inc i) ". **" (or title "(untitled)") "**"
+                                (when summary (str " — " summary))
+                                " `[blob: " blob-dir "]`")))))
             (println "No previous session found.")))))
 
     :else

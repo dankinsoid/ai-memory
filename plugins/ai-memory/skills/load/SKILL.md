@@ -30,6 +30,19 @@ bb <this-skill-dir>/load-chain.bb <current-session-id> <project-name>
 
 For a specific blob dir, use `memory_read_blob` to read its contents.
 
+## Handling CHOOSE_SESSION
+
+If the script output starts with `# CHOOSE_SESSION`, no automatic chain was found.
+The output contains a numbered list of recent session candidates.
+
+**You MUST ask the user which session to load** using a question with the candidate list.
+Present the candidates clearly (number, title, summary). Let the user pick by number or description.
+
+Once the user picks, load that session's blob via:
+```bash
+bb <this-skill-dir>/load-chain.bb --blob <blob-dir>
+```
+
 ## After loading
 
 **Do NOT announce what you loaded.** Do not say "here's what I recovered" or "what should we do next?".

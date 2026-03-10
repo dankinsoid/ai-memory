@@ -68,7 +68,8 @@
     (let [cache-file (str state-dir "/prev-session-" project ".edn")]
       (spit cache-file
             (pr-str {:session-id session-id
-                     :project    project}))
+                     :project    project
+                     :timestamp  (str (java.time.Instant/now))}))
       ;; Log cache write
       (spit (str state-dir "/session-end.log")
             (str (java.time.Instant/now)

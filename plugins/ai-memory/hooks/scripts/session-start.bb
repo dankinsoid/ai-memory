@@ -19,6 +19,7 @@
 (require '[cheshire.core :as json]
          '[babashka.http-client :as http]
          '[babashka.process :as process]
+         '[babashka.fs :as fs]
          '[clojure.string :as str])
 
 (defn git-project-name [cwd]
@@ -86,6 +87,43 @@
 ;; --- Detect project from cwd ---
 
 (def project-name (derive-project cwd))
+(def session-id (:session_id input))
+(def hook-reason (:reason input))
+
+;; --- Auto-chain on clear ---
+;; When reason=clear, SessionEnd just wrote prev-session cache.
+;; If it's fresh (< 2 min), create continuation edge immediately.
+;; This is the only reliable auto-chain signal: SessionEnd(clear) → SessionStart(clear)
+;; happen back-to-back within seconds.
+
+(def max-auto-chain-age-secs 120)
+
+(when (and (= hook-reason "clear") session-id project-name)
+  (let [state-dir  (str (System/getenv "HOME") "/.claude/hooks/state")
+        cache-file (str state-dir "/prev-session-" project-name ".edn")]
+    (when (fs/exists? cache-file)
+      (try
+        (let [cache     (read-string (slurp cache-file))
+              prev-id   (:session-id cache)
+              timestamp (:timestamp cache)
+              age-secs  (when timestamp
+                          (let [then (java.time.Instant/parse timestamp)
+                                now  (java.time.Instant/now)]
+                            (.getSeconds (java.time.Duration/between then now))))]
+          (if (and prev-id
+                    (not= prev-id session-id)
+                    age-secs
+                    (<= age-secs max-auto-chain-age-secs))
+            ;; Fresh cache — create continuation edge and clean up
+            (do
+              (api-post "/api/session/continue"
+                {:prev_session_id prev-id
+                 :session_id      session-id
+                 :project         project-name})
+              (fs/delete cache-file))
+            ;; Stale or missing timestamp — just delete, don't chain
+            (fs/delete cache-file)))
+        (catch Exception _ nil)))))
 
 ;; --- Priority tiers & budgets ---
 
