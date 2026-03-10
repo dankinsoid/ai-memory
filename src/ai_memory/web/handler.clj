@@ -78,7 +78,6 @@
                       ["/facts/:id" {:get    (fn [req] (api/get-fact-detail ctx req))
                                      :patch  (fn [req] (api/update-fact ctx req))
                                      :delete (fn [req] (api/delete-fact ctx req))}]
-                      ["/admin/reset" {:post (fn [req] (api/reset-db ctx req))}]
                       ["/admin/reindex" {:post (fn [req] (api/reindex-vectors ctx req))}]
                       ;; export/import moved to /api/admin/export and /import
                       ;; as binary routes (outside muuntaja) — see below

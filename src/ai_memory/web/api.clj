@@ -205,10 +205,6 @@
 
 ;; --- Admin ---
 
-(defn reset-db [ctx _req]
-  {:status 200
-   :body   (admin/reset-all! ctx)})
-
 (defn reindex-vectors [ctx _req]
   {:status 200
    :body   (admin/reindex! ctx)})

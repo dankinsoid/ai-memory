@@ -1,9 +1,8 @@
 ;; @ai-generated(guided)
 (ns ai-memory.service.admin
-  "Admin operations: health checks, diagnostics, stats, reindexing, reset."
+  "Admin operations: health checks, diagnostics, stats, reindexing."
   (:require [ai-memory.store.protocols :as p]
             [ai-memory.graph.node :as node]
-            [ai-memory.graph.delete :as delete]
             [ai-memory.service.tags :as tags]))
 
 (defn health
@@ -54,9 +53,3 @@
         tag-result  (tags/seed! ctx)]
     (merge node-result tag-result)))
 
-(defn reset-all!
-  "Wipes all facts, edges, blobs, and vectors.
-   `ctx` — service context with :fact-store, :vector-store, :blob-path
-   Returns {:deleted-nodes N :deleted-edges M :deleted-blobs B}."
-  [ctx]
-  (delete/reset-all! (:fact-store ctx) (:vector-store ctx) (:blob-path ctx)))
