@@ -60,10 +60,11 @@
       (if (= backend :auto) :openai backend))))
 
 (defmethod ig/init-key :store/embedding [_ {:keys [cfg]}]
-  (let [backend (resolve-embedding-backend cfg)]
-    (log/info "Embedding backend:" backend)
+  (let [backend (resolve-embedding-backend cfg)
+        dim     (:embedding-dim cfg)]
+    (log/info "Embedding backend:" backend "dim:" dim)
     (case backend
-      :random (rand-emb/create)
+      :random (rand-emb/create dim)
       :openai (openai-emb/create cfg))))
 
 (defmethod ig/init-key :service/context

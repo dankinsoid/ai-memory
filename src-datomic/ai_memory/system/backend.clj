@@ -23,19 +23,20 @@
 
 (defn- make-vector-store
   "Creates a VectorStore based on :vector-backend config.
-   :memory — in-memory (no external deps), :qdrant — real Qdrant."
-  [cfg embedding collection]
+   :memory — in-memory (no external deps), :qdrant — real Qdrant.
+   Dimension comes from config :embedding-dim, not from embedding provider."
+  [cfg collection]
   (let [backend (or (:vector-backend cfg) :qdrant)
         store   (case backend
                   :memory (mem-vectors/create collection)
                   :qdrant (qdrant/create cfg collection))
-        dim     (p/embedding-dim embedding)]
+        dim     (:embedding-dim cfg)]
     (p/ensure-store! store dim)
-    (log/info "Vector store" collection "backend:" backend)
+    (log/info "Vector store" collection "backend:" backend "dim:" dim)
     store))
 
-(defmethod ig/init-key :store/vectors [_ {:keys [cfg embedding collection]}]
-  (make-vector-store cfg embedding collection))
+(defmethod ig/init-key :store/vectors [_ {:keys [cfg collection]}]
+  (make-vector-store cfg collection))
 
-(defmethod ig/init-key :store/tag-vectors [_ {:keys [cfg embedding collection]}]
-  (make-vector-store cfg embedding collection))
+(defmethod ig/init-key :store/tag-vectors [_ {:keys [cfg collection]}]
+  (make-vector-store cfg collection))

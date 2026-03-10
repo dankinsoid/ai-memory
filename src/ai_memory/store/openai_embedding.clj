@@ -6,8 +6,7 @@
   p/EmbeddingProvider
   (embed-query    [_ text]  (emb/embed-query api-key text))
   (embed-document [_ text]  (emb/embed-document api-key text))
-  (embed-batch    [_ texts] (emb/embed-batch api-key texts))
-  (embedding-dim  [_]       1536))
+  (embed-batch    [_ texts] (emb/embed-batch api-key texts)))
 
 (defn create [cfg]
   (->OpenAIEmbedding (:openai-api-key cfg)))

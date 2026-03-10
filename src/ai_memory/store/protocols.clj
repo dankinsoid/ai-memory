@@ -3,8 +3,7 @@
 (defprotocol EmbeddingProvider
   (embed-query    [this text])
   (embed-document [this text])
-  (embed-batch    [this texts])
-  (embedding-dim  [this]))
+  (embed-batch    [this texts]))
 
 (defprotocol VectorStore
   (ensure-store!  [this dim])
