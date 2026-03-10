@@ -39,13 +39,14 @@
 - [x] Extract shared `aspect-tags` into `src/ai_memory/schema.clj`
 - [x] Add `:datalevin-path` to `system.edn` config
 - [x] Verify: `clj -M:datalevin:test` — 55 tests, 129 assertions, 0 failures
-- [ ] Verify: `clj -M:datalevin:run` — full service startup
+- [x] Verify: `clj -M:datalevin:run` — full service startup
+- [x] JVM `--add-opens` flags added to `:datalevin` alias in deps.edn (LMDB NIO access)
 
 ## Phase 5: Validation
-- [ ] All existing tests pass with `:datomic` alias
-- [ ] Core tests pass with `:datalevin` alias
-- [ ] Health check works with both backends
-- [ ] Manual smoke test: remember → recall cycle
+- [x] All existing tests pass with `:datomic` alias
+- [x] Core tests pass with `:datalevin` alias (55 tests, 129 assertions)
+- [x] Health check works with Datalevin backend
+- [x] Manual smoke test: remember → recall cycle (3 facts, edges, tag query)
 
 ## Open Questions
 - Datalevin vector search: does built-in KNN quality match Qdrant for our use case?
