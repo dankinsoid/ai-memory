@@ -18,13 +18,15 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Switch backend: set BACKEND secret to "datomic" or "datalevin" (default: datomic)
+          BACKEND: ${{ secrets.BACKEND != '' && secrets.BACKEND || 'datomic' }}
         with:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
           script_stop: true
           command_timeout: 10m
-          envs: OPENAI_API_KEY
+          envs: OPENAI_API_KEY,BACKEND
           script: |
             set -euo pipefail
 
@@ -35,11 +37,19 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # Ensure OPENAI_API_KEY is in .env
+            # Persist env vars for docker compose
             grep -q '^OPENAI_API_KEY=' .env 2>/dev/null && sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=${OPENAI_API_KEY}|" .env || echo "OPENAI_API_KEY=${OPENAI_API_KEY}" >> .env
+            grep -q '^BACKEND=' .env 2>/dev/null && sed -i "s|^BACKEND=.*|BACKEND=${BACKEND}|" .env || echo "BACKEND=${BACKEND}" >> .env
 
-            $COMPOSE pull qdrant prometheus grafana
-            $COMPOSE build --parallel app datomic
+            # Build services based on backend choice
+            PULL_SERVICES="qdrant prometheus grafana"
+            BUILD_SERVICES="app"
+            if [ "$BACKEND" = "datomic" ]; then
+              BUILD_SERVICES="app datomic"
+            fi
+
+            $COMPOSE pull $PULL_SERVICES
+            $COMPOSE build --parallel $BUILD_SERVICES
             $COMPOSE up -d --remove-orphans
 
             echo "Waiting for app health..."
