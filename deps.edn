@@ -16,7 +16,7 @@
   aero/aero                       {:mvn/version "1.1.6"}}
 
  :aliases
- {;; Backend aliases — pick one: clj -M:datomic:run, clj -M:datalevin:run
+ {;; Backend aliases — pick one: clj -M:datomic:run, clj -M:datalevin:run, clj -M:edn:run
   :datomic
   {:extra-paths ["src-datomic"]
    :extra-deps  {com.datomic/peer {:mvn/version "1.0.7187"}}}
@@ -27,6 +27,9 @@
    ;; Datalevin (LMDB) needs direct NIO access for memory-mapped files
    :jvm-opts    ["--add-opens=java.base/java.nio=ALL-UNNAMED"
                  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]}
+
+  :edn
+  {:extra-paths ["src-edn"]}
 
   :dev
   {:extra-paths ["dev"]
