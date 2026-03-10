@@ -225,7 +225,8 @@
                            ".zip")]
         {:status  200
          :headers {"Content-Type"        "application/zip"
-                   "Content-Disposition" (str "attachment; filename=\"" filename "\"")}
+                   "Content-Disposition" (str "attachment; filename=\"" filename "\"")
+                   "Content-Length"       (str (alength zip-bytes))}
          :body    (java.io.ByteArrayInputStream. zip-bytes)})
       (catch Exception e
         {:status 500

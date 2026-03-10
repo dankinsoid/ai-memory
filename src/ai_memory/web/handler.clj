@@ -103,7 +103,8 @@
                      ;; Binary routes — no muuntaja (ZIP I/O)
                      ["/api/admin/export" {:get  (fn [req] (api/export-snapshot ctx req))
                                            :middleware [parameters/parameters-middleware]}]
-                     ["/api/admin/import" {:post (fn [req] (api/import-snapshot ctx req))}]
+                     ["/api/admin/import" {:post (fn [req] (api/import-snapshot ctx req))
+                                           :middleware [parameters/parameters-middleware]}]
                      ["/mcp" {:handler (mcp/streamable-handler
                                           {:base-url  (str "http://localhost:" (:port cfg))
                                            :api-token (:api-token cfg)})}]]
