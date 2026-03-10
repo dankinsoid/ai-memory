@@ -158,10 +158,12 @@
           (let [eid        (:db/id duplicate)
                 current-w  (or (:node/weight duplicate) 0.0)
                 new-w      (decay/apply-score current-w 1.0 factor)]
-            (patch! stores eid {:content  content
-                                :tags     tags
-                                :tag-mode :merge
-                                :weight   new-w})
+            (patch! stores eid
+                    (cond-> {:content  content
+                             :tags     tags
+                             :tag-mode :merge
+                             :weight   new-w}
+                      (:blob-content node-data) (assoc :blob-content (:blob-content node-data))))
             {:id eid :status :reinforced})
           (let [result (patch! stores nil (-> node-data
                                               (dissoc :node-type :id)
