@@ -59,7 +59,7 @@ jobs:
                 echo "App healthy after ~$((15 + i * 5))s!"
                 break
               fi
-              [ "$i" -eq 36 ] && echo "Health check timeout" && exit 1
+              if [ "$i" -eq 36 ]; then echo "Health check timeout" && exit 1; fi
               sleep 5
             done
 
