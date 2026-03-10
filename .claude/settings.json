@@ -19,7 +19,8 @@
       "Bash(claude mcp get:*)",
       "Bash(clj -M:datomic:test)",
       "Bash(clj -M:datalevin:test)",
-      "Bash(clj -M:datalevin:run)"
+      "Bash(clj -M:datalevin:run)",
+      "Bash(clj -M:edn -e '\\(require \\(quote ai-memory.web.handler\\) \\(quote ai-memory.web.api\\)\\)')"
     ]
   }
 }

@@ -99,10 +99,14 @@
                       ["/session/chain" {:post (fn [req] (api/session-chain ctx req))}]
                       ["/session" {:post (fn [req] (api/session-update ctx req))}]
                       ["/project" {:post (fn [req] (api/project-update ctx req))}]]
-                     ;; Binary routes — no muuntaja (ZIP I/O)
-                     ["/api/admin/export" {:get  (fn [req] (api/export-snapshot ctx req))
+                     ;; Binary routes — no muuntaja (ZIP I/O).
+                     ;; :muuntaja nil disables format-middleware so it won't
+                     ;; interfere with raw byte responses / request bodies.
+                     ["/api/admin/export" {:get        (fn [req] (api/export-snapshot ctx req))
+                                           :muuntaja   nil
                                            :middleware [parameters/parameters-middleware]}]
-                     ["/api/admin/import" {:post (fn [req] (api/import-snapshot ctx req))
+                     ["/api/admin/import" {:post       (fn [req] (api/import-snapshot ctx req))
+                                           :muuntaja   nil
                                            :middleware [parameters/parameters-middleware]}]
                      ["/mcp" {:handler (mcp/streamable-handler
                                           {:base-url  (str "http://localhost:" (:port cfg))

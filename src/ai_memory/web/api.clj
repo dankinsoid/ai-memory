@@ -12,7 +12,8 @@
             [ai-memory.graph.write :as write]
             [ai-memory.web.visualization :as viz]
             [cheshire.core :as json]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.java.io :as io]))
 
 ;; --- D3 visualization (presentation layer) ---
 
@@ -210,7 +211,9 @@
    :body   (admin/reindex! ctx)})
 
 (defn export-snapshot
-  "Returns ZIP archive as a downloadable binary response."
+  "Returns ZIP archive as a downloadable binary response.
+   Writes to a temp file so Ring/Jetty can serve it with correct
+   Content-Length and proper connection termination."
   [ctx req]
   (let [include-vectors (not= "false" (get-in req [:query-params "vectors"]))]
     (try
@@ -218,12 +221,14 @@
             filename  (str "ai-memory-snapshot-"
                            (.format (java.time.LocalDate/now)
                                     (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd"))
-                           ".zip")]
+                           ".zip")
+            tmp-file  (java.io.File/createTempFile "ai-memory-export-" ".zip")]
+        (.deleteOnExit tmp-file)
+        (io/copy zip-bytes tmp-file)
         {:status  200
          :headers {"Content-Type"        "application/zip"
-                   "Content-Disposition" (str "attachment; filename=\"" filename "\"")
-                   "Content-Length"       (str (alength zip-bytes))}
-         :body    (java.io.ByteArrayInputStream. zip-bytes)})
+                   "Content-Disposition" (str "attachment; filename=\"" filename "\"")}
+         :body    tmp-file})
       (catch Exception e
         {:status 500
          :headers {"Content-Type" "application/json"}
