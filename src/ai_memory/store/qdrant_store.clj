@@ -13,7 +13,8 @@
   (search        [_ qvec top-k _opts]     (vs/search base-url collection qvec top-k))
   (delete!       [_ id]                   (vs/delete-point! base-url collection id))
   (delete-all!   [_]                      (vs/delete-all-points! base-url collection (or @dim-atom 1536)))
-  (store-info    [_]                      (vs/collection-info base-url collection)))
+  (store-info    [_]                      (vs/collection-info base-url collection))
+  (scroll-all    [_]                      (vs/scroll-all-points base-url collection)))
 
 (defn create
   "Creates a QdrantStore for the given Qdrant collection.

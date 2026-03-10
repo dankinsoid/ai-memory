@@ -97,3 +97,21 @@ export async function updateFact(id, data) {
 export async function resetDb() {
   return post('/admin/reset', {})
 }
+
+export async function exportSnapshot({ includeVectors = true } = {}) {
+  const res = await fetch(`${BASE}/admin/export?vectors=${includeVectors}`, {
+    headers: authHeaders()
+  })
+  if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+  return res.blob()
+}
+
+export async function importSnapshot(zipBlob) {
+  const res = await fetch(`${BASE}/admin/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/zip', ...authHeaders() },
+    body: zipBlob
+  })
+  if (!res.ok) throw new Error(`Import failed: ${res.status}`)
+  return res.json()
+}

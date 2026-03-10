@@ -6,7 +6,7 @@
 
 (def ^:private node-pull-spec
   [:db/id :node/content :node/weight :node/cycle :node/sources
-   :node/blob-dir :node/updated-at :node/tags])
+   :node/blob-dir :node/created-at :node/updated-at :node/session-id :node/tags])
 
 (defn- now [] (Date.))
 
@@ -287,7 +287,46 @@
     (let [db   (d/db conn)
           tick (db-core/next-tick db)]
       (db-core/transact! conn [] tick)
-      tick)))
+      tick))
+
+  ;; --- Migration ---
+
+  (set-tick! [_ tick]
+    @(d/transact conn [{:db/ident :tick/singleton :tick/value tick}]))
+
+  (import-node! [_ {:keys [content weight cycle tags blob-dir sources session-id
+                            created-at updated-at]}]
+    (let [tempid (d/tempid :db.part/user)
+          ts     (now)
+          tx     (cond-> {:db/id           tempid
+                          :node/content    content
+                          :node/weight     (or weight 0.0)
+                          :node/cycle      (or cycle 0)
+                          :node/created-at (or created-at ts)
+                          :node/updated-at (or updated-at ts)}
+                   (seq tags)    (assoc :node/tags (vec tags))
+                   blob-dir      (assoc :node/blob-dir blob-dir)
+                   (seq sources) (assoc :node/sources sources)
+                   session-id    (assoc :node/session-id session-id))
+          ;; Raw transact — no tick auto-increment
+          result @(d/transact conn [tx])]
+      {:id (d/resolve-tempid (:db-after result) (:tempids result) tempid)}))
+
+  (import-edge! [_ {:keys [from to weight cycle type]}]
+    (let [tx (cond-> {:db/id       (d/tempid :db.part/user)
+                      :edge/id     (d/squuid)
+                      :edge/from   from
+                      :edge/to     to
+                      :edge/weight (or weight 0.0)
+                      :edge/cycle  (or cycle 0)}
+               type (assoc :edge/type type))]
+      @(d/transact conn [tx])))
+
+  (update-node-cycle! [_ eid cycle]
+    @(d/transact conn [[:db/add eid :node/cycle cycle]]))
+
+  (update-edge-cycle! [_ edge-id cycle]
+    @(d/transact conn [{:edge/id edge-id :edge/cycle cycle}])))
 
 (defn create [conn]
   (->DatomicStore conn))

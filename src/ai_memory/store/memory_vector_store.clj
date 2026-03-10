@@ -61,7 +61,12 @@
     {:reachable?   true
      :status       "in-memory"
      :vector-count (count @points-atom)
-     :points-count (count @points-atom)}))
+     :points-count (count @points-atom)})
+
+  (scroll-all [_]
+    (mapv (fn [{:keys [id vector payload]}]
+            {:id id :vector vector :payload payload})
+          (vals @points-atom))))
 
 (defn create
   "Creates an in-memory VectorStore.

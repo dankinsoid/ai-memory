@@ -11,7 +11,8 @@
   (search         [this query-vector top-k opts])
   (delete!        [this id])
   (delete-all!    [this])
-  (store-info     [this]))
+  (store-info     [this])
+  (scroll-all     [this]))
 
 (defprotocol FactStore
   ;; Nodes
@@ -51,4 +52,10 @@
   (all-edges             [this])
   ;; System
   (current-tick          [this])
-  (next-tick!            [this]))
+  (next-tick!            [this])
+  ;; Migration — import with explicit field values, no auto-tick
+  (set-tick!             [this tick])
+  (import-node!          [this node-data])
+  (import-edge!          [this edge-data])
+  (update-node-cycle!    [this eid cycle])
+  (update-edge-cycle!    [this edge-id cycle]))

@@ -7,9 +7,11 @@
             [ai-memory.service.blobs :as blobs]
             [ai-memory.service.sessions :as sessions]
             [ai-memory.service.admin :as admin]
+            [ai-memory.service.migration :as migration]
             [ai-memory.store.protocols :as p]
             [ai-memory.graph.write :as write]
             [ai-memory.web.visualization :as viz]
+            [cheshire.core :as json]
             [clojure.string :as str]))
 
 ;; --- D3 visualization (presentation layer) ---
@@ -210,3 +212,39 @@
 (defn reindex-vectors [ctx _req]
   {:status 200
    :body   (admin/reindex! ctx)})
+
+(defn export-snapshot
+  "Returns ZIP archive as a downloadable binary response."
+  [ctx req]
+  (let [include-vectors (not= "false" (get-in req [:query-params "vectors"]))]
+    (try
+      (let [zip-bytes (migration/export-snapshot-zip ctx {:include-vectors include-vectors})
+            filename  (str "ai-memory-snapshot-"
+                           (.format (java.time.LocalDate/now)
+                                    (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd"))
+                           ".zip")]
+        {:status  200
+         :headers {"Content-Type"        "application/zip"
+                   "Content-Disposition" (str "attachment; filename=\"" filename "\"")}
+         :body    (java.io.ByteArrayInputStream. zip-bytes)})
+      (catch Exception e
+        {:status 500
+         :headers {"Content-Type" "application/json"}
+         :body    (str "{\"error\":\"" (ex-message e) "\"}")}))))
+
+(defn import-snapshot
+  "Accepts ZIP archive as raw request body, imports into database."
+  [ctx req]
+  (try
+    (let [body      (:body req)
+          zip-bytes (if (bytes? body)
+                      body
+                      (.readAllBytes body))
+          result    (migration/import-snapshot-zip! ctx zip-bytes)]
+      {:status  200
+       :headers {"Content-Type" "application/json"}
+       :body    (json/generate-string result)})
+    (catch Exception e
+      {:status  500
+       :headers {"Content-Type" "application/json"}
+       :body    (json/generate-string {:error (ex-message e)})})))

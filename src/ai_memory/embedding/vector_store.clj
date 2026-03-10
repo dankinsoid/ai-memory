@@ -67,6 +67,30 @@
     (catch Exception _))
   (ensure-collection! base-url collection dim))
 
+(defn scroll-all-points
+  "Returns all points with vectors and payloads using Qdrant scroll API.
+   Paginates automatically until all points are retrieved.
+   Each point: {:id N :vector [...] :payload {...}}."
+  [base-url collection]
+  (loop [acc [] offset nil]
+    (let [body (cond-> {:limit 100 :with_vector true :with_payload true}
+                 offset (assoc :offset offset))
+          resp (http/post (str base-url "/collections/" collection "/points/scroll")
+                          {:content-type :json
+                           :body         (json/generate-string body)
+                           :as           :json})
+          result     (get-in resp [:body :result])
+          points     (:points result)
+          next-page  (:next_page_offset result)
+          new-acc    (into acc (map (fn [pt]
+                                     {:id      (:id pt)
+                                      :vector  (:vector pt)
+                                      :payload (:payload pt)}))
+                           points)]
+      (if next-page
+        (recur new-acc next-page)
+        new-acc))))
+
 (defn collection-info
   "Returns Qdrant collection stats: reachable?, status, vector-count, points-count.
    On any error returns {:reachable? false :error <message>}."

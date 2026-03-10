@@ -80,6 +80,8 @@
                                      :delete (fn [req] (api/delete-fact ctx req))}]
                       ["/admin/reset" {:post (fn [req] (api/reset-db ctx req))}]
                       ["/admin/reindex" {:post (fn [req] (api/reindex-vectors ctx req))}]
+                      ;; export/import moved to /api/admin/export and /import
+                      ;; as binary routes (outside muuntaja) — see below
                       ["/admin/promote-eternal" {:post (fn [req] (api/promote-eternal ctx req))}]
                       ["/nodes" {:get  (fn [req] (api/list-nodes req))
                                  :post (fn [req] (api/create-node ctx req))}]
@@ -98,6 +100,10 @@
                       ["/session/chain" {:post (fn [req] (api/session-chain ctx req))}]
                       ["/session" {:post (fn [req] (api/session-update ctx req))}]
                       ["/project" {:post (fn [req] (api/project-update ctx req))}]]
+                     ;; Binary routes — no muuntaja (ZIP I/O)
+                     ["/api/admin/export" {:get  (fn [req] (api/export-snapshot ctx req))
+                                           :middleware [parameters/parameters-middleware]}]
+                     ["/api/admin/import" {:post (fn [req] (api/import-snapshot ctx req))}]
                      ["/mcp" {:handler (mcp/streamable-handler
                                           {:base-url  (str "http://localhost:" (:port cfg))
                                            :api-token (:api-token cfg)})}]]
