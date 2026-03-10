@@ -1,12 +1,7 @@
 ---
 name: memory-scribe
 description: Filter and save a candidate observation to long-term memory. Pass raw observations here — agent applies quality filters, formats, and saves if worth keeping. Never call memory_remember directly in main context; always delegate here.
-tools:
-  - mcp__ai-memory__memory_remember
-  - mcp__ai-memory__memory_get_facts
-  - mcp__ai-memory__memory_reinforce
-  - mcp__ai-memory__memory_explore_tags
-  - mcp__ai-memory__memory_resolve_tags
+tools: "*"
 ---
 
 # memory-scribe
