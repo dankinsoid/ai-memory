@@ -26,6 +26,10 @@ Task(subagent_type="memory-scribe", run_in_background=true,
 Save **at the moment** — not at session end. One note per observation. Always include project. English only.
 Do NOT call `memory_remember` directly — always delegate to memory-scribe.
 
+## Failure Handling
+
+If any memory operation fails (memory-scribe, MCP tools, "Memory Unavailable" in hook output) — tell the user in one line, don't retry, continue your task.
+
 ## Reinforcing
 
 After completing a task where retrieved facts influenced your work, call `memory_reinforce`.

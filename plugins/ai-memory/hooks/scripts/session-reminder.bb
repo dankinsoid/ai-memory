@@ -21,9 +21,17 @@
 
 (require '[cheshire.core :as json]
          '[babashka.fs :as fs]
+         '[babashka.http-client :as http]
          '[babashka.process :as process]
          '[clojure.string :as str]
          '[clojure.java.io :as io])
+
+(def base-url (or (System/getenv "AI_MEMORY_URL") "http://localhost:8080"))
+(def api-token (System/getenv "AI_MEMORY_TOKEN"))
+
+(def health-check-interval
+  "Check server health every N prompts to catch mid-session outages."
+  10)
 
 (def project-remind-interval-days
   "Remind about project summary at most once every N days per project."
@@ -80,6 +88,18 @@
 (defn derive-project [cwd]
   (or (git-project-name cwd)
       (when cwd (last (str/split cwd #"/")))))
+
+(defn health-ok?
+  "Lightweight health check — GET /api/health with short timeout.
+   Returns true if server responds 2xx, false otherwise."
+  []
+  (try
+    (let [resp (http/get (str base-url "/api/health")
+                {:headers (cond-> {}
+                            api-token (assoc "Authorization" (str "Bearer " api-token)))
+                 :timeout 3000})]
+      (<= 200 (:status resp) 299))
+    (catch Exception _ false)))
 
 (defn days-since [date-str]
   (try
@@ -143,7 +163,12 @@
           need-project-remind? (and project-name
                                     (= prompt-count 1)
                                     (>= (days-since (:last-reminded project-remind-state ""))
-                                        project-remind-interval-days))]
+                                        project-remind-interval-days))
+
+          ;; Periodic health check — every N prompts (skip first, session-start covers it)
+          need-health-check? (and (> prompt-count 1)
+                                  (zero? (mod prompt-count health-check-interval)))
+          server-down? (and need-health-check? (not (health-ok?)))]
 
       (fs/create-dirs state-dir)
       (spit reminder-file (pr-str new-state))
@@ -151,10 +176,12 @@
         (spit project-remind-file
               (pr-str {:last-reminded (str (java.time.LocalDate/now))})))
 
-      (when (or need-summary? need-chunk? need-project-remind?)
+      (when (or need-summary? need-chunk? need-project-remind? server-down?)
         (println
          (str/join " "
            (cond-> []
+             server-down?
+             (conj "⚠ ai-memory server is unreachable — MCP tools and memory-scribe will fail silently. Tell the user.")
              need-chunk?
              (conj (str "Chunk ~" (quot context-tokens 1000) "K tokens."
                         " Call memory_session with session_id: \"" session-id "\""

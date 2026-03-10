@@ -47,6 +47,9 @@
     api-token (assoc "Authorization" (str "Bearer " api-token))))
 
 ;; --- HTTP helpers ---
+;; Track API errors so we can warn the user if memory server is unreachable.
+
+(def api-errors (atom []))
 
 (defn api-get [path & [params]]
   (try
@@ -54,7 +57,9 @@
                  (cond-> {:headers (auth-headers)}
                    params (assoc :query-params params)))]
       (json/parse-string (:body resp) true))
-    (catch Exception _ nil)))
+    (catch Exception e
+      (swap! api-errors conj {:path path :error (.getMessage e)})
+      nil)))
 
 (defn api-post [path body]
   (try
@@ -63,7 +68,9 @@
                                   {"Content-Type" "application/json"})
                   :body    (json/generate-string body)})]
       (json/parse-string (:body resp) true))
-    (catch Exception _ nil)))
+    (catch Exception e
+      (swap! api-errors conj {:path path :error (.getMessage e)})
+      nil)))
 
 ;; --- Read hook input ---
 
@@ -321,9 +328,16 @@
                              sessions-section
                              aspects-section])]
 
-  (when (seq sections)
+  (if (seq sections)
     (println (str "# Memory Context\n\n"
                   (str/join "\n\n" sections)
-                  "\n\n---\n" timestamp))))
+                  "\n\n---\n" timestamp))
+    ;; No sections at all — API likely down
+    (when (seq @api-errors)
+      (println (str "# ⚠ Memory Unavailable\n\n"
+                    "ai-memory server is unreachable (" base-url "). "
+                    "Memory context was NOT loaded. "
+                    "MCP tools (memory_remember, memory_session, etc.) will likely fail too.\n"
+                    "Tell the user that their memory plugin is down.")))))
 
 (System/exit 0)
