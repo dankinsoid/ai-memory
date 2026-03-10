@@ -1,7 +1,8 @@
 (ns ai-memory.db.core
   (:require [datomic.api :as d]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [ai-memory.schema :as schema]))
 
 (defn connect [uri]
   (d/create-database uri)
@@ -12,12 +13,6 @@
       slurp
       edn/read-string))
 
-(def aspect-tags
-  "Tier 2 (aspect) tags — fixed vocabulary for knowledge categorization."
-  ["architecture" "pattern" "idea" "decision" "preference"
-   "debugging" "pitfall" "api" "data-model" "tooling"
-   "workflow" "performance" "comparison" "testing" "insight"])
-
 (defn ensure-schema [conn]
   @(d/transact conn (load-schema))
   ;; Tick singleton (must be separate tx — attribute must exist first)
@@ -26,7 +21,7 @@
   ;; Seed aspect tags (tier 2) — idempotent via :tag/name unique identity
   @(d/transact conn
     (mapv (fn [name] {:tag/name name :tag/tier :aspect :tag/node-count 0})
-          aspect-tags)))
+          schema/aspect-tags)))
 
 (defn db [conn]
   (d/db conn))

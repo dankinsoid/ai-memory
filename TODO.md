@@ -30,13 +30,16 @@
 - [ ] Add integration tests with Integrant-based fixtures (backend-agnostic, uses system.edn)
 
 ## Phase 4: Datalevin implementation
-- [ ] `src-datalevin/ai_memory/db/datalevin.clj` — connection, schema, tick counter
-- [ ] `src-datalevin/ai_memory/store/datalevin_store.clj` — FactStore protocol implementation
+- [x] `src-datalevin/ai_memory/db/datalevin.clj` — connection, schema (map format), tick counter
+- [x] `src-datalevin/ai_memory/store/datalevin_store.clj` — FactStore protocol implementation
   - Datalevin Datalog queries (similar but not identical to Datomic)
-  - Built-in vector search for VectorStore protocol (KNN)
-- [ ] `src-datalevin/ai_memory/system/backend.clj` — Integrant init-keys for Datalevin
-- [ ] Schema migration: translate `schema.edn` from Datomic format to Datalevin format
-- [ ] Verify: `clj -M:datalevin:run`, `clj -M:datalevin:test`
+  - Vector stores: in-memory for now; Datalevin KNN can replace later
+- [x] `src-datalevin/ai_memory/system/backend.clj` — Integrant init-keys for Datalevin
+- [x] Schema: inline map-based schema in datalevin.clj (Datalevin applies at connect time)
+- [x] Extract shared `aspect-tags` into `src/ai_memory/schema.clj`
+- [x] Add `:datalevin-path` to `system.edn` config
+- [x] Verify: `clj -M:datalevin:test` — 55 tests, 129 assertions, 0 failures
+- [ ] Verify: `clj -M:datalevin:run` — full service startup
 
 ## Phase 5: Validation
 - [ ] All existing tests pass with `:datomic` alias

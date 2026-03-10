@@ -6,6 +6,8 @@
   :openai-api-key #env OPENAI_API_KEY
   :qdrant-url     #or [#env QDRANT_URL "http://localhost:6333"]
   :blob-path      #or [#env BLOB_PATH nil]
+  ;; Datalevin DB path — nil for in-memory (dev), filesystem path for persistence
+  :datalevin-path #or [#env DATALEVIN_PATH nil]
   :project-path   #env PROJECT_PATH
   :api-token      #env API_TOKEN
   ;; :memory — in-memory stores (no external deps), :qdrant — real Qdrant
