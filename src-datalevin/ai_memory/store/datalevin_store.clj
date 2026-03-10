@@ -18,6 +18,19 @@
   [:db/id :node/content :node/weight :node/cycle :node/sources
    :node/blob-dir :node/created-at :node/updated-at :node/session-id :node/tags])
 
+(def ^:private edge-pull-spec
+  "Pull spec that returns all edge fields with refs as nested {:db/id N} maps."
+  [:db/id :edge/id :edge/weight :edge/cycle :edge/type
+   {:edge/from [:db/id]} {:edge/to [:db/id]}])
+
+(defn- flatten-edge-refs
+  "Unwraps Datalevin ref maps {:db/id N} to plain long EIDs."
+  [edge]
+  (when edge
+    (-> edge
+        (update :edge/from :db/id)
+        (update :edge/to :db/id))))
+
 (defn- now [] (Date.))
 
 (defrecord DatalevinStore [conn]
@@ -250,26 +263,27 @@
         tick)))
 
   (find-edges-from [_ from-eid]
-    (d/q '[:find [(pull ?e [* {:edge/to [:db/id :node/content]}]) ...]
-           :in $ ?from-eid
-           :where [?e :edge/from ?from-eid]]
-         (d/db conn) from-eid))
+    (mapv flatten-edge-refs
+          (d/q '[:find [(pull ?e pull-spec) ...]
+                 :in $ ?from-eid pull-spec
+                 :where [?e :edge/from ?from-eid]]
+               (d/db conn) from-eid edge-pull-spec)))
 
   (find-edge-between [_ from-eid to-eid]
-    (d/q '[:find [?eid ?w]
-           :in $ ?from-eid ?to-eid
-           :where
-           [?e :edge/from ?from-eid]
-           [?e :edge/to ?to-eid]
-           [?e :edge/id ?eid]
-           [?e :edge/weight ?w]]
-         (d/db conn) from-eid to-eid))
+    (flatten-edge-refs
+      (d/q '[:find (pull ?e pull-spec) .
+             :in $ ?from-eid ?to-eid pull-spec
+             :where
+             [?e :edge/from ?from-eid]
+             [?e :edge/to ?to-eid]]
+           (d/db conn) from-eid to-eid edge-pull-spec)))
 
   (find-typed-edge-from [_ from-eid edge-type]
-    (d/q '[:find (pull ?e [:edge/id :edge/weight {:edge/to [:db/id :node/content :node/blob-dir :node/session-id]}]) .
-           :in $ ?from-eid ?etype
-           :where [?e :edge/from ?from-eid] [?e :edge/type ?etype]]
-         (d/db conn) from-eid edge-type))
+    (flatten-edge-refs
+      (d/q '[:find (pull ?e pull-spec) .
+             :in $ ?from-eid ?etype pull-spec
+             :where [?e :edge/from ?from-eid] [?e :edge/type ?etype]]
+           (d/db conn) from-eid edge-type edge-pull-spec)))
 
   (update-edge-weight! [_ edge-id weight]
     (let [db   (d/db conn)
@@ -282,11 +296,11 @@
       (db/transact! conn [{:edge/id edge-id :edge/weight 1.0 :edge/cycle tick}] tick)))
 
   (all-edges [_]
-    (d/q '[:find [(pull ?e [:edge/id :edge/weight :edge/cycle
-                             {:edge/from [:db/id]}
-                             {:edge/to   [:db/id]}]) ...]
-           :where [?e :edge/id]]
-         (d/db conn)))
+    (mapv flatten-edge-refs
+          (d/q '[:find [(pull ?e pull-spec) ...]
+                 :in $ pull-spec
+                 :where [?e :edge/id]]
+               (d/db conn) edge-pull-spec)))
 
   ;; --- System ---
 

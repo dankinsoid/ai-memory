@@ -222,32 +222,20 @@
                             (assoc :tick tick))))))
 
   (find-edges-from [_ from-eid]
-    (let [state (db/state db)]
-      (->> (vals (:edges state))
-           (filter #(= (:edge/from %) from-eid))
-           (mapv (fn [e]
-                   (let [to-node (get-in state [:nodes (:edge/to e)])]
-                     (assoc e :edge/to (select-keys to-node [:db/id :node/content]))))))))
+    (->> (vals (:edges (db/state db)))
+         (filterv #(= (:edge/from %) from-eid))))
 
   (find-edge-between [_ from-eid to-eid]
     (->> (vals (:edges (db/state db)))
          (filter #(and (= (:edge/from %) from-eid)
                        (= (:edge/to %) to-eid)))
-         first
-         ((fn [e] (when e [(:edge/id e) (:edge/weight e)])))))
+         first))
 
   (find-typed-edge-from [_ from-eid edge-type]
-    (let [state (db/state db)]
-      (->> (vals (:edges state))
-           (filter #(and (= (:edge/from %) from-eid)
-                         (= (:edge/type %) edge-type)))
-           first
-           ((fn [e]
-              (when e
-                (let [to-node (get-in state [:nodes (:edge/to e)])]
-                  {:edge/id     (:edge/id e)
-                   :edge/weight (:edge/weight e)
-                   :edge/to     (select-keys to-node [:db/id :node/content :node/blob-dir :node/session-id])})))))))
+    (->> (vals (:edges (db/state db)))
+         (filter #(and (= (:edge/from %) from-eid)
+                       (= (:edge/type %) edge-type)))
+         first))
 
   (update-edge-weight! [_ edge-id weight]
     (let [tick (inc (db/current-tick db))]
@@ -280,13 +268,7 @@
                             s))))))
 
   (all-edges [_]
-    (->> (vals (:edges (db/state db)))
-         (mapv (fn [e]
-                 {:edge/id     (:edge/id e)
-                  :edge/weight (:edge/weight e)
-                  :edge/cycle  (:edge/cycle e)
-                  :edge/from   {:db/id (:edge/from e)}
-                  :edge/to     {:db/id (:edge/to e)}}))))
+    (vec (vals (:edges (db/state db)))))
 
   ;; --- System ---
 

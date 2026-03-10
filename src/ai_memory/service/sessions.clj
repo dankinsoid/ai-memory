@@ -362,8 +362,8 @@
         (str "continuation of " prev-session-id) project nil))
     (let [new-eid  (find-session-fact fs session-id)
           prev-dir (:node/blob-dir (p/find-node fs prev-eid))]
-      (if-let [[edge-id current-w] (p/find-edge-between fs new-eid prev-eid)]
-        (p/update-edge-weight! fs edge-id (decay/apply-score current-w 1.0 0.5))
+      (if-let [edge (p/find-edge-between fs new-eid prev-eid)]
+        (p/update-edge-weight! fs (:edge/id edge) (decay/apply-score (:edge/weight edge) 1.0 0.5))
         (p/create-edge! fs {:from new-eid :to prev-eid :weight 0.5 :type :continuation}))
       (cond-> {:status "linked" :edge-created true}
         prev-dir (assoc :prev-blob-dir prev-dir)))))
@@ -376,16 +376,16 @@
          depth 0]
     (if (>= depth max-depth)
       chain
-      (if-let [edge-data (p/find-typed-edge-from fact-store eid :continuation)]
-        (let [prev     (:edge/to edge-data)
-              prev-eid (:db/id prev)]
+      (if-let [edge (p/find-typed-edge-from fact-store eid :continuation)]
+        (let [prev-eid (:edge/to edge)
+              prev     (p/find-node fact-store prev-eid)]
           (recur prev-eid
                  (conj chain {:eid         prev-eid
                               :session-id  (:node/session-id prev)
                               :blob-dir    (:node/blob-dir prev)
                               :content     (:node/content prev)
-                              :edge-id     (:edge/id edge-data)
-                              :edge-weight (:edge/weight edge-data)})
+                              :edge-id     (:edge/id edge)
+                              :edge-weight (:edge/weight edge)})
                  (inc depth)))
         chain))))
 

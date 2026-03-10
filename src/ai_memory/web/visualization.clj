@@ -30,8 +30,8 @@
                         decay/default-decay-k)))
 
 (defn- edge->d3 [e]
-  {:source (str (get-in e [:edge/from :db/id]))
-   :target (str (get-in e [:edge/to :db/id]))
+  {:source (str (:edge/from e))
+   :target (str (:edge/to e))
    :weight (:edge/weight e)})
 
 ;; --- Endpoints ---
@@ -84,7 +84,7 @@
       {:nodes nodes :edges edges :has-more (and (< d depth) (not (empty? frontier)))}
       (let [new-edges    (mapcat #(p/find-edges-from fact-store %) frontier)
             neighbor-ids (->> new-edges
-                              (keep #(get-in % [:edge/to :db/id]))
+                              (keep :edge/to)
                               (remove visited)
                               distinct
                               (take limit))

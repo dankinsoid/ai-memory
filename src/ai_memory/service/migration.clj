@@ -3,26 +3,28 @@
   "Export/import snapshots for migrating data between backends.
 
    Export produces a ZIP archive:
-     snapshot.json  — facts, edges, tick, tags
-     vectors.json   — embedding vectors (optional, separate for size)
+     snapshot.edn   — facts, edges, tick, tags (EDN format)
+     vectors.edn    — embedding vectors (optional, separate for size)
      blobs/         — blob directory tree (files as-is)
 
-   snapshot.json format:
-   {:version 1
+   snapshot.edn format (namespaced keys matching store protocol):
+   {:version 2
     :tick    N
-    :tags    [{:name \"foo\" :tier :aspect} ...]
-    :nodes   [{:snapshot-id 0 :content \"...\" :weight 0.5 :cycle 30
-               :tags [\"t1\" \"t2\"] :blob-dir \"...\" ...} ...]
-    :edges   [{:from-snapshot-id 0 :to-snapshot-id 1
-               :weight 0.3 :cycle 10 :type :co-occurrence} ...]
-    :vectors [{:snapshot-id 0 :vector [...] :payload {...}} ...]}
+    :tags    [{:tag/name \"foo\" :tag/tier :aspect} ...]
+    :nodes   [{:db/id 42 :node/content \"...\" :node/weight 0.5 :node/cycle 30
+               :node/tags [\"t1\" \"t2\"] :node/blob-dir \"...\" ...} ...]
+    :edges   [{:edge/from 42 :edge/to 17
+               :edge/weight 0.3 :edge/cycle 10 :edge/type :co-occurrence} ...]
+    :vectors [{:db/id 42 :vector [...] :payload {...}} ...]}
 
    On import, nodes are matched by content for merge (upsert semantics).
+   :db/id values from the source are used only to resolve internal references
+   (edges → nodes, vectors → nodes) — target database assigns new EIDs.
    Tick cycles are adjusted to preserve fact ages across both existing
    and imported data."
   (:require [ai-memory.store.protocols :as p]
             [clojure.java.io :as io]
-            [cheshire.core :as json]
+            [clojure.edn :as edn]
             [clojure.tools.logging :as log])
   (:import [java.io ByteArrayOutputStream ByteArrayInputStream]
            [java.util.zip ZipOutputStream ZipInputStream ZipEntry]
@@ -75,25 +77,25 @@
 
 (defn- snapshot->zip-bytes
   "Packages snapshot map + blob files + optional vectors into a ZIP byte array.
-   `snapshot`  — the snapshot map (will be serialized as snapshot.json)
-   `vectors`   — seq of vector maps, or nil (written as separate vectors.json)
+   `snapshot`  — the snapshot map (will be serialized as snapshot.edn)
+   `vectors`   — seq of vector maps, or nil (written as separate vectors.edn)
    `blob-path` — filesystem base path for blobs
    `blob-dirs` — set of blob-dir strings referenced by nodes"
   [snapshot vectors blob-path blob-dirs]
   (let [baos (ByteArrayOutputStream.)]
     (with-open [zos (ZipOutputStream. baos)]
-      ;; 1. Write snapshot.json (facts, edges, tags — no vectors)
-      (.putNextEntry zos (ZipEntry. "snapshot.json"))
-      (let [json-bytes (.getBytes (json/generate-string snapshot) "UTF-8")]
-        (.write zos json-bytes 0 (count json-bytes)))
+      ;; 1. Write snapshot.edn (facts, edges, tags — no vectors)
+      (.putNextEntry zos (ZipEntry. "snapshot.edn"))
+      (let [edn-bytes (.getBytes (pr-str snapshot) "UTF-8")]
+        (.write zos edn-bytes 0 (count edn-bytes)))
       (.closeEntry zos)
-      ;; 2. Write vectors.json separately — large 1536-dim float arrays
+      ;; 2. Write vectors.edn separately — large 1536-dim float arrays
       ;;    compress much better as a standalone entry and don't bloat
       ;;    the snapshot that users might want to inspect.
       (when (seq vectors)
-        (.putNextEntry zos (ZipEntry. "vectors.json"))
-        (let [json-bytes (.getBytes (json/generate-string vectors) "UTF-8")]
-          (.write zos json-bytes 0 (count json-bytes)))
+        (.putNextEntry zos (ZipEntry. "vectors.edn"))
+        (let [edn-bytes (.getBytes (pr-str vectors) "UTF-8")]
+          (.write zos edn-bytes 0 (count edn-bytes)))
         (.closeEntry zos))
       ;; 3. Write blob files
       (doseq [blob-dir blob-dirs
@@ -106,8 +108,8 @@
 
 (defn- zip-bytes->parts
   "Reads a ZIP byte array and returns {:snapshot <map> :vectors <vec> :blob-files {rel-path → bytes}}.
-   Supports both formats: vectors as separate vectors.json (new) or embedded in
-   snapshot.json (legacy). blob-files paths are relative to blob-path (without 'blobs/' prefix)."
+   Expects snapshot.edn and optional vectors.edn entries.
+   blob-files paths are relative to blob-path (without 'blobs/' prefix)."
   [^bytes zip-bytes]
   (with-open [zis (ZipInputStream. (ByteArrayInputStream. zip-bytes))]
     (loop [snapshot nil
@@ -118,22 +120,18 @@
               content (.readAllBytes zis)]
           (.closeEntry zis)
           (cond
-            (= name "snapshot.json")
-            (recur (json/parse-string (String. content "UTF-8") true) vectors blob-files)
+            (= name "snapshot.edn")
+            (recur (edn/read-string (String. content "UTF-8")) vectors blob-files)
 
-            (= name "vectors.json")
-            (recur snapshot (json/parse-string (String. content "UTF-8") true) blob-files)
+            (= name "vectors.edn")
+            (recur snapshot (edn/read-string (String. content "UTF-8")) blob-files)
 
             (.startsWith name "blobs/")
             (recur snapshot vectors (assoc blob-files (subs name 6) content))
 
             :else
             (recur snapshot vectors blob-files)))
-        ;; Legacy support: vectors may be embedded in snapshot.json
-        (let [embedded-vectors (:vectors snapshot)
-              final-vectors    (or vectors embedded-vectors)
-              clean-snapshot   (dissoc snapshot :vectors)]
-          {:snapshot clean-snapshot :vectors final-vectors :blob-files blob-files})))))
+        {:snapshot snapshot :vectors vectors :blob-files blob-files}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Export
@@ -148,57 +146,28 @@
         tick (p/current-tick fs)
 
         node-eids (p/all-nodes fs)
-        eid->sid  (zipmap node-eids (range))
+        eid-set   (set node-eids)
 
-        nodes (mapv (fn [eid]
-                      (let [node (p/find-node fs eid)
-                            tags (p/node-tags fs eid)]
-                        {:snapshot-id (eid->sid eid)
-                         :content     (:node/content node)
-                         :weight      (:node/weight node)
-                         :cycle       (:node/cycle node)
-                         :tags        (vec tags)
-                         :blob-dir    (:node/blob-dir node)
-                         :sources     (:node/sources node)
-                         :session-id  (:node/session-id node)
-                         :created-at  (:node/created-at node)
-                         :updated-at  (:node/updated-at node)}))
-                    node-eids)
+        nodes (mapv #(p/find-node fs %) node-eids)
 
         all-tags (p/all-tags fs)
-        tags-export (filterv :tag/tier
-                             (mapv (fn [t]
-                                     (cond-> {:name (:tag/name t)}
-                                       (:tag/tier t) (assoc :tier (:tag/tier t))))
-                                   all-tags))
+        tags-export (->> all-tags
+                         (filter :tag/tier)
+                         (mapv #(dissoc % :tag/node-count)))
 
         all-edges (p/all-edges fs)
-        edges (filterv
-                #(and (:from-snapshot-id %) (:to-snapshot-id %))
-                (mapv (fn [e]
-                        (let [from-eid (get-in e [:edge/from :db/id])
-                              to-eid   (get-in e [:edge/to :db/id])]
-                          {:from-snapshot-id (eid->sid from-eid)
-                           :to-snapshot-id   (eid->sid to-eid)
-                           :weight           (:edge/weight e)
-                           :cycle            (:edge/cycle e)
-                           :type             (:edge/type e)}))
-                      all-edges))
+        edges (->> all-edges
+                   (filter #(and (eid-set (:edge/from %)) (eid-set (:edge/to %))))
+                   (mapv #(dissoc % :db/id :edge/id)))
 
         vectors (when include-vectors
-                  (let [all-vectors (p/scroll-all vs)]
-                    (filterv
-                      some?
-                      (mapv (fn [pt]
-                              (when-let [sid (eid->sid (:id pt))]
-                                {:snapshot-id sid
-                                 :vector      (:vector pt)
-                                 :payload     (:payload pt)}))
-                            all-vectors))))
+                  (->> (p/scroll-all vs)
+                       (filter #(eid-set (:id %)))
+                       (mapv #(-> % (assoc :db/id (:id %)) (dissoc :id)))))
 
-        blob-dirs (into #{} (keep :blob-dir) nodes)
+        blob-dirs (into #{} (keep :node/blob-dir) nodes)
 
-        snapshot {:version 1
+        snapshot {:version 2
                   :tick    tick
                   :tags    tags-export
                   :nodes   nodes
@@ -284,43 +253,42 @@
         _ (adjust-existing-cycles! fs existing-delta)
 
         ;; Step 2: Ensure all tags exist, set tiers
-        _ (doseq [{:keys [name tier]} tags]
-            (p/ensure-tag! fs name)
-            ;; Tier is set during DB seed for aspect tags; custom tiers
-            ;; would need a separate protocol method. For now, ensure-tag
-            ;; is sufficient since aspect tags are seeded on startup.
-            )
+        _ (doseq [{:keys [tag/name]} tags]
+            (p/ensure-tag! fs name))
         _ (doseq [n nodes
-                  tag-name (:tags n)]
+                  tag-name (:node/tags n)]
             (p/ensure-tag! fs tag-name))
 
         ;; Step 3: Build content index for merge matching
         content->eid (build-content-index fs)
 
-        ;; Step 4: Import nodes, build snapshot-id → new-eid mapping
-        sid->eid (reduce
-                   (fn [m {:keys [snapshot-id content weight cycle tags
-                                  blob-dir sources session-id created-at updated-at]}]
-                     (let [adjusted-cycle (+ (or cycle 0) import-delta)
+        ;; Step 4: Import nodes, build old-eid → new-eid mapping
+        old->new (reduce
+                   (fn [m node]
+                     (let [old-eid        (:db/id node)
+                           content        (:node/content node)
+                           weight         (:node/weight node)
+                           cycle          (:node/cycle node)
+                           tags           (:node/tags node)
+                           blob-dir       (:node/blob-dir node)
+                           adjusted-cycle (+ (or cycle 0) import-delta)
                            existing       (get content->eid content)
                            existing-eid   (:eid existing)]
                        (if existing-eid
                          ;; Merge: keep the more recently updated version
-                         (let [imp-date      (parse-date updated-at)
+                         (let [imp-date      (parse-date (:node/updated-at node))
                                ext-date      (:updated-at existing)
                                import-newer? (or (nil? ext-date)
                                                  (and imp-date
                                                       (.after imp-date ext-date)))]
-                           ;; Always map snapshot-id and update cycle
                            (p/update-node-cycle! fs existing-eid adjusted-cycle)
-                           ;; Only overwrite weight/tags/blob when import is newer
                            (when import-newer?
                              (p/update-node-weight! fs existing-eid (or weight 0.0))
                              (when (seq tags)
                                (p/replace-node-tags! fs existing-eid tags))
                              (when blob-dir
                                (p/set-node-blob-dir! fs existing-eid blob-dir)))
-                           (assoc m snapshot-id existing-eid))
+                           (assoc m old-eid existing-eid))
                          ;; New: create via import-node!
                          (let [result (p/import-node! fs
                                         {:content    content
@@ -328,39 +296,39 @@
                                          :cycle      adjusted-cycle
                                          :tags       tags
                                          :blob-dir   blob-dir
-                                         :sources    sources
-                                         :session-id session-id
-                                         :created-at created-at
-                                         :updated-at updated-at})]
-                           (assoc m snapshot-id (:id result))))))
+                                         :sources    (:node/sources node)
+                                         :session-id (:node/session-id node)
+                                         :created-at (:node/created-at node)
+                                         :updated-at (:node/updated-at node)})]
+                           (assoc m old-eid (:id result))))))
                    {}
                    nodes)
 
         ;; Step 5: Import edges
         edges-imported
-        (reduce (fn [cnt {:keys [from-snapshot-id to-snapshot-id weight cycle type]}]
-                  (let [from-eid (sid->eid from-snapshot-id)
-                        to-eid   (sid->eid to-snapshot-id)]
+        (reduce (fn [cnt edge]
+                  (let [from-eid (old->new (:edge/from edge))
+                        to-eid   (old->new (:edge/to edge))]
                     (if (and from-eid to-eid)
-                      (let [adjusted-cycle (+ (or cycle 0) import-delta)]
+                      (let [adjusted-cycle (+ (or (:edge/cycle edge) 0) import-delta)]
                         ;; Skip if edge already exists between these nodes
                         (when-not (p/find-edge-between fs from-eid to-eid)
                           (p/import-edge! fs {:from   from-eid
                                               :to     to-eid
-                                              :weight (or weight 0.0)
+                                              :weight (or (:edge/weight edge) 0.0)
                                               :cycle  adjusted-cycle
-                                              :type   type}))
+                                              :type   (:edge/type edge)}))
                         (inc cnt))
                       cnt)))
                 0
                 edges)
 
-        ;; Step 6: Import vectors with new entity IDs (skip if snapshot has none)
+        ;; Step 6: Import vectors with new entity IDs
         vectors-imported
         (if (seq vectors)
-          (reduce (fn [cnt {:keys [snapshot-id vector payload]}]
-                    (if-let [new-eid (sid->eid snapshot-id)]
-                      (do (p/upsert! vs new-eid vector payload)
+          (reduce (fn [cnt v]
+                    (if-let [new-eid (old->new (:db/id v))]
+                      (do (p/upsert! vs new-eid (:vector v) (:payload v))
                           (inc cnt))
                       cnt))
                   0
@@ -381,7 +349,7 @@
 
 (defn import-snapshot-zip!
   "Imports a ZIP archive (as byte array) into the current database.
-   Unpacks snapshot.json + blob files, then delegates to import logic.
+   Unpacks snapshot.edn + blob files, then delegates to import logic.
    `ctx`       — service context with :fact-store, :vector-store, :blob-path.
    `zip-bytes` — byte array of the ZIP archive.
    Returns {:imported-nodes N :imported-edges N :imported-vectors N :imported-blobs N :new-tick N}."

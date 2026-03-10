@@ -79,9 +79,9 @@
   "Upsert edge: if exists, reinforce weight via apply-score; if not, create new.
    `initial-weight` serves as both initial weight for new edges and reinforcement factor for existing."
   [fact-store from-eid to-eid initial-weight opts]
-  (if-let [[edge-id current-w] (p/find-edge-between fact-store from-eid to-eid)]
-    (let [new-w (decay/apply-score current-w 1.0 initial-weight)]
-      (p/update-edge-weight! fact-store edge-id new-w))
+  (if-let [edge (p/find-edge-between fact-store from-eid to-eid)]
+    (let [new-w (decay/apply-score (:edge/weight edge) 1.0 initial-weight)]
+      (p/update-edge-weight! fact-store (:edge/id edge) new-w))
     (p/create-edge! fact-store (cond-> {:from from-eid :to to-eid :weight initial-weight}
                                  (:type opts) (assoc :type (:type opts))))))
 
