@@ -8,7 +8,9 @@
             [ai-memory.db.core :as db]
             [ai-memory.store.datomic-store :as datomic]
             [ai-memory.store.qdrant-store :as qdrant]
+            [ai-memory.store.memory-vector-store :as mem-vectors]
             [ai-memory.store.openai-embedding :as openai-emb]
+            [ai-memory.store.random-embedding :as rand-emb]
             [ai-memory.store.protocols :as p]
             [ai-memory.service.tags :as tags]
             [ai-memory.metrics :as metrics]
@@ -33,9 +35,11 @@
   (ig/ref value))
 
 (defn read-config
-  "Reads system.edn via aero (resolves #env, #or, #long) then parses #ig/ref tags."
-  []
-  (aero/read-config (io/resource "system.edn")))
+  "Reads system.edn via aero (resolves #env, #or, #long, #profile) then parses #ig/ref tags.
+   `opts` — aero opts map, e.g. {:profile :dev} for in-memory vector stores."
+  ([] (read-config {}))
+  ([opts]
+   (aero/read-config (io/resource "system.edn") opts)))
 
 ;; --- Lifecycle methods ---
 
@@ -57,20 +61,40 @@
 (defmethod ig/init-key :store/fact [_ {:keys [conn]}]
   (datomic/create conn))
 
+(defn- resolve-embedding-backend
+  "Resolves embedding backend keyword.
+   :auto — uses :openai if API key is present, :random otherwise."
+  [cfg]
+  (let [backend (or (:embedding-backend cfg) :openai)]
+    (if (and (= backend :auto) (not (:openai-api-key cfg)))
+      :random
+      (if (= backend :auto) :openai backend))))
+
 (defmethod ig/init-key :store/embedding [_ {:keys [cfg]}]
-  (openai-emb/create cfg))
+  (let [backend (resolve-embedding-backend cfg)]
+    (log/info "Embedding backend:" backend)
+    (case backend
+      :random (rand-emb/create)
+      :openai (openai-emb/create cfg))))
+
+(defn- make-vector-store
+  "Creates a VectorStore based on :vector-backend config.
+   :memory — in-memory (no external deps), :qdrant — real Qdrant."
+  [cfg embedding collection]
+  (let [backend (or (:vector-backend cfg) :qdrant)
+        store   (case backend
+                  :memory (mem-vectors/create collection)
+                  :qdrant (qdrant/create cfg collection))
+        dim     (p/embedding-dim embedding)]
+    (p/ensure-store! store dim)
+    (log/info "Vector store" collection "backend:" backend)
+    store))
 
 (defmethod ig/init-key :store/vectors [_ {:keys [cfg embedding collection]}]
-  (let [store (qdrant/create cfg collection)
-        dim   (p/embedding-dim embedding)]
-    (p/ensure-store! store dim)
-    store))
+  (make-vector-store cfg embedding collection))
 
 (defmethod ig/init-key :store/tag-vectors [_ {:keys [cfg embedding collection]}]
-  (let [store (qdrant/create cfg collection)
-        dim   (p/embedding-dim embedding)]
-    (p/ensure-store! store dim)
-    store))
+  (make-vector-store cfg embedding collection))
 
 (defmethod ig/init-key :service/context
   [_ {:keys [cfg] :as ctx}]

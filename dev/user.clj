@@ -6,7 +6,7 @@
             [ai-memory.tag.query :as tag-query]
             [datomic.api :as d]))
 
-(ig-repl/set-prep! sys/read-config)
+(ig-repl/set-prep! #(sys/read-config {:profile :dev}))
 
 (def go ig-repl/go)
 (def halt ig-repl/halt)

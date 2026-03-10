@@ -1,5 +1,5 @@
 ;; Integrant system config, read via aero.
-;; aero tags: #env VAR, #or [a b], #long "8080"
+;; aero tags: #env VAR, #or [a b], #long "8080", #profile {:dev ... :prod ...}
 {:config/env
  {:datomic-uri    #or [#env DATOMIC_URI "datomic:mem://ai-memory-dev"]
   :port           #long #or [#env PORT "8080"]
@@ -7,7 +7,12 @@
   :qdrant-url     #or [#env QDRANT_URL "http://localhost:6333"]
   :blob-path      #or [#env BLOB_PATH nil]
   :project-path   #env PROJECT_PATH
-  :api-token      #env API_TOKEN}
+  :api-token      #env API_TOKEN
+  ;; :memory — in-memory stores (no external deps), :qdrant — real Qdrant
+  :vector-backend #profile {:dev :memory :default :qdrant}
+  ;; :random — deterministic pseudo-random vectors (no API key needed), :openai — real OpenAI
+  ;; dev: auto-detects — uses :openai if OPENAI_API_KEY is set, :random otherwise
+  :embedding-backend #profile {:dev :auto :default :openai}}
 
  :metrics/registry {}
 
