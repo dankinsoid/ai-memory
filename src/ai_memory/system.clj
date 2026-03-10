@@ -1,21 +1,21 @@
-;; @ai-generated(solo)
+;; @ai-generated(guided)
 (ns ai-memory.system
-  "Integrant lifecycle methods for all system components."
+  "Integrant lifecycle methods for backend-agnostic system components.
+   Backend-specific init-keys (db, stores) live in ai-memory.system.backend
+   which is loaded from whichever backend source path is on the classpath."
   (:require [integrant.core :as ig]
             [aero.core :as aero]
             [clojure.java.io :as io]
             [clojure.tools.logging :as log]
-            [ai-memory.db.core :as db]
-            [ai-memory.store.datomic-store :as datomic]
-            [ai-memory.store.qdrant-store :as qdrant]
-            [ai-memory.store.memory-vector-store :as mem-vectors]
             [ai-memory.store.openai-embedding :as openai-emb]
             [ai-memory.store.random-embedding :as rand-emb]
-            [ai-memory.store.protocols :as p]
             [ai-memory.service.tags :as tags]
             [ai-memory.metrics :as metrics]
             [ai-memory.scheduler :as scheduler]
-            [ai-memory.web.handler :as web]))
+            [ai-memory.web.handler :as web]
+            ;; Side-effect require: registers backend-specific ig/init-key defmethods.
+            ;; Resolved at classpath level — src-datomic/ or src-datalevin/.
+            ai-memory.system.backend))
 
 ;; --- Config loading ---
 
@@ -50,17 +50,6 @@
 (defmethod ig/init-key :metrics/registry [_ _]
   (metrics/create-registry))
 
-(defmethod ig/init-key :db/conn [_ {:keys [cfg]}]
-  (let [uri  (:datomic-uri cfg)
-        conn (db/connect uri)]
-    (db/ensure-schema conn)
-    (db/recompute-tag-counts! conn)
-    (log/info "Datomic connected:" uri)
-    conn))
-
-(defmethod ig/init-key :store/fact [_ {:keys [conn]}]
-  (datomic/create conn))
-
 (defn- resolve-embedding-backend
   "Resolves embedding backend keyword.
    :auto — uses :openai if API key is present, :random otherwise."
@@ -76,25 +65,6 @@
     (case backend
       :random (rand-emb/create)
       :openai (openai-emb/create cfg))))
-
-(defn- make-vector-store
-  "Creates a VectorStore based on :vector-backend config.
-   :memory — in-memory (no external deps), :qdrant — real Qdrant."
-  [cfg embedding collection]
-  (let [backend (or (:vector-backend cfg) :qdrant)
-        store   (case backend
-                  :memory (mem-vectors/create collection)
-                  :qdrant (qdrant/create cfg collection))
-        dim     (p/embedding-dim embedding)]
-    (p/ensure-store! store dim)
-    (log/info "Vector store" collection "backend:" backend)
-    store))
-
-(defmethod ig/init-key :store/vectors [_ {:keys [cfg embedding collection]}]
-  (make-vector-store cfg embedding collection))
-
-(defmethod ig/init-key :store/tag-vectors [_ {:keys [cfg embedding collection]}]
-  (make-vector-store cfg embedding collection))
 
 (defmethod ig/init-key :service/context
   [_ {:keys [cfg] :as ctx}]

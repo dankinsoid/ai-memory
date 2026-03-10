@@ -6,21 +6,22 @@
 - [x] Clean Datomic/Qdrant references from docstrings in common code
 
 ## Phase 2: Split source paths
-- [ ] Create `src-datomic/` directory structure
-- [ ] Move datomic-specific files:
+- [x] Create `src-datomic/` directory structure
+- [x] Move datomic-specific files:
   - `db/core.clj` → `src-datomic/`
   - `store/datomic_store.clj` → `src-datomic/`
-  - `store/qdrant_store.clj` → `src-datomic/`
-  - `embedding/vector_store.clj` → `src-datomic/` (Qdrant HTTP client)
-  - `graph/edge.clj` → `src-datomic/` (PAUSED, direct datomic.api)
-  - `graph/traverse.clj` → `src-datomic/` (PAUSED, depends on edge.clj)
-- [ ] Split `system.clj`:
+  - `graph/edge.clj` → `src-datomic/`
+  - `graph/traverse.clj` → `src-datomic/`
+  - Note: `qdrant_store.clj` and `embedding/vector_store.clj` stay in `src/` (no datomic dep, reusable by any backend)
+- [x] Split `system.clj`:
   - Common init-keys stay in `src/ai_memory/system.clj` (config, metrics, embedding, context, web, scheduler)
-  - Backend-specific init-keys → `src-datomic/ai_memory/system/backend.clj` (:db/conn, :store/fact, :store/vectors)
+  - Backend-specific init-keys → `src-datomic/ai_memory/system/backend.clj` (:db/conn, :store/fact, :store/vectors, :store/tag-vectors)
   - `system.clj` requires `ai-memory.system.backend` (whichever is on classpath)
+- [x] Fix tests: replace `tag/ensure-tag!` calls with `p/ensure-tag!` on FactStore protocol
+- [x] Rewrite `tag/core_test.clj`: test tag vectorization via `service.tags/ensure!` instead of impl-specific ensure-tag
 
 ## Phase 3: Update deps.edn
-- [ ] Move `com.datomic/peer` and `clj-http` to `:datomic` alias with `extra-paths ["src-datomic"]`
+- [ ] Move `com.datomic/peer` to `:datomic` alias with `extra-paths ["src-datomic"]`
 - [ ] Create `:datalevin` alias with `datalevin/datalevin` dep and `extra-paths ["src-datalevin"]`
 - [ ] Update `:run`, `:dev`, `:test` aliases to compose with backend alias
 - [ ] Verify: `clj -M:datomic:run`, `clj -M:datomic:test`

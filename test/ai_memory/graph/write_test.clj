@@ -6,8 +6,7 @@
             [ai-memory.graph.write :as write]
             [ai-memory.service.facts :as facts]
             [ai-memory.store.protocols :as p]
-            [ai-memory.store.datomic-store :as datomic-store]
-            [ai-memory.tag.core :as tag]))
+            [ai-memory.store.datomic-store :as datomic-store]))
 
 ;; --- In-memory Datomic fixture (no TEI/Qdrant) ---
 
@@ -244,7 +243,7 @@
    Returns Datomic entity ID."
   [conn content tick]
   (let [tempid (d/tempid :db.part/user)]
-    (tag/ensure-tag! conn "entity")
+    (p/ensure-tag! *fact-store* "entity")
     (let [tx @(d/transact conn
                 [{:db/id         tempid
                   :node/content  content

@@ -3,13 +3,13 @@
             [clojure.string :as str]
             [datomic.api :as d]
             [ai-memory.db.core :as db]
-            [ai-memory.tag.core :as tag]
             [ai-memory.web.handler :as web]
             [ai-memory.mcp.protocol :as protocol]
             [ai-memory.store.datomic-store :as datomic-store]
             [ai-memory.store.protocols :as p]))
 
 (def ^:dynamic *conn* nil)
+(def ^:dynamic *fact-store* nil)
 (def ^:dynamic *base-url* nil)
 (def ^:dynamic *server* nil)
 
@@ -37,7 +37,8 @@
         conn       (db/connect uri)
         _          (db/ensure-schema conn)
         cfg        {:blob-path "/tmp/ai-memory-test-blobs"}
-        ctx        {:fact-store        (datomic-store/create conn)
+        fs         (datomic-store/create conn)
+        ctx        {:fact-store        fs
                     :vector-store      stub-vector-store
                     :tag-vector-store  stub-vector-store
                     :embedding         stub-embedding
@@ -45,9 +46,10 @@
                     :blob-path         "/tmp/ai-memory-test-blobs"}
         srv        (web/start {:port 0 :conn conn :cfg cfg :ctx ctx})
         port       (-> srv .getConnectors first .getLocalPort)]
-    (binding [*conn*     conn
-              *base-url* (str "http://localhost:" port)
-              *server*   srv]
+    (binding [*conn*      conn
+              *fact-store* fs
+              *base-url*  (str "http://localhost:" port)
+              *server*    srv]
       (try
         (f)
         (finally
@@ -63,7 +65,7 @@
   ([conn content tag-names opts]
    (let [now    (java.util.Date.)
          tempid (d/tempid :db.part/user)]
-     (doseq [n tag-names] (tag/ensure-tag! conn n))
+     (doseq [n tag-names] (p/ensure-tag! *fact-store* n))
      (let [node-map {:db/id           tempid
                      :node/content    content
                      :node/weight     1.0

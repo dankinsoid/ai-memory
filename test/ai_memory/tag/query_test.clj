@@ -2,8 +2,8 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datomic.api :as d]
             [ai-memory.db.core :as db]
-            [ai-memory.tag.core :as tag]
             [ai-memory.tag.query :as query]
+            [ai-memory.store.protocols :as p]
             [ai-memory.store.datomic-store :as datomic-store]
             [ai-memory.decay.core :as decay]))
 
@@ -35,7 +35,7 @@
   ([conn content tag-names opts]
    (let [now    (java.util.Date.)
          tempid (d/tempid :db.part/user)]
-     (doseq [n tag-names] (tag/ensure-tag! conn n))
+     (doseq [n tag-names] (p/ensure-tag! *fact-store* n))
      (let [node-map {:db/id           tempid
                      :node/content    content
                      :node/weight     (or (:weight opts) 0.0)
