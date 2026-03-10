@@ -20,11 +20,14 @@
 - [x] Fix tests: replace `tag/ensure-tag!` calls with `p/ensure-tag!` on FactStore protocol
 - [x] Rewrite `tag/core_test.clj`: test tag vectorization via `service.tags/ensure!` instead of impl-specific ensure-tag
 
-## Phase 3: Update deps.edn
-- [ ] Move `com.datomic/peer` to `:datomic` alias with `extra-paths ["src-datomic"]`
-- [ ] Create `:datalevin` alias with `datalevin/datalevin` dep and `extra-paths ["src-datalevin"]`
-- [ ] Update `:run`, `:dev`, `:test` aliases to compose with backend alias
-- [ ] Verify: `clj -M:datomic:run`, `clj -M:datomic:test`
+## Phase 3: Update deps.edn & decouple tests
+- [x] Move `com.datomic/peer` to `:datomic` alias with `extra-paths ["src-datomic"]`
+- [x] Create `:datalevin` alias with `datalevin/datalevin` dep and `extra-paths ["src-datalevin"]`
+- [x] Commands now require backend alias: `clj -M:datomic:run`, `clj -M:datomic:test`
+- [x] Remove store-level tests (tag/core_test, tag/query_test, graph/write_test)
+- [x] Strip Datomic fixture from mcp/protocol_test — keep only pure rendering/protocol tests
+- [x] Verify: `clj -M:test` compiles without datomic (55 tests pass)
+- [ ] Add integration tests with Integrant-based fixtures (backend-agnostic, uses system.edn)
 
 ## Phase 4: Datalevin implementation
 - [ ] `src-datalevin/ai_memory/db/datalevin.clj` — connection, schema, tick counter

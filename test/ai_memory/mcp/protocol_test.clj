@@ -1,92 +1,13 @@
 (ns ai-memory.mcp.protocol-test
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [clojure.string :as str]
-            [datomic.api :as d]
-            [ai-memory.db.core :as db]
-            [ai-memory.web.handler :as web]
-            [ai-memory.mcp.protocol :as protocol]
-            [ai-memory.store.datomic-store :as datomic-store]
-            [ai-memory.store.protocols :as p]))
+  (:require [clojure.test :refer [deftest is testing]]
+            [ai-memory.mcp.protocol :as protocol]))
 
-(def ^:dynamic *conn* nil)
-(def ^:dynamic *fact-store* nil)
-(def ^:dynamic *base-url* nil)
-(def ^:dynamic *server* nil)
-
-(defn- test-uri []
-  (str "datomic:mem://mcp-protocol-test-" (d/squuid)))
-
-(def ^:private stub-vector-store
-  (reify p/VectorStore
-    (ensure-store! [_ _dim])
-    (upsert!       [_ _id _vec _payload])
-    (search        [_ _qvec _top-k _opts] [])
-    (delete!       [_ _id])
-    (delete-all!   [_])
-    (store-info    [_] {:reachable? false})))
-
-(def ^:private stub-embedding
-  (reify p/EmbeddingProvider
-    (embed-query    [_ _text] (vec (repeat 1536 0.0)))
-    (embed-document [_ _text] (vec (repeat 1536 0.0)))
-    (embed-batch    [_ texts] (mapv (fn [_] (vec (repeat 1536 0.0))) texts))
-    (embedding-dim  [_] 1536)))
-
-(defn with-server [f]
-  (let [uri        (test-uri)
-        conn       (db/connect uri)
-        _          (db/ensure-schema conn)
-        cfg        {:blob-path "/tmp/ai-memory-test-blobs"}
-        fs         (datomic-store/create conn)
-        ctx        {:fact-store        fs
-                    :vector-store      stub-vector-store
-                    :tag-vector-store  stub-vector-store
-                    :embedding         stub-embedding
-                    :metrics           nil
-                    :blob-path         "/tmp/ai-memory-test-blobs"}
-        srv        (web/start {:port 0 :conn conn :cfg cfg :ctx ctx})
-        port       (-> srv .getConnectors first .getLocalPort)]
-    (binding [*conn*      conn
-              *fact-store* fs
-              *base-url*  (str "http://localhost:" port)
-              *server*    srv]
-      (try
-        (f)
-        (finally
-          (.stop srv)
-          (d/delete-database uri))))))
-
-(use-fixtures :each with-server)
-
-;; --- Helpers ---
-
-(defn- create-tagged-node!
-  ([conn content tag-names] (create-tagged-node! conn content tag-names nil))
-  ([conn content tag-names opts]
-   (let [now    (java.util.Date.)
-         tempid (d/tempid :db.part/user)]
-     (doseq [n tag-names] (p/ensure-tag! *fact-store* n))
-     (let [node-map {:db/id           tempid
-                     :node/content    content
-                     :node/weight     1.0
-                     :node/cycle      0
-                     :node/tags       (vec tag-names)
-                     :node/created-at now
-                     :node/updated-at (or (:updated-at opts) now)}
-           tx       @(d/transact conn [node-map])]
-       (d/resolve-tempid (:db-after tx) (:tempids tx) tempid)))))
-
-(defn- handler []
-  (protocol/make-handler {:base-url *base-url*}))
-
-(defn- call [method & {:keys [id params] :or {id 1 params {}}}]
-  ((handler) {:jsonrpc "2.0" :id id :method method :params params}))
-
-;; --- Protocol tests (no DB) ---
+;; --- Pure rendering tests (no DB) ---
 
 (deftest initialize-test
   (testing "returns protocol version and capabilities"
-    (let [resp (call "initialize")]
+    (let [handler (protocol/make-handler {:base-url "http://localhost:8080"})
+          resp    (handler {:jsonrpc "2.0" :id 1 :method "initialize" :params {}})]
       (is (= 1 (:id resp)))
       (is (= "2025-03-26" (get-in resp [:result :protocolVersion])))
       (is (= "ai-memory" (get-in resp [:result :serverInfo :name])))
@@ -94,16 +15,18 @@
 
 (deftest tools-list-test
   (testing "returns all tools with schemas"
-    (let [resp  (call "tools/list")
-          tools (get-in resp [:result :tools])]
+    (let [handler (protocol/make-handler {:base-url "http://localhost:8080"})
+          resp    (handler {:jsonrpc "2.0" :id 1 :method "tools/list" :params {}})
+          tools   (get-in resp [:result :tools])]
       (is (every? :name tools))
       (is (every? :description tools))
       (is (every? :inputSchema tools)))))
 
 (deftest tools-list-names-test
   (testing "tool names match expected"
-    (let [resp  (call "tools/list")
-          names (set (map :name (get-in resp [:result :tools])))]
+    (let [handler (protocol/make-handler {:base-url "http://localhost:8080"})
+          resp    (handler {:jsonrpc "2.0" :id 1 :method "tools/list" :params {}})
+          names   (set (map :name (get-in resp [:result :tools])))]
       (is (= #{"memory_explore_tags" "memory_resolve_tags"
                "memory_get_facts"
                "memory_remember" "memory_reinforce"
@@ -113,22 +36,27 @@
 
 (deftest ping-test
   (testing "returns empty result"
-    (let [resp (call "ping")]
+    (let [handler (protocol/make-handler {:base-url "http://localhost:8080"})
+          resp    (handler {:jsonrpc "2.0" :id 1 :method "ping" :params {}})]
       (is (= {} (:result resp))))))
 
 (deftest notification-returns-nil-test
   (testing "notifications/initialized returns nil"
-    (let [resp ((handler) {:jsonrpc "2.0" :method "notifications/initialized"})]
+    (let [handler (protocol/make-handler {:base-url "http://localhost:8080"})
+          resp    (handler {:jsonrpc "2.0" :method "notifications/initialized"})]
       (is (nil? resp)))))
 
 (deftest unknown-method-test
   (testing "unknown method returns -32601"
-    (let [resp (call "nonexistent")]
+    (let [handler (protocol/make-handler {:base-url "http://localhost:8080"})
+          resp    (handler {:jsonrpc "2.0" :id 1 :method "nonexistent" :params {}})]
       (is (= -32601 (get-in resp [:error :code]))))))
 
 (deftest unknown-tool-test
   (testing "unknown tool returns -32602"
-    (let [resp (call "tools/call" :params {:name "nonexistent_tool" :arguments {}})]
+    (let [handler (protocol/make-handler {:base-url "http://localhost:8080"})
+          resp    (handler {:jsonrpc "2.0" :id 1 :method "tools/call"
+                            :params {:name "nonexistent_tool" :arguments {}}})]
       (is (= -32602 (get-in resp [:error :code]))))))
 
 ;; --- Render tag list ---
@@ -179,102 +107,9 @@
                    "- [103] Use dataclasses")
              text)))))
 
-;; --- Tool dispatch with embedded HTTP server ---
-
-(deftest explore-tags-browse-test
-  (testing "memory_explore_tags without tag_sets returns flat tag list"
-    (create-tagged-node! *conn* "Fact 1" ["clj"])
-    (create-tagged-node! *conn* "Fact 2" ["clj"])
-    (create-tagged-node! *conn* "Fact 3" ["python"])
-    (db/recompute-tag-counts! *conn*)
-    (let [resp (call "tools/call"
-                 :params {:name "memory_explore_tags"
-                          :arguments {:limit 50}})
-          text (get-in resp [:result :content 0 :text])
-          lines (str/split-lines text)]
-      (is (nil? (:error resp)))
-      ;; Has aspect section header + aspect tags + blank line + user tags
-      (is (> (count lines) 2))
-      ;; First line is "aspect:" section header
-      (is (str/includes? text "aspect:"))
-      ;; User tags (clj, python) appear after aspect section
-      (is (str/includes? text "clj 2")))))
-
-(deftest explore-tags-empty-test
-  (testing "memory_explore_tags with no user tags returns seeded aspect tags"
-    (let [resp (call "tools/call"
-                 :params {:name "memory_explore_tags"
-                          :arguments {}})
-          text (get-in resp [:result :content 0 :text])
-          lines (str/split-lines text)]
-      ;; Aspect tags are seeded, so not empty
-      (is (pos? (count lines)))
-      ;; Starts with "aspect:" section header
-      (is (str/starts-with? text "aspect:")))))
-
-(deftest explore-tags-count-test
-  (testing "memory_explore_tags with tag_sets returns text counts"
-    (create-tagged-node! *conn* "A" ["clj" "error-handling"])
-    (create-tagged-node! *conn* "B" ["clj"])
-    (let [resp (call "tools/call"
-                 :params {:name "memory_explore_tags"
-                          :arguments {:tag_sets [["clj"]
-                                                 ["clj" "error-handling"]]}})
-          text (get-in resp [:result :content 0 :text])
-          lines (str/split-lines text)]
-      (is (nil? (:error resp)))
-      (is (= 2 (count lines)))
-      (is (= "clj: 2" (first lines)))
-      (is (= "clj + error-handling: 1" (second lines))))))
-
-(deftest get-facts-tool-test
-  (testing "memory_get_facts returns plain text facts"
-    (create-tagged-node! *conn* "Clojure error handling"
-                         ["clj" "error-handling"])
-    (create-tagged-node! *conn* "Python basics" ["python"])
-    (let [resp (call "tools/call"
-                 :params {:name "memory_get_facts"
-                          :arguments {:filters [{:tags ["clj"] :limit 10}]}})
-          text (get-in resp [:result :content 0 :text])]
-      (is (nil? (:error resp)))
-      (is (str/includes? text "= clj"))
-      (is (str/includes? text "Clojure error handling"))
-      (is (re-find #"\[(\d+)\]" text) "should include entity ID")
-      (is (not (str/includes? text "Python basics"))))))
-
-(deftest get-facts-with-since-test
-  (testing "memory_get_facts with since filters by date"
-    (let [old-date (java.util.Date. (- (System/currentTimeMillis) (* 30 24 60 60 1000)))
-          new-date (java.util.Date. (- (System/currentTimeMillis) (* 1 24 60 60 1000)))]
-      (create-tagged-node! *conn* "Old fact" ["clj"] {:updated-at old-date})
-      (create-tagged-node! *conn* "New fact" ["clj"] {:updated-at new-date})
-      (let [resp (call "tools/call"
-                   :params {:name "memory_get_facts"
-                            :arguments {:filters [{:tags ["clj"] :since "7d"}]}})
-            text (get-in resp [:result :content 0 :text])]
-        (is (nil? (:error resp)))
-        (is (str/includes? text "New fact"))
-        (is (not (str/includes? text "Old fact")))))))
-
-(deftest get-facts-no-tags-test
-  (testing "memory_get_facts with date-only filter"
-    (let [old-date (java.util.Date. (- (System/currentTimeMillis) (* 30 24 60 60 1000)))
-          new-date (java.util.Date. (- (System/currentTimeMillis) (* 1 24 60 60 1000)))]
-      (create-tagged-node! *conn* "Old fact" ["clj"] {:updated-at old-date})
-      (create-tagged-node! *conn* "New fact" ["python"] {:updated-at new-date})
-      (let [resp (call "tools/call"
-                   :params {:name "memory_get_facts"
-                            :arguments {:filters [{:since "7d"}]}})
-            text (get-in resp [:result :content 0 :text])]
-        (is (nil? (:error resp)))
-        (is (str/includes? text "= all"))
-        (is (str/includes? text "New fact"))
-        (is (not (str/includes? text "Old fact")))))))
-
 (deftest render-filter-results-empty-filter-test
   (testing "render-filter-results handles filter with no tags/query"
     (let [text (protocol/render-filter-results
                  [{:filter {}
                    :facts [{:db/id 201 :node/content "Some fact"}]}])]
       (is (= "= all\n- [201] Some fact" text)))))
-

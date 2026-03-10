@@ -25,13 +25,15 @@ Legacy `claude_config_files/` and `scripts/deploy.bb` are deprecated.
 
 ## Commands
 
+Requires a backend alias (`:datomic` or `:datalevin`):
+
 ```bash
-clj -M:dev          # REPL (nREPL + CIDER)
-clj -M:run          # Run service (port 8080)
-clj -M:test         # Tests (kaocha)
+clj -M:datomic:dev          # REPL (nREPL + CIDER) with Datomic backend
+clj -M:datomic:run          # Run service (port 8080)
+clj -M:datomic:test         # Tests (kaocha)
 ```
 
-Local dev: run service directly (`clj -M:run`), no Docker. Restart after code changes.
+Local dev: run service directly, no Docker. Restart after code changes.
 
 ## Server (DigitalOcean)
 
