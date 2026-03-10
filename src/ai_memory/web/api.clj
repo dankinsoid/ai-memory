@@ -227,7 +227,12 @@
         (io/copy zip-bytes tmp-file)
         {:status  200
          :headers {"Content-Type"        "application/zip"
-                   "Content-Disposition" (str "attachment; filename=\"" filename "\"")}
+                   "Content-Disposition" (str "attachment; filename=\"" filename "\"")
+                   ;; Explicit Content-Length forces Jetty to use fixed-length
+                   ;; instead of Transfer-Encoding: chunked — browsers hang on
+                   ;; chunked downloads that look complete but never get the
+                   ;; terminating chunk marker.
+                   "Content-Length"       (str (.length tmp-file))}
          :body    tmp-file})
       (catch Exception e
         {:status 500
