@@ -28,6 +28,10 @@
       (.mkdirs dir))
     (.getPath dir)))
 
+(defmethod aero/reader 'ig/ref
+  [_ _ value]
+  (ig/ref value))
+
 (defn read-config
   "Reads system.edn via aero (resolves #env, #or, #long) then parses #ig/ref tags."
   []
