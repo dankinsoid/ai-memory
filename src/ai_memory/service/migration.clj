@@ -47,17 +47,16 @@
 ;; Blob I/O helpers
 ;; ---------------------------------------------------------------------------
 
-(defn- collect-blob-files
-  "Recursively collects all files under blob-path/blob-dir.
-   Returns seq of {:relative-path \"blobs/dir/file\" :file java.io.File}."
-  [blob-path blob-dir]
-  (let [dir (io/file blob-path blob-dir)]
+(defn- collect-all-blob-files
+  "Recursively collects all files under blob-path (the entire blobs directory).
+   Returns seq of {:relative-path \"blobs/...\" :file java.io.File}."
+  [blob-path]
+  (let [dir (io/file blob-path)]
     (when (.isDirectory dir)
       (->> (file-seq dir)
            (filter #(.isFile %))
            (mapv (fn [f]
-                   (let [rel (.relativize (.toPath (io/file blob-path))
-                                          (.toPath f))]
+                   (let [rel (.relativize (.toPath dir) (.toPath f))]
                      {:relative-path (str "blobs/" rel)
                       :file          f})))))))
 
@@ -76,12 +75,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- snapshot->zip-bytes
-  "Packages snapshot map + blob files + optional vectors into a ZIP byte array.
+  "Packages snapshot map + entire blob directory + optional vectors into a ZIP byte array.
    `snapshot`  — the snapshot map (will be serialized as snapshot.edn)
    `vectors`   — seq of vector maps, or nil (written as separate vectors.edn)
-   `blob-path` — filesystem base path for blobs
-   `blob-dirs` — set of blob-dir strings referenced by nodes"
-  [snapshot vectors blob-path blob-dirs]
+   `blob-path` — filesystem base path for blobs (included in full)"
+  [snapshot vectors blob-path]
   (let [baos (ByteArrayOutputStream.)]
     (with-open [zos (ZipOutputStream. baos)]
       ;; 1. Write snapshot.edn (facts, edges, tags — no vectors)
@@ -97,10 +95,8 @@
         (let [edn-bytes (.getBytes (pr-str vectors) "UTF-8")]
           (.write zos edn-bytes 0 (count edn-bytes)))
         (.closeEntry zos))
-      ;; 3. Write blob files
-      (doseq [blob-dir blob-dirs
-              :when blob-dir
-              {:keys [relative-path file]} (collect-blob-files blob-path blob-dir)]
+      ;; 3. Write entire blob directory tree
+      (doseq [{:keys [relative-path file]} (collect-all-blob-files blob-path)]
         (.putNextEntry zos (ZipEntry. relative-path))
         (io/copy file zos)
         (.closeEntry zos)))
@@ -139,7 +135,7 @@
 
 (defn- build-snapshot-map
   "Builds the snapshot data map (without blobs — those go in the ZIP separately).
-   Returns the snapshot map + set of blob-dirs for packaging."
+   Returns {:snapshot map, :vectors vec-or-nil}."
   [ctx {:keys [include-vectors] :or {include-vectors true}}]
   (let [fs   (:fact-store ctx)
         vs   (:vector-store ctx)
@@ -165,8 +161,6 @@
                        (filter #(eid-set (:id %)))
                        (mapv #(-> % (assoc :db/id (:id %)) (dissoc :id)))))
 
-        blob-dirs (into #{} (keep :node/blob-dir) nodes)
-
         snapshot {:version 2
                   :tick    tick
                   :tags    tags-export
@@ -176,21 +170,21 @@
     (log/info "Exported snapshot:" (count nodes) "nodes,"
               (count edges) "edges,"
               (if include-vectors (str (count vectors) " vectors,") "no vectors,")
-              (count blob-dirs) "blob dirs, tick=" tick)
+              "tick=" tick)
 
-    (cond-> {:snapshot snapshot :blob-dirs blob-dirs}
+    (cond-> {:snapshot snapshot}
       include-vectors (assoc :vectors vectors))))
 
 (defn export-snapshot-zip
-  "Exports database state as a ZIP byte array containing snapshot.json + blobs/.
+  "Exports database state as a ZIP byte array containing snapshot.edn + blobs/.
    `ctx`  — service context with :fact-store, :vector-store, :blob-path.
    `opts` — {:include-vectors true/false} (default true).
    Returns byte array of the ZIP archive."
   ([ctx] (export-snapshot-zip ctx {}))
   ([ctx opts]
-   (let [{:keys [snapshot vectors blob-dirs]} (build-snapshot-map ctx opts)
+   (let [{:keys [snapshot vectors]} (build-snapshot-map ctx opts)
          blob-path (:blob-path ctx)]
-     (snapshot->zip-bytes snapshot vectors blob-path blob-dirs))))
+     (snapshot->zip-bytes snapshot vectors blob-path))))
 
 ;; ---------------------------------------------------------------------------
 ;; Import

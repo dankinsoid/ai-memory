@@ -20,6 +20,10 @@
     (when-let [node (p/find-nodes-by-session fact-store session-id)]
       (:db/id node))))
 
+;; DB stores short blob-dir names (e.g. "2026-03-10_session-abc") intentionally —
+;; decouples DB from filesystem layout so blob directory structure (flat vs projects/*)
+;; can change without migrating stored references. Resolution happens at read time
+;; via blob-store/resolve-blob-dir.
 (defn- link-blob-dir! [fact-store eid blob-dir]
   (p/set-node-blob-dir! fact-store eid blob-dir))
 
