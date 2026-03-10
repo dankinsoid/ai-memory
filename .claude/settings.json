@@ -17,7 +17,9 @@
       "Bash(ssh:*)",
       "Bash(claude mcp list:*)",
       "Bash(claude mcp get:*)",
-      "Bash(clj -M:datomic:test)"
+      "Bash(clj -M:datomic:test)",
+      "Bash(clj -M:datalevin:test)",
+      "Bash(clj -M:datalevin:run)"
     ]
   }
 }
