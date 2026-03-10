@@ -9,11 +9,11 @@
 (defn health
   "Health check with vector store reachability.
    `stores` — map with :vector-store
-   Returns {:status 'ok' :qdrant {...}}."
+   Returns {:status 'ok' :vector-store {...}}."
   [stores]
   (let [info (p/store-info (:vector-store stores))]
     {:status "ok"
-     :qdrant (select-keys info [:reachable? :status])}))
+     :vector-store (select-keys info [:reachable? :status])}))
 
 (defn diagnostics
   "Full diagnostic: collection info + optional test search.
@@ -21,7 +21,7 @@
    `test-query` — optional text to run end-to-end embedding + search"
   [stores test-query]
   (let [info (p/store-info (:vector-store stores))]
-    (cond-> {:qdrant info}
+    (cond-> {:vector-store info}
       (and (:reachable? info) test-query)
       (assoc :test-search
              (try

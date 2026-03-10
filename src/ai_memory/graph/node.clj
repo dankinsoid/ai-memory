@@ -1,5 +1,5 @@
 ;; Node utilities — embedding-related helpers used by the write pipeline.
-;; Pure DB operations have moved to ai-memory.store.datomic-store.
+;; Pure DB operations live in the backend-specific FactStore implementation.
 ;; See ADR-009 for retrieval architecture.
 
 (ns ai-memory.graph.node
@@ -8,11 +8,6 @@
             [clojure.java.io :as io]
             [clojure.tools.logging :as log])
   (:import [java.util UUID]))
-
-;; Kept for callers that need the pull spec shape (e.g. tag/query.clj).
-(def node-pull-spec
-  [:db/id :node/content :node/weight :node/cycle :node/sources
-   :node/blob-dir :node/updated-at :node/tags])
 
 (def ^:private min-score 0.2)
 (def ^:private min-file-score 0.15)

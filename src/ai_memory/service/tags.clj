@@ -1,6 +1,6 @@
 ;; @ai-generated(guided)
 (ns ai-memory.service.tags
-  "Tag operations: creation with Qdrant embedding, browsing, counting, resolution.
+  "Tag operations: creation with vector embedding, browsing, counting, resolution.
    Single entry point for tag creation — all callers must go through `ensure!`."
   (:require [ai-memory.store.protocols :as p]
             [ai-memory.tag.core :as tag]
@@ -9,7 +9,7 @@
             [clojure.tools.logging :as log]))
 
 (defn ensure!
-  "Ensures tags exist in Datomic and embeds new ones into the tag vector store.
+  "Ensures tags exist and embeds new ones into the tag vector store.
    This is THE single code path for tag creation — no other code should call
    p/ensure-tag! + embed directly.
    `stores` — map with :fact-store, :tag-vector-store, :embedding
@@ -43,7 +43,7 @@
   (tag-query/count-by-tag-sets (:fact-store ctx) (:metrics ctx) tag-sets))
 
 (defn resolve-tags
-  "Fuzzy tag resolution via vector similarity search in Qdrant.
+  "Fuzzy tag resolution via vector similarity search.
    `stores`     — map with :tag-vector-store, :embedding
    `candidates` — seq of candidate tag strings
    `opts`       — {:threshold N :top-k N}"
@@ -54,7 +54,7 @@
                             opts))
 
 (defn seed!
-  "Backfills tag vectors into Qdrant for tags that exist in Datomic but
+  "Backfills tag vectors for tags that exist in fact store but
    are missing from the vector store. Called at startup and on reindex.
    `stores` — map with :fact-store, :tag-vector-store, :embedding"
   [stores]

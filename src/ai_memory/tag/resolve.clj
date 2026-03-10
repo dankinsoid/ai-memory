@@ -1,7 +1,7 @@
 (ns ai-memory.tag.resolve
-  "Resolves candidate tag names to similar existing tags via Qdrant vector search.
-   Tags are embedded into a dedicated 'tags' Qdrant collection at creation time.
-   seed-tags! backfills any existing tags that are missing from Qdrant."
+  "Resolves candidate tag names to similar existing tags via vector search.
+   Tags are embedded into a dedicated 'tags' vector collection at creation time.
+   seed-tags! backfills any existing tags that are missing from the vector store."
   (:require [ai-memory.store.protocols :as p]
             [ai-memory.tag.core :as tag]
             [clojure.tools.logging :as log]))
@@ -9,19 +9,19 @@
 ;; --- Public API ---
 
 (defn seed-tags!
-  "Ensures all existing tags in Datomic have vectors in the tag vector store.
+  "Ensures all existing tags have vectors in the tag vector store.
    Embeds missing tags in batch. Called at startup to backfill."
   [fact-store tag-vector-store embedding]
   (let [all-tags   (mapv :tag/name (p/all-tags fact-store))
         store-info (p/store-info tag-vector-store)
         stored     (or (:points-count store-info) 0)
-        ;; If Qdrant has fewer points than tags, re-embed all.
-        ;; Qdrant upsert is idempotent so safe to re-embed.
+        ;; If vector store has fewer points than tags, re-embed all.
+        ;; Upsert is idempotent so safe to re-embed.
         to-embed   (if (< stored (count all-tags))
                      all-tags
                      [])]
     (when (seq to-embed)
-      (log/info "Seeding" (count to-embed) "tag vectors into Qdrant")
+      (log/info "Seeding" (count to-embed) "tag vectors into vector store")
       (let [vectors (p/embed-batch embedding to-embed)]
         (doseq [[tag-name vector] (map vector to-embed vectors)]
           (p/upsert! tag-vector-store (tag/tag-point-id tag-name) vector {:tag_name tag-name})))
@@ -29,7 +29,7 @@
     {:seeded (count to-embed) :total (count all-tags)}))
 
 (defn resolve-tags
-  "For each candidate tag, finds similar existing tags via Qdrant vector search.
+  "For each candidate tag, finds similar existing tags via vector search.
    Returns seq of {:candidate str :matches [{:tag str :score double} ...]},
    sorted by score descending, filtered by threshold.
 

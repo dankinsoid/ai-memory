@@ -1,6 +1,6 @@
 ;; @ai-generated(solo)
 (ns ai-memory.store.memory-vector-store
-  "In-memory VectorStore for local dev — no Qdrant dependency.
+  "In-memory VectorStore for local dev — no external vector DB dependency.
    Stores vectors in an atom, searches via brute-force cosine similarity."
   (:require [ai-memory.store.protocols :as p]
             [clojure.tools.logging :as log]))
