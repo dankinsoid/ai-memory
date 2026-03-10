@@ -7,6 +7,10 @@
             [clojure.tools.logging :as log]
             [ai-memory.schema :as schema]))
 
+;; Default embedding dimension (text-embedding-3-small = 1536).
+;; Passed at connection time via vector-opts; cannot change after DB creation.
+(def ^:const default-embedding-dim 1536)
+
 ;; --- Schema ---
 ;; Datalevin uses a map-based schema: {attr {:db/valueType ... :db/cardinality ...}}
 ;; Translated from Datomic's schema.edn vector format.
@@ -65,7 +69,17 @@
 
    ;; --- Global tick ---
    :tick/value  {:db/valueType   :db.type/long
-                 :db/cardinality :db.cardinality/one}})
+                 :db/cardinality :db.cardinality/one}
+
+   ;; --- Vector points (VectorStore entities) ---
+   ;; Dedicated entities for vector search, keyed by "collection:id".
+   ;; Keeps VectorStore decoupled from FactStore — blob file vectors
+   ;; have UUID string IDs that don't map to node entities.
+   :vp/point-id   {:db/valueType   :db.type/string
+                    :db/unique      :db.unique/identity}
+   :vp/collection  {:db/valueType   :db.type/string}
+   :vp/embedding   {:db/valueType   :db.type/vec}
+   :vp/payload     {:db/valueType   :db.type/string}})
 
 
 ;; --- Connection ---
@@ -73,13 +87,16 @@
 (defn connect
   "Opens (or creates) a Datalevin database at `db-path`.
    `db-path` — filesystem directory for the DB, or nil for in-memory.
+   `opts` — optional map, supports :embedding-dim (default 1536).
    Returns a Datalevin connection."
-  [db-path]
-  (let [conn (if db-path
-               (d/get-conn db-path schema)
-               (d/get-conn nil schema))]
-    (log/info "Datalevin connected:" (or db-path "<in-memory>"))
-    conn))
+  ([db-path] (connect db-path {}))
+  ([db-path {:keys [embedding-dim]}]
+   (let [dim  (or embedding-dim default-embedding-dim)
+         opts {:vector-opts {:dimensions dim :metric-type :cosine}}
+         conn (d/get-conn db-path schema opts)]
+     (log/info "Datalevin connected:" (or db-path "<in-memory>")
+               "vector-dim:" dim)
+     conn)))
 
 (defn close
   "Closes Datalevin connection, releasing resources."

@@ -34,10 +34,12 @@
 
  :store/vectors
  {:cfg        #ig/ref :config/env
+  :conn       #ig/ref :db/conn
   :collection "nodes"}
 
  :store/tag-vectors
  {:cfg        #ig/ref :config/env
+  :conn       #ig/ref :db/conn
   :collection "tags"}
 
  ;; Unified context for all services: stores + config values they need.
