@@ -3,7 +3,8 @@
   "Export/import snapshots for migrating data between backends.
 
    Export produces a ZIP archive:
-     snapshot.json  — facts, edges, vectors (optional), tick, tags
+     snapshot.json  — facts, edges, tick, tags
+     vectors.json   — embedding vectors (optional, separate for size)
      blobs/         — blob directory tree (files as-is)
 
    snapshot.json format:
@@ -73,19 +74,28 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- snapshot->zip-bytes
-  "Packages snapshot map + blob files into a ZIP byte array.
+  "Packages snapshot map + blob files + optional vectors into a ZIP byte array.
    `snapshot`  — the snapshot map (will be serialized as snapshot.json)
+   `vectors`   — seq of vector maps, or nil (written as separate vectors.json)
    `blob-path` — filesystem base path for blobs
    `blob-dirs` — set of blob-dir strings referenced by nodes"
-  [snapshot blob-path blob-dirs]
+  [snapshot vectors blob-path blob-dirs]
   (let [baos (ByteArrayOutputStream.)]
     (with-open [zos (ZipOutputStream. baos)]
-      ;; 1. Write snapshot.json
+      ;; 1. Write snapshot.json (facts, edges, tags — no vectors)
       (.putNextEntry zos (ZipEntry. "snapshot.json"))
       (let [json-bytes (.getBytes (json/generate-string snapshot) "UTF-8")]
         (.write zos json-bytes 0 (count json-bytes)))
       (.closeEntry zos)
-      ;; 2. Write blob files
+      ;; 2. Write vectors.json separately — large 1536-dim float arrays
+      ;;    compress much better as a standalone entry and don't bloat
+      ;;    the snapshot that users might want to inspect.
+      (when (seq vectors)
+        (.putNextEntry zos (ZipEntry. "vectors.json"))
+        (let [json-bytes (.getBytes (json/generate-string vectors) "UTF-8")]
+          (.write zos json-bytes 0 (count json-bytes)))
+        (.closeEntry zos))
+      ;; 3. Write blob files
       (doseq [blob-dir blob-dirs
               :when blob-dir
               {:keys [relative-path file]} (collect-blob-files blob-path blob-dir)]
@@ -95,11 +105,13 @@
     (.toByteArray baos)))
 
 (defn- zip-bytes->parts
-  "Reads a ZIP byte array and returns {:snapshot <map> :blob-files {rel-path → bytes}}.
-   blob-files paths are relative to blob-path (without 'blobs/' prefix)."
+  "Reads a ZIP byte array and returns {:snapshot <map> :vectors <vec> :blob-files {rel-path → bytes}}.
+   Supports both formats: vectors as separate vectors.json (new) or embedded in
+   snapshot.json (legacy). blob-files paths are relative to blob-path (without 'blobs/' prefix)."
   [^bytes zip-bytes]
   (with-open [zis (ZipInputStream. (ByteArrayInputStream. zip-bytes))]
     (loop [snapshot nil
+           vectors nil
            blob-files {}]
       (if-let [entry (.getNextEntry zis)]
         (let [name (.getName entry)
@@ -107,15 +119,21 @@
           (.closeEntry zis)
           (cond
             (= name "snapshot.json")
-            (recur (json/parse-string (String. content "UTF-8") true) blob-files)
+            (recur (json/parse-string (String. content "UTF-8") true) vectors blob-files)
+
+            (= name "vectors.json")
+            (recur snapshot (json/parse-string (String. content "UTF-8") true) blob-files)
 
             (.startsWith name "blobs/")
-            ;; Strip "blobs/" prefix → path relative to blob-path
-            (recur snapshot (assoc blob-files (subs name 6) content))
+            (recur snapshot vectors (assoc blob-files (subs name 6) content))
 
             :else
-            (recur snapshot blob-files)))
-        {:snapshot snapshot :blob-files blob-files}))))
+            (recur snapshot vectors blob-files)))
+        ;; Legacy support: vectors may be embedded in snapshot.json
+        (let [embedded-vectors (:vectors snapshot)
+              final-vectors    (or vectors embedded-vectors)
+              clean-snapshot   (dissoc snapshot :vectors)]
+          {:snapshot clean-snapshot :vectors final-vectors :blob-files blob-files})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Export
@@ -180,19 +198,19 @@
 
         blob-dirs (into #{} (keep :blob-dir) nodes)
 
-        snapshot (cond-> {:version 1
-                          :tick    tick
-                          :tags    tags-export
-                          :nodes   nodes
-                          :edges   edges}
-                   include-vectors (assoc :vectors vectors))]
+        snapshot {:version 1
+                  :tick    tick
+                  :tags    tags-export
+                  :nodes   nodes
+                  :edges   edges}]
 
     (log/info "Exported snapshot:" (count nodes) "nodes,"
               (count edges) "edges,"
               (if include-vectors (str (count vectors) " vectors,") "no vectors,")
               (count blob-dirs) "blob dirs, tick=" tick)
 
-    {:snapshot snapshot :blob-dirs blob-dirs}))
+    (cond-> {:snapshot snapshot :blob-dirs blob-dirs}
+      include-vectors (assoc :vectors vectors))))
 
 (defn export-snapshot-zip
   "Exports database state as a ZIP byte array containing snapshot.json + blobs/.
@@ -201,9 +219,9 @@
    Returns byte array of the ZIP archive."
   ([ctx] (export-snapshot-zip ctx {}))
   ([ctx opts]
-   (let [{:keys [snapshot blob-dirs]} (build-snapshot-map ctx opts)
+   (let [{:keys [snapshot vectors blob-dirs]} (build-snapshot-map ctx opts)
          blob-path (:blob-path ctx)]
-     (snapshot->zip-bytes snapshot blob-path blob-dirs))))
+     (snapshot->zip-bytes snapshot vectors blob-path blob-dirs))))
 
 ;; ---------------------------------------------------------------------------
 ;; Import
@@ -245,12 +263,13 @@
    and imported data.
 
    `ctx`      — service context with :fact-store, :vector-store.
-   `snapshot` — parsed snapshot map.
+   `snapshot` — parsed snapshot map (no vectors key).
+   `vectors`  — seq of vector maps, or nil.
    Returns {:imported-nodes N :imported-edges N :imported-vectors N :new-tick N}."
-  [ctx snapshot]
+  [ctx snapshot vectors]
   (let [fs   (:fact-store ctx)
         vs   (:vector-store ctx)
-        {:keys [tick nodes edges vectors tags]} snapshot
+        {:keys [tick nodes edges tags]} snapshot
 
         target-tick    (p/current-tick fs)
         new-tick       (max target-tick tick)
@@ -367,9 +386,9 @@
    `zip-bytes` — byte array of the ZIP archive.
    Returns {:imported-nodes N :imported-edges N :imported-vectors N :imported-blobs N :new-tick N}."
   [ctx zip-bytes]
-  (let [{:keys [snapshot blob-files]} (zip-bytes->parts zip-bytes)
+  (let [{:keys [snapshot vectors blob-files]} (zip-bytes->parts zip-bytes)
         blob-path (:blob-path ctx)
         blobs-written (when (and blob-path (seq blob-files))
                         (write-blob-files! blob-path blob-files))
-        result (import-snapshot-map! ctx snapshot)]
+        result (import-snapshot-map! ctx snapshot vectors)]
     (assoc result :imported-blobs (or blobs-written 0))))

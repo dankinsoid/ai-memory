@@ -28,7 +28,9 @@ export function NavBar() {
       const suffix = includeVectors ? '' : '-facts-only'
       a.download = `ai-memory-snapshot${suffix}-${new Date().toISOString().slice(0, 10)}.zip`
       a.click()
-      URL.revokeObjectURL(url)
+      // Delay revoke — Chromium starts the download asynchronously after
+      // click(), so revoking immediately kills the blob mid-transfer.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (e) {
       console.error('Export failed:', e)
       alert('Export failed: ' + e.message)

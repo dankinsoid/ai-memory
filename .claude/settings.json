@@ -20,7 +20,9 @@
       "Bash(clj -M:datomic:test)",
       "Bash(clj -M:datalevin:test)",
       "Bash(clj -M:datalevin:run)",
-      "Bash(clj -M:edn -e '\\(require \\(quote ai-memory.web.handler\\) \\(quote ai-memory.web.api\\)\\)')"
+      "Bash(clj -M:edn -e '\\(require \\(quote ai-memory.web.handler\\) \\(quote ai-memory.web.api\\)\\)')",
+      "Read(//private/tmp/**)",
+      "Bash(unzip -t /tmp/test-export2.zip)"
     ]
   }
 }
