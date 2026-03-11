@@ -117,11 +117,11 @@ Next: implement storage layer
 
 ### Задачи
 
-- [ ] `plugins/ai-memory/mcp/tags.py` — парсинг front-matter + derivation тегов из пути
-- [ ] `plugins/ai-memory/mcp/storage.py` — файловые операции (search, upsert session, remember)
-- [ ] `plugins/ai-memory/mcp/server.py` — MCP stdio JSON-RPC сервер
-- [ ] Обновить `plugins/ai-memory/.mcp.json` → stdio транспорт
-- [ ] Bump plugin version
+- [x] `plugins/ai-memory/mcp/tags.py` — парсинг front-matter + derivation тегов из пути
+- [x] `plugins/ai-memory/mcp/storage.py` — файловые операции (search, upsert session, remember)
+- [x] `plugins/ai-memory/mcp/server.py` — MCP stdio JSON-RPC сервер
+- [x] Обновить `plugins/ai-memory/.mcp.json` → stdio транспорт
+- [x] Bump plugin version (0.1.27)
 
 ---
 
@@ -195,8 +195,8 @@ Next: implement storage layer
 
 1. ~~**Блок 3**~~ ✅
 2. ~~**Блок 6**~~ ✅
-3. **Блок 1** ← сейчас (MCP сервер + файловое хранилище)
-4. **Блок 2** — обновить скиллы и хуки под новый формат
+3. ~~**Блок 1**~~ ✅
+4. **Блок 2** ← сейчас (обновить скиллы и хуки под новый формат)
 5. **Блок 4** — ленивая загрузка правил
 6. **Блок 5** — опциональный AI
 7. **Блок 7** — финальный рефактор плагина
