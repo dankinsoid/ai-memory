@@ -10,7 +10,7 @@ to stdout.  Logs to stderr only.
 Tools exposed:
   memory_session      — upsert session .md file
   memory_remember     — save a rule/preference .md file
-  memory_search       — search facts/rules (+ optionally sessions)
+  memory_search       — search all memory files by tags/text/date
   memory_explore_tags — list all tags with file counts
   memory_resolve_tags — fuzzy-match approximate tag names to existing ones
 
@@ -72,7 +72,7 @@ TOOLS = [
                 },
                 "content": {
                     "type": "string",
-                    "description": "Full session content for ## Content section (optional)",
+                    "description": "Compact session content saved to a separate messages file for /load recovery",
                 },
             },
             "required": ["session_id", "title", "summary"],
@@ -122,8 +122,10 @@ TOOLS = [
     {
         "name": "memory_search",
         "description": (
-            "Search facts/rules (and optionally sessions) by tags, text, and dates. "
-            "Results are sorted before slicing, so offset/since/until work correctly."
+            "Search all memory files by tags, text, and dates. Covers facts, rules, "
+            "and sessions — use tags to scope: 'universal', 'project/<name>', 'session', "
+            "'rule', 'preference', etc. Results are sorted before slicing, so "
+            "offset/since/until work correctly."
         ),
         "inputSchema": {
             "type": "object",
@@ -170,14 +172,6 @@ TOOLS = [
                 "offset": {
                     "type": "integer",
                     "description": "Skip first N results for pagination (default: 0)",
-                },
-                "include_sessions": {
-                    "type": "boolean",
-                    "description": "Also search session files (default: false)",
-                },
-                "project": {
-                    "type": "string",
-                    "description": "Restrict session search to this project (with include_sessions)",
                 },
             },
         },
@@ -255,7 +249,7 @@ def _handle_tools_call(params: dict) -> dict:
             return _text(f"Saved → {path}")
 
         if name == "memory_search":
-            facts = storage.search_facts(
+            results = storage.search_facts(
                 tags=args.get("tags"),
                 any_tags=args.get("any_tags"),
                 exclude_tags=args.get("exclude_tags"),
@@ -266,17 +260,7 @@ def _handle_tools_call(params: dict) -> dict:
                 limit=args.get("limit", 20),
                 offset=args.get("offset", 0),
             )
-            result: dict = {"facts": facts}
-            if args.get("include_sessions"):
-                result["sessions"] = storage.search_sessions(
-                    project=args.get("project"),
-                    since=args.get("since"),
-                    until=args.get("until"),
-                    sort_by=args.get("sort_by", "date"),
-                    limit=5,
-                    offset=args.get("offset", 0),
-                )
-            return _text(json.dumps(result, indent=2, ensure_ascii=False))
+            return _text(json.dumps({"results": results}, indent=2, ensure_ascii=False))
 
         if name == "memory_explore_tags":
             return _text(

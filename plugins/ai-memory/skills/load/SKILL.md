@@ -1,6 +1,6 @@
 ---
 name: load
-description: Deep recovery from a previous session — read blob content and resume work. SessionStart hook provides lightweight context; this skill loads the full picture.
+description: Deep recovery from a previous session — read session content and resume work. SessionStart hook provides lightweight context; this skill loads the full picture.
 ---
 
 # Load Session
@@ -14,33 +14,35 @@ Parse ARGUMENTS to determine which session to load:
    python3 <this-skill-dir>/load-chain.py <current-session-id> <project-name>
    ```
    `<this-skill-dir>` = the directory containing this SKILL.md (derive from the path you loaded it from).
-   The current session ID is in SessionStart context. Determine the project name from the git repo name. The script picks up prev-session cache files for that project only, creates continuation edges, then traverses the chain.
-2. **Free text** → translate the user's request into `memory_get_facts` filter params.
-   Always include `tags: ["session"]` (+ project tag if known). Use `query` only when the user describes session content — for recency or time ranges, structured params suffice.
-   Always write `query` in English regardless of what language the user used.
-   Pick best match from results (skip current session), extract its `[blob: dir-name]`.
-3. **Blob dir** (matches `*_session-*`) → use directly
+   The current session ID is in SessionStart context. Determine the project name from the git repo name.
+   The script finds the previous session by ID, traverses `continues:` wiki-links, then outputs combined context.
+
+2. **Free text** → translate the user's request to English and pass as the first positional arg... no: instead call `memory_search` with `tags: ["session", "project/<project>"]` and `text: "<english query>"`, pick the best match, then load via `--file`:
+   ```bash
+   python3 <this-skill-dir>/load-chain.py --file <path from result>
+   ```
+
+3. **File path** (matches `sessions/...`) → use directly:
+   ```bash
+   python3 <this-skill-dir>/load-chain.py --file <rel-path>
+   ```
 
 ## Load content
 
-For continuation chain (no args), run the script — it traverses chain edges and outputs combined context:
-```bash
-python3 <this-skill-dir>/load-chain.py <current-session-id> <project-name>
-```
-
-For a specific blob dir, use `memory_read_blob` to read its contents.
+Run the script — it reads `messages.md` (compact content) for the most recent session,
+and shows just title + summary for older sessions in the chain.
 
 ## Handling CHOOSE_SESSION
 
-If the script output starts with `# CHOOSE_SESSION`, no automatic chain was found.
+If the script output starts with `# CHOOSE_SESSION`, no session was found for the current ID.
 The output contains a numbered list of recent session candidates.
 
 **You MUST ask the user which session to load** using a question with the candidate list.
 Present the candidates clearly (number, title, summary). Let the user pick by number or description.
 
-Once the user picks, load that session's blob via:
+Once the user picks, load that session's file via:
 ```bash
-python3 <this-skill-dir>/load-chain.py --blob <blob-dir>
+python3 <this-skill-dir>/load-chain.py --file <file-path from [file: ...] marker>
 ```
 
 ## After loading

@@ -191,6 +191,33 @@ Next: implement storage layer
 
 ---
 
+## Блок 8 — Shared lib: вынести общий код в `lib/`
+
+**Цель:** `storage.py` и `tags.py` сейчас живут в `mcp/` и подтягиваются через `sys.path` хаки.
+Вынести в общий пакет `plugins/ai-memory/lib/` чтобы MCP сервер, хуки и скиллы импортировали одно и то же без дублирования.
+
+```
+plugins/ai-memory/
+  lib/
+    __init__.py       # get_plugin_root() helper
+    storage.py        ← переехал из mcp/
+    tags.py           ← переехал из mcp/
+  mcp/
+    server.py         ← import from lib
+  hooks/scripts/
+    session-start.py  ← import from lib
+  skills/load/
+    load-chain.py     ← import from lib
+```
+
+- [ ] Создать `lib/__init__.py` с `get_plugin_root() -> Path`
+- [ ] Переместить `mcp/storage.py` → `lib/storage.py`
+- [ ] Переместить `mcp/tags.py` → `lib/tags.py`
+- [ ] Обновить все импорты (`mcp/server.py`, `hooks/scripts/*.py`, `skills/load/load-chain.py`)
+- [ ] При росте: добавить `lib/protocols.py` с `typing.Protocol` интерфейсами для подмены реализации
+
+---
+
 ## Порядок реализации
 
 1. ~~**Блок 3**~~ ✅
@@ -200,6 +227,7 @@ Next: implement storage layer
 5. **Блок 4** — ленивая загрузка правил
 6. **Блок 5** — опциональный AI
 7. **Блок 7** — финальный рефактор плагина
+8. **Блок 8** — shared lib (`lib/`)
 
 ---
 

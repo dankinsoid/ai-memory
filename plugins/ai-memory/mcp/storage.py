@@ -4,13 +4,22 @@ from __future__ import annotations
 """File-based storage operations for ai-memory.
 
 All facts/rules are stored as individual .md files under AI_MEMORY_DIR
-(default: ~/.claude/ai-memory/).  Sessions live in dedicated sessions/
-subdirectories.  No database or server required.
+(default: ~/.claude/ai-memory/).  Sessions are stored as flat .md files
+inside sessions/ directories, using full human-readable names:
+
+  sessions/2026-03-11 Block 2 skills update.md          # summary (Obsidian-friendly)
+  sessions/2026-03-11 Block 2 skills update messages.md  # compact content for /load
+
+The summary file contains Obsidian wiki-links:
+  messages: [[2026-03-11 Block 2 skills update messages]]
+  continues: [[2026-03-10 Block 1 Python MCP server]]
+
+No database or server required.
 
 Public API:
   get_base_dir() -> Path
   search_facts(tags, any_tags, exclude_tags, text, since, until, sort_by, limit, offset) -> list[dict]
-  search_sessions(project, since, until, sort_by, limit, offset) -> list[dict]
+  search_sessions(project, text, since, until, sort_by, limit, offset) -> list[dict]
   upsert_session(session_id, project, title, summary, tags, content) -> str
   remember(content_text, tags, type_, filename) -> str
   explore_tags() -> dict
@@ -73,9 +82,11 @@ def get_base_dir() -> Path:
 
 
 def _is_session_file(rel_parts: tuple[str, ...]) -> bool:
-    """True if the relative path lives inside a sessions/ directory."""
-    # rel_parts includes the filename as the last element.
-    # A session file has 'sessions' as one of the directory components.
+    """True if the relative path lives inside a sessions/ directory.
+
+    Handles flat session files: sessions/foo.md → True
+    Non-session: universal/some-rule.md → False
+    """
     return "sessions" in rel_parts[:-1]
 
 
@@ -87,13 +98,35 @@ def _read_content(path: Path) -> str | None:
         return None
 
 
-def _safe_filename(text: str, max_len: int = 60) -> str:
-    """Convert arbitrary text to a filesystem-safe filename stem."""
-    # Remove characters that are problematic on most filesystems
-    safe = re.sub(r"[^\w\s-]", "", text)
-    # Collapse whitespace to hyphens
-    safe = re.sub(r"\s+", "-", safe.strip()).lower()
-    return safe[:max_len] or "untitled"
+def _safe_title(text: str) -> str:
+    """Strip filesystem-invalid characters from a title string.
+
+    Keeps spaces and most punctuation; removes chars that are invalid
+    on macOS/Windows: / \\ : * ? \" < > |
+    """
+    return re.sub(r'[/\\:*?"<>|]', "", text).strip()
+
+
+def _extract_summary_text(content: str) -> str | None:
+    """Return the first non-empty line under the ## Summary heading."""
+    in_summary = False
+    for line in content.splitlines():
+        if line.strip() == "## Summary":
+            in_summary = True
+            continue
+        if in_summary:
+            if line.startswith("##"):
+                break
+            stripped = line.strip()
+            if stripped:
+                return stripped
+    return None
+
+
+def _parse_wikilink(value: str) -> str | None:
+    """Extract the page name from an Obsidian wiki-link [[name]], or None."""
+    m = re.match(r"^\[\[(.+)\]\]$", value.strip())
+    return m.group(1) if m else None
 
 
 # ---------------------------------------------------------------------------
@@ -143,9 +176,6 @@ def search_facts(
     candidates: list[dict] = []
 
     for md_file in base.rglob("*.md"):
-        if _is_session_file(md_file.relative_to(base).parts):
-            continue
-
         content = _read_content(md_file)
         if content is None:
             continue
@@ -206,20 +236,66 @@ def search_facts(
 # ---------------------------------------------------------------------------
 
 
+def _is_messages_file(filename: str) -> bool:
+    """True if this is a session messages file (ends with ' messages.md')."""
+    return filename.endswith(" messages.md")
+
+
+def _read_session_file(summary_path: Path, base: Path) -> dict | None:
+    """Read a session summary .md file and return a session record, or None.
+
+    The summary file must contain front-matter with at least an 'id' field.
+    A paired messages file is expected at '<stem> messages.md'.
+
+    Returns dict with keys: path, title, date, project, tags, id,
+    continues, summary, messages_path, content (full summary.md text),
+    _mtime (internal), _date (internal).
+    """
+    content = _read_content(summary_path)
+    if content is None:
+        return None
+
+    fm = parse_front_matter(content)
+    # Skip files without a session ID — they're likely not session summaries
+    if not fm.get("id"):
+        return None
+
+    messages_stem = summary_path.stem + " messages"
+    messages_path = summary_path.parent / f"{messages_stem}.md"
+
+    return {
+        "path": str(summary_path.relative_to(base)),
+        "title": fm.get("title", summary_path.stem),
+        "date": fm.get("date", ""),
+        "project": fm.get("project", ""),
+        "tags": parse_tags_field(fm.get("tags", "")),
+        "id": fm.get("id", ""),
+        "continues": fm.get("continues", ""),
+        "summary": _extract_summary_text(content) or "",
+        "messages_path": str(messages_path.relative_to(base)) if messages_path.exists() else None,
+        "content": content,
+        "_mtime": _file_mtime(summary_path),
+        "_date": _file_date(fm),
+    }
+
+
 def search_sessions(
     project: str | None = None,
+    text: str | None = None,
     since: str | None = None,
     until: str | None = None,
     sort_by: str = "date",
     limit: int = 5,
     offset: int = 0,
 ) -> list[dict]:
-    """Return session files, sorted and filtered.
+    """Return session summary records, sorted and filtered.
 
-    Searches projects/<project>/sessions/ (if project given) and sessions/.
+    Searches projects/<project>/sessions/ (if project given) or sessions/.
+    Only reads summary .md files (skips ' messages.md' files).
 
     Args:
         project: restrict to this project's sessions dir
+        text: case-insensitive substring match against summary.md content
         since: ISO date; skip sessions with date before this
         until: ISO date; skip sessions with date after this
         sort_by: 'date' (front-matter date, newest first) or
@@ -228,51 +304,41 @@ def search_sessions(
         offset: skip first N results
 
     Returns:
-        List of dicts with keys:
-          path (str, relative), title, date, project,
-          tags (list[str]), id (str), content (str)
+        List of dicts with keys: path, title, date, project, tags,
+        id, continues, summary, messages_path, content
     """
     base = get_base_dir()
     since_d = _parse_date(since) if since else None
     until_d = _parse_date(until) if until else None
+    text_lower = text.lower() if text else None
 
-    search_dirs: list[Path] = []
     if project:
         # Strict filter: project= means only that project's sessions dir.
-        # Generic sessions/ is for unscoped sessions only.
-        search_dirs.append(base / "projects" / project / "sessions")
+        search_dirs = [base / "projects" / project / "sessions"]
     else:
-        search_dirs.append(base / "sessions")
+        search_dirs = [base / "sessions"]
 
     candidates: list[dict] = []
     for d in search_dirs:
         if not d.exists():
             continue
         for f in d.glob("*.md"):
-            content = _read_content(f)
-            if content is None:
+            # Skip messages files — only read summary files
+            if _is_messages_file(f.name):
                 continue
-            fm = parse_front_matter(content)
-            file_date = _file_date(fm)
+            rec = _read_session_file(f, base)
+            if rec is None:
+                continue
 
+            file_date = rec["_date"]
             if since_d and (file_date is None or file_date < since_d):
                 continue
             if until_d and (file_date is not None and file_date > until_d):
                 continue
+            if text_lower and text_lower not in rec["content"].lower():
+                continue
 
-            candidates.append(
-                {
-                    "path": str(f.relative_to(base)),
-                    "title": fm.get("title", f.stem),
-                    "date": fm.get("date", ""),
-                    "project": fm.get("project", ""),
-                    "tags": parse_tags_field(fm.get("tags", "")),
-                    "id": fm.get("id", ""),
-                    "content": content,
-                    "_mtime": _file_mtime(f),
-                    "_date": file_date,
-                }
-            )
+            candidates.append(rec)
 
     _epoch = date(1970, 1, 1)
     if sort_by == "modified":
@@ -295,9 +361,13 @@ def search_sessions(
 # ---------------------------------------------------------------------------
 
 
-def _find_session_file(session_dir: Path, session_id: str) -> Path | None:
-    """Locate an existing session file by id in front-matter."""
-    for f in session_dir.glob("*.md"):
+def _find_session_file(sessions_dir: Path, session_id: str) -> Path | None:
+    """Locate an existing session summary file by id in front-matter."""
+    if not sessions_dir.exists():
+        return None
+    for f in sessions_dir.glob("*.md"):
+        if _is_messages_file(f.name):
+            continue
         content = _read_content(f)
         if content and parse_front_matter(content).get("id") == session_id:
             return f
@@ -312,10 +382,18 @@ def upsert_session(
     tags: list[str],
     content: str | None = None,
 ) -> str:
-    """Create or update a session .md file.
+    """Create or update a session .md file pair.
 
-    Matches existing session by id field in front-matter; creates new file
-    if not found.  File name format: YYYY-MM-DD <title>.md.
+    File naming:
+      {date} {title}.md          — summary (front-matter + ## Summary)
+      {date} {title} messages.md — compact content (written when content given)
+
+    The summary file contains:
+      messages: [[{date} {title} messages]]  (when content provided)
+      continues: — left empty; caller or /save skill fills it if known
+
+    Matches existing session by id field in summary front-matter; reuses
+    the existing filename if found (preserves original date in name).
 
     Args:
         session_id: unique session identifier (UUID or similar)
@@ -323,42 +401,52 @@ def upsert_session(
         title: short session title, 2-5 words
         summary: 1-2 sentence summary for quick reading
         tags: topic tags (path-derived tags are added automatically)
-        content: optional full session text for ## Content section
+        content: optional compact content for the messages file
 
     Returns:
-        Path to the session file, relative to base_dir.
+        Path to the session summary file, relative to base_dir.
     """
     base = get_base_dir()
     today = date.today().isoformat()
 
     if project:
-        session_dir = base / "projects" / project / "sessions"
+        sessions_dir = base / "projects" / project / "sessions"
     else:
-        session_dir = base / "sessions"
-    session_dir.mkdir(parents=True, exist_ok=True)
+        sessions_dir = base / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
 
-    existing = _find_session_file(session_dir, session_id)
+    existing = _find_session_file(sessions_dir, session_id)
     if existing:
-        filename = existing.name
+        # Reuse existing filename (keeps original creation date in name)
+        summary_path = existing
+        stem = existing.stem
     else:
-        safe_title = _safe_filename(title)
-        filename = f"{today} {safe_title}.md"
-
-    target = session_dir / filename
+        safe = _safe_title(title)
+        stem = f"{today} {safe}"
+        summary_path = sessions_dir / f"{stem}.md"
 
     tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
+
+    messages_stem = f"{stem} messages"
+    messages_link = f"[[{messages_stem}]]"
 
     fm_lines = ["---", f"id: {session_id}", f"date: {today}"]
     if project:
         fm_lines.append(f"project: {project}")
-    fm_lines += [f"title: {title}", f"tags: {tags_str}", "---", ""]
-
-    body: list[str] = ["## Summary", "", summary, ""]
+    fm_lines += [f"title: {title}", f"tags: {tags_str}"]
     if content:
-        body += ["## Content", "", content, ""]
+        fm_lines.append(f"messages: {messages_link}")
+    fm_lines += ["---", ""]
 
-    target.write_text("\n".join(fm_lines + body), encoding="utf-8")
-    return str(target.relative_to(base))
+    summary_body = ["## Summary", "", summary, ""]
+
+    summary_path.write_text("\n".join(fm_lines + summary_body), encoding="utf-8")
+
+    if content:
+        messages_path = sessions_dir / f"{messages_stem}.md"
+        messages_path.write_text(content, encoding="utf-8")
+
+    return str(summary_path.relative_to(base))
 
 
 # ---------------------------------------------------------------------------
@@ -426,7 +514,7 @@ def remember(
     target_dir = _tags_to_dir(base, tags, language)
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    stem = filename or _safe_filename(content_text)
+    stem = filename or _safe_title(content_text)[:60] or "untitled"
     if not stem.endswith(".md"):
         stem += ".md"
 

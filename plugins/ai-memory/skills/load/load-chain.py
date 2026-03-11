@@ -1,277 +1,236 @@
 #!/usr/bin/env python3
 # @ai-generated(solo)
-# Load skill script: discovers session chain and outputs combined context.
+# Load skill helper: discovers session chain and outputs combined context.
 #
 # Usage:
 #   python3 load-chain.py <session-id> [project]  # traverse continuation chain
-#   python3 load-chain.py --blob <blob-dir>        # load specific session blob
+#   python3 load-chain.py --file <rel-path>        # load specific session by path
 #
-# Chain mode: calls /api/session/chain to traverse the full chain.
-# When [project] is provided, filters the fallback session query by project tag.
-# Blob mode: directly reads compact.md from a specific blob dir.
+# Chain mode: finds session summary.md by id field, then follows continues:
+# Obsidian wiki-links to build the full chain.
 #
-# Content strategy: shows last N chars of conversation (concatenated chunks).
-# If entire conversation fits in N chars, compact.md is skipped.
-# If conversation exceeds N chars, compact.md is shown first, then the tail.
+# Content strategy: shows messages.md (compact) for the most recent session.
+# Older sessions in chain: just title + summary line.
+# If no session found by id: shows CHOOSE_SESSION list of recent sessions.
+#
+# File paths in output use [file: rel-path] markers that /load SKILL.md parses.
 
-import json
-import os
+import re
 import sys
-from urllib import request as urllib_request
-from urllib.error import URLError
+from pathlib import Path
 
-BASE_URL = os.environ.get("AI_MEMORY_URL", "http://localhost:8080")
-API_TOKEN = os.environ.get("AI_MEMORY_TOKEN")
-CONTEXT_CHARS = 4000  # ~1000 words — conversation tail for recovery
+# Allow importing storage module from mcp/
+_PLUGIN_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_PLUGIN_ROOT / "mcp"))
 
-
-def auth_headers() -> dict:
-    h = {"Content-Type": "application/json", "Accept": "application/json"}
-    if API_TOKEN:
-        h["Authorization"] = f"Bearer {API_TOKEN}"
-    return h
+import storage
+from tags import parse_front_matter  # noqa: E402
 
 
-def api_post(path: str, body: dict) -> dict | None:
-    """POST JSON to the API, return parsed response or None on error."""
-    data = json.dumps(body).encode()
-    req = urllib_request.Request(BASE_URL + path, data=data, headers=auth_headers(), method="POST")
-    try:
-        with urllib_request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read())
-    except Exception as e:
-        print(f"API error: {e}", file=sys.stderr)
-        return None
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
-def read_blob_file(blob_dir: str, filename: str) -> str | None:
-    """Read a file from a blob dir via /api/blobs/exec. Returns content or None."""
-    result = api_post("/api/blobs/exec", {
-        "blob_dir": blob_dir,
-        "command": f"cat {filename} 2>/dev/null",
-    })
-    if result and result.get("exit-code", -1) == 0:
-        stdout = result.get("stdout", "")
-        return stdout if stdout.strip() else None
+def _parse_wikilink(value: str) -> str | None:
+    """Extract the page name from [[wiki-link]], or None if not a wiki-link."""
+    m = re.match(r"^\[\[(.+)\]\]$", value.strip())
+    return m.group(1) if m else None
+
+
+def _find_session_by_id(session_id: str, project: str | None) -> Path | None:
+    """Scan sessions directories for a summary.md with a matching id field.
+
+    Searches project sessions dir first (if given), then the generic sessions dir.
+
+    Args:
+        session_id: full session UUID to match against front-matter id:
+        project: optional project name for targeted search
+
+    Returns:
+        Path to summary.md, or None if not found.
+    """
+    base = storage.get_base_dir()
+    search_dirs: list[Path] = []
+    if project:
+        search_dirs.append(base / "projects" / project / "sessions")
+    search_dirs.append(base / "sessions")
+
+    seen: set[Path] = set()
+    for d in search_dirs:
+        if not d.exists() or d in seen:
+            continue
+        seen.add(d)
+        for f in sorted(d.glob("*.md"), reverse=True):  # newest first for speed
+            if storage._is_messages_file(f.name):
+                continue
+            content = storage._read_content(f)
+            if content and parse_front_matter(content).get("id") == session_id:
+                return f
     return None
 
 
-def read_conversation(blob_dir: str, max_chars: int) -> dict | None:
-    """Read conversation from blob — all numbered chunks + _current.md in order.
+def _find_session_by_wikilink(ref: str, sessions_dir: Path) -> Path | None:
+    """Resolve an Obsidian wiki-link ref to a summary.md in the same directory.
+
+    Tries exact filename match first, then case-insensitive fallback.
 
     Args:
-        blob_dir: blob directory identifier
-        max_chars: maximum characters to return
+        ref: the page name extracted from [[ref]]
+        sessions_dir: directory to search in
 
     Returns:
-        {"content": str, "total_size": int, "full": bool} or None if no files found.
+        Path to summary.md, or None if not found.
     """
-    result = api_post("/api/blobs/exec", {
-        "blob_dir": blob_dir,
-        "command": (
-            'files=$(ls -1 *.md 2>/dev/null | grep -v compact.md | sort);'
-            'if [ -z "$files" ]; then exit 1; fi;'
-            'total=$(echo "$files" | xargs cat | wc -c);'
-            'echo "$files";'
-            'echo "---SIZE---";'
-            'echo $total'
-        ),
-    })
-    if not result or result.get("exit-code", -1) != 0:
-        return None
-
-    output = result.get("stdout", "")
-    parts = output.split("---SIZE---\n", 1)
-    if len(parts) < 2:
-        return None
-
-    files = [f for f in parts[0].strip().splitlines() if f.strip()]
-    try:
-        total_size = int(parts[1].strip())
-    except (ValueError, IndexError):
-        return None
-
-    if not files or total_size <= 0:
-        return None
-
-    all_files = " ".join(files)
-    full = total_size <= max_chars
-    cmd = f"cat {all_files}" if full else f"cat {all_files} | tail -c {max_chars}"
-    content_result = api_post("/api/blobs/exec", {"blob_dir": blob_dir, "command": cmd})
-    if not content_result or content_result.get("exit-code", -1) != 0:
-        return None
-
-    return {
-        "content": content_result.get("stdout", ""),
-        "total_size": total_size,
-        "full": full,
-    }
+    candidate = sessions_dir / f"{ref}.md"
+    if candidate.exists():
+        return candidate
+    ref_lower = ref.lower()
+    for f in sessions_dir.glob("*.md"):
+        if not storage._is_messages_file(f.name) and f.stem.lower() == ref_lower:
+            return f
+    return None
 
 
-def trim_to_line_boundary(content: str) -> str:
-    """Trim content to start at first newline (avoids partial first line)."""
-    idx = content.find("\n")
-    return content[idx + 1:] if idx != -1 else content
+def _read_messages(summary_path: Path) -> str | None:
+    """Read the paired messages.md file for a session summary, or None."""
+    messages_path = summary_path.parent / f"{summary_path.stem} messages.md"
+    return storage._read_content(messages_path)
 
 
-def read_blob_meta(blob_dir: str) -> dict | None:
-    """Read and parse meta.edn from a blob dir. Returns dict or None."""
-    content = read_blob_file(blob_dir, "meta.edn")
-    if not content:
-        return None
-    # Basic EDN map parsing: extract :key "value" pairs
-    # Only handles simple flat maps with string/keyword values
-    import re
-    result = {}
-    # Extract git sub-map
-    git_match = re.search(r':git\s*\{([^}]*)\}', content)
-    if git_match:
-        git = {}
-        for m in re.finditer(r':(\S+)\s+"([^"]*)"', git_match.group(1)):
-            git[m.group(1)] = m.group(2)
-        if git:
-            result["git"] = git
-    return result or None
+def _get_title(summary_path: Path) -> str:
+    """Extract title from summary.md front-matter, falling back to stem."""
+    content = storage._read_content(summary_path) or ""
+    return parse_front_matter(content).get("title", summary_path.stem)
 
 
-def format_git_info(git: dict) -> str | None:
-    """Format git dict as a compact string, or None if no useful info."""
-    branch = git.get("branch")
-    start = git.get("start-commit")
-    end = git.get("end-commit")
-    if start and end and start != end:
-        commits = f"{start}..{end}"
+def _get_summary_line(summary_path: Path) -> str:
+    """Extract the first line of ## Summary from a summary.md file."""
+    content = storage._read_content(summary_path) or ""
+    return storage._extract_summary_text(content) or "(no summary)"
+
+
+def _print_session_content(summary_path: Path) -> None:
+    """Print session content: messages.md if available, otherwise summary.md."""
+    messages = _read_messages(summary_path)
+    if messages:
+        print(messages)
     else:
-        commits = end or start
-    parts = [p for p in [branch, commits] if p]
-    if not parts:
-        return None
-    return f"*git: {' @ '.join(parts)}*"
+        content = storage._read_content(summary_path) or ""
+        print(content)
 
 
-def print_blob_content(blob_dir: str) -> None:
-    """Print session content from a blob.
-    Small conversations: full transcript, no compact.md needed.
-    Large conversations: compact.md summary + last N chars of transcript.
+def _traverse_chain(start: Path) -> list[Path]:
+    """Follow continues: wiki-links starting from start, newest first.
+
+    Args:
+        start: Path to the most recent session summary.md
+
+    Returns:
+        List of session summary.md paths, newest first.
+        Stops after 10 hops or when continues: is absent/unresolvable.
     """
-    meta = read_blob_meta(blob_dir)
-    if meta and meta.get("git"):
-        git_line = format_git_info(meta["git"])
-        if git_line:
-            print(git_line)
-            print()
+    chain = [start]
+    seen = {start.resolve()}
+    current = start
 
-    conv = read_conversation(blob_dir, CONTEXT_CHARS)
-    if conv:
-        if conv["full"]:
-            # Entire conversation fits — show directly, skip compact
-            print(conv["content"])
-        else:
-            # Large conversation — compact summary + tail
-            compact = read_blob_file(blob_dir, "compact.md")
-            if compact:
-                print(compact)
-                print()
-                print("---")
-                print()
-            k = CONTEXT_CHARS // 1000
-            total_k = conv["total_size"] // 1000
-            print("## Conversation Tail")
-            print()
-            print(f"*(last ~{k}K of {total_k}K total)*")
-            print()
-            print(trim_to_line_boundary(conv["content"]))
-    else:
-        # No conversation files — try compact.md alone
-        compact = read_blob_file(blob_dir, "compact.md")
-        if compact:
-            print(compact)
-        else:
-            print("*No content found.*")
+    for _ in range(10):  # guard against cycles or excessively long chains
+        content = storage._read_content(current) or ""
+        fm = parse_front_matter(content)
+        continues = fm.get("continues", "").strip()
+        if not continues:
+            break
+        ref = _parse_wikilink(continues)
+        if not ref:
+            break
+        prev = _find_session_by_wikilink(ref, current.parent)
+        if prev is None or prev.resolve() in seen:
+            break
+        seen.add(prev.resolve())
+        chain.append(prev)
+        current = prev
+
+    return chain
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 
 def main() -> None:
     args = sys.argv[1:]
-    flag = args[0] if args else None
-    value = args[1] if len(args) > 1 else None
 
-    if flag == "--blob":
-        if not value:
-            print("Usage: python3 load-chain.py --blob <blob-dir>")
+    if not args:
+        print("Usage: python3 load-chain.py <session-id> [project]")
+        print("       python3 load-chain.py --file <rel-path>")
+        sys.exit(1)
+
+    if args[0] == "--file":
+        if len(args) < 2:
+            print("Usage: python3 load-chain.py --file <rel-path>")
+            sys.exit(1)
+        base = storage.get_base_dir()
+        summary_path = base / args[1]
+        if not summary_path.exists():
+            print(f"Session file not found: {args[1]}")
             sys.exit(1)
         print("# Session Recovery")
         print()
-        print_blob_content(value)
+        _print_session_content(summary_path)
+        return
 
-    elif flag:
-        session_id = flag
-        project = value  # optional 2nd arg for project isolation
+    session_id = args[0]
+    project = args[1] if len(args) > 1 else None
+    sid_prefix = session_id[:8]
 
-        result = api_post("/api/session/chain", {
-            "session_id": session_id,
-            "strengthen": True,
-        })
-        chain = (result or {}).get("chain", [])
+    start = _find_session_by_id(session_id, project)
 
-        if chain:
-            latest = chain[0]
-            older = chain[1:]
-            print("# Session Chain Recovery")
-            print()
-            print(f"{len(chain)} previous session(s) in chain.")
-            for session in older:
-                print()
-                print("---")
-                print(f"## {session.get('content') or '(no summary)'}")
-            # Most recent: load full blob content
-            blob_dir = latest.get("blob-dir")
-            if blob_dir:
-                print()
-                print("---")
-                print(f"## {latest.get('content') or '(no summary)'}")
-                print()
-                print_blob_content(blob_dir)
+    if start:
+        chain = _traverse_chain(start)
+        latest = chain[0]
+        older = chain[1:]
+
+        print("# Session Chain Recovery")
+        print()
+        print(f"{len(chain)} previous session(s) in chain.")
+
+        for prev in older:
+            title = _get_title(prev)
+            summary = _get_summary_line(prev)
             print()
             print("---")
-            print("Continuation edge strengthened.")
-        else:
-            # No chain — show candidates for user to pick from
-            tags = ["session"]
-            if project:
-                tags.append(f"project/{project}")
-            resp = api_post("/api/tags/facts", {
-                "filters": [{"tags": tags, "sort_by": "date", "limit": 8}],
-            })
-            facts = ((resp or {}).get("results") or [{}])[0].get("facts", [])
-            sid_prefix = session_id[:8]
-            candidates = [
-                f for f in facts
-                if f.get("node/blob-dir")
-                and sid_prefix not in f.get("node/blob-dir", "")
-            ]
-            if candidates:
-                print("# CHOOSE_SESSION")
-                print()
-                print("No continuation chain found. Recent sessions:")
-                print()
-                for i, f in enumerate(candidates):
-                    content = f.get("node/content", "") or ""
-                    blob_dir = f.get("node/blob-dir", "")
-                    lines = content.splitlines()
-                    title = lines[0] if lines else "(untitled)"
-                    summary = lines[1] if len(lines) > 1 else None
-                    line = f"{i + 1}. **{title}**"
-                    if summary:
-                        line += f" — {summary}"
-                    line += f" `[blob: {blob_dir}]`"
-                    print(line)
-            else:
-                print("No previous session found.")
+            print(f"## {title} — {summary}")
+
+        print()
+        print("---")
+        print(f"## {_get_title(latest)}")
+        print()
+        _print_session_content(latest)
+        print()
+        print("---")
 
     else:
-        print("Usage: python3 load-chain.py <session-id> [project]")
-        print("       python3 load-chain.py --blob <blob-dir>")
-        sys.exit(1)
+        # No session found by id — show recent candidates for user to pick
+        sessions = storage.search_sessions(project=project, limit=8)
+        candidates = [s for s in sessions if s.get("id", "")[:8] != sid_prefix]
+
+        if candidates:
+            print("# CHOOSE_SESSION")
+            print()
+            print("No session found for current ID. Recent sessions:")
+            print()
+            for i, s in enumerate(candidates):
+                title = s.get("title", "(untitled)")
+                summary = s.get("summary", "")
+                path = s.get("path", "")
+                line = f"{i + 1}. **{title}**"
+                if summary:
+                    line += f" — {summary}"
+                line += f" `[file: {path}]`"
+                print(line)
+        else:
+            print("No previous session found.")
 
 
 if __name__ == "__main__":
