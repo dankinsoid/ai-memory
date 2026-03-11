@@ -125,7 +125,7 @@ Next: implement storage layer
 
 ---
 
-## Блок 2 — Сессии: обновить скиллы и хуки
+## Блок 2 — Сессии: обновить скиллы и хуки ✅
 
 **Цель:** `/save` и `/load` скиллы работают с новым .md форматом.
 
@@ -148,14 +148,12 @@ Next: implement storage layer
 
 ---
 
-## Блок 4 — Ленивая загрузка правил
-
-**Цель:** загружать только релевантные правила в зависимости от задачи.
+## Блок 4 — Ленивая загрузка правил ✅
 
 - [x] `memory_session` возвращает релевантные правила по topic-тегам сессии (с дедупликацией по session_id)
 - [x] `session-end.py` очищает dedup-кэш при завершении сессии (`hooks.json` matcher → `""`)
 - [x] `CLAUDE.md` плагина: конкретные триггеры когда агент должен вызывать `memory_search`
-- [ ] Block 5: 4o-mini автосохранение + точный LLM-поиск правил по контексту сессии
+- [ ] Block 5: 4o-mini автосохранение + LLM-классификация топика
 
 ---
 
@@ -163,17 +161,19 @@ Next: implement storage layer
 
 ### Без AI (базовый режим)
 
-- [ ] Поиск сессий: по дате, проекту, тегам из front-matter
-- [ ] Поиск правил: по тегам/папкам
-- [ ] `memory_resolve_tags`: fuzzy/substring match без векторов
+- [x] Поиск сессий: по дате, проекту, тегам из front-matter
+- [x] Поиск правил: по тегам/папкам
+- [x] `memory_resolve_tags`: fuzzy/substring match без векторов
 
 ### С OpenAI (опционально)
 
-- [x] Семантический поиск сессий и правил по содержанию
-- [ ] `memory_resolve_tags`: embedding-based tag normalization
+- [x] Семантический поиск сессий и правил по содержанию (`content_store.search()`)
+- [x] `memory_resolve_tags`: embedding-based tag normalization (`tag_store.find_similar()`)
+- [x] Vector store инфраструктура: `lib/vector_store/` (ABC + JSON backend + Qdrant backend)
+- [x] Content vectorization: MD5 freshness check, batch embedding, единая "content" коллекция
+- [x] Конфиг: `OPENAI_API_KEY` (embedding backend auto-detects)
 - [ ] `Stop` hook + 4o-mini: автосохранение compact без участия основного агента
 - [ ] `UserPromptSubmit` hook + 4o-mini: классификация топика → загрузка правил
-- [ ] Конфиг: `OPENAI_API_KEY` + `AI_MEMORY_LLM=openai`
 
 ---
 
@@ -187,36 +187,21 @@ Next: implement storage layer
 
 ## Блок 7 — Рефактор плагина (финальная сборка)
 
-- [ ] Обновить `CLAUDE.md` плагина (новые инструменты, новые пути)
-- [ ] Пересмотреть триггеры хуков
-- [ ] `/remember` скилл — явное сохранение правила
-- [ ] Убрать legacy Clojure-зависимости из всех скриптов
+- [x] Обновить `hooks.json` — все хуки Python, триггеры актуальны
+- [x] `/remember` скилл — явное сохранение правила через `memory_remember` MCP
+- [x] Убрать legacy Clojure-зависимости из всех скриптов
+- [ ] Обновить `CLAUDE.md` плагина (документировать новые MCP инструменты, query vs tags, /save /load /remember)
 
 ---
 
-## Блок 8 — Shared lib: вынести общий код в `lib/`
-
-**Цель:** `storage.py` и `tags.py` сейчас живут в `mcp/` и подтягиваются через `sys.path` хаки.
-Вынести в общий пакет `plugins/ai-memory/lib/` чтобы MCP сервер, хуки и скиллы импортировали одно и то же без дублирования.
-
-```
-plugins/ai-memory/
-  lib/
-    __init__.py       # get_plugin_root() helper
-    storage.py        ← переехал из mcp/
-    tags.py           ← переехал из mcp/
-  mcp/
-    server.py         ← import from lib
-  hooks/scripts/
-    session-start.py  ← import from lib
-  skills/load/
-    load-chain.py     ← import from lib
-```
+## Блок 8 — Shared lib: вынести общий код в `lib/` ✅
 
 - [x] Создать `lib/__init__.py` с `get_plugin_root() -> Path`
 - [x] Переместить `mcp/storage.py` → `lib/storage.py`
 - [x] Переместить `mcp/tags.py` → `lib/tags.py`
 - [x] Обновить все импорты (`mcp/server.py`, `hooks/scripts/*.py`, `skills/load/load-chain.py`)
+- [x] `lib/vector_store/` — VectorStore ABC, JSON/Qdrant backends, tag_store, content_store
+- [x] `lib/embedding.py` — OpenAI text-embedding-3-small batch API
 - [ ] При росте: добавить `lib/protocols.py` с `typing.Protocol` интерфейсами для подмены реализации
 
 ---
@@ -226,11 +211,11 @@ plugins/ai-memory/
 1. ~~**Блок 3**~~ ✅
 2. ~~**Блок 6**~~ ✅
 3. ~~**Блок 1**~~ ✅
-4. **Блок 2** ← сейчас (обновить скиллы и хуки под новый формат)
-5. **Блок 4** — ленивая загрузка правил
-6. **Блок 5** — опциональный AI
-7. **Блок 7** — финальный рефактор плагина
-8. **Блок 8** — shared lib (`lib/`)
+4. ~~**Блок 2**~~ ✅
+5. ~~**Блок 4**~~ ✅
+6. ~~**Блок 8**~~ ✅
+7. **Блок 5** — опциональный AI (векторы ✅, LLM-хуки остались)
+8. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
 
 ---
 
@@ -248,6 +233,6 @@ plugins/ai-memory/
 Открытые:
 - [ ] Stop hook + 4o-mini: что передавать в качестве контекста?
 - [ ] SQLite индекс: когда включать (>500 файлов? >1000?)
-- [ ] Индекс сессий `sessions/.index.json` (session_id → filename) — O(1) lookup вместо скана front-matter всех файлов
-- [ ] Индекс тегов `tags/.index.json` (tag → [file paths]) — O(1) lookup вместо сканирования всех .md
+- [x] Индекс сессий (session_id → filename) — решено через `{date} {title}.{sid8}.md` формат + glob O(1)
+- [ ] Индекс тегов (tag → [file paths]) — O(1) lookup вместо сканирования всех .md
 - [ ] Clojure-бэкенд: архивировать или удалить из репо?
