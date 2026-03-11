@@ -6,6 +6,6 @@ description: Save a rule, preference, or observation to long-term memory. Use wh
 # Remember
 
 1. **Clean** — strip meta-wrappers ("remember that", "I want you to"). Fix broken references. Keep wording otherwise.
-2. **Save** — `memory_remember(content=..., title=<descriptive-kebab-slug>, tags=[...])`
+2. **Save** — `memory_remember` mcp tool.
 
 Confirm: "Saved to memory."
