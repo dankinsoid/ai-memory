@@ -157,7 +157,7 @@ continued-by: [[2025-03-12 MCP rewrite]]
 ### С 4o-mini в хуках (опционально, большие возможности)
 
 - [ ] `Stop` hook: автоматически сохранять компакт сессии без участия основного агента
-  - Hook вызывает 4o-mini с историей и генерирует summary → пишет в `.md` файл
+  - Hook вызывает 4o-mini с историей и генерирует summary → пишет в `.md` файл + compact.md
   - Устраняет необходимость явного `/save` перед `/clear`
 - [ ] `UserPromptSubmit` hook: классифицировать топик промпта → подгрузить нужные правила
 - [ ] Конфиг: `AI_MEMORY_LLM=openai` (или `none`)
@@ -203,12 +203,12 @@ continued-by: [[2025-03-12 MCP rewrite]]
 ## Открытые вопросы
 
 Закрытые:
-- [x] **Формат правил:** дерево папок + YAML front-matter теги; теги выводятся из пути автоматически
+- [x] **Формат правил:** дерево папок + YAML front-matter теги;
 - [x] **Индексация:** Python парсит front-matter + путь (~100ms/200 файлов); SQLite опционально
 - [x] **Ссылки сессий:** Obsidian wikilinks `[[title]]` через `continues:` / `continued-by:`
 - [x] **Веса/приоритеты:** убраны — теги и их количество сигнализируют о важности
-- [x] **Тег характера сессии:** `type: chat | planning | implementation | debugging | exploration`
-  - SessionStart не грузит `chat`; `planning`/`implementation` в приоритете
+- [x] **Тег характера сессии:** chat, planning, implementation, debugging, exploration, etc
+  - SessionStart не грузит `chat`; `planning`/`implementation` в приоритете (под вопросом)
   - 4o-mini назначает тип автоматически при сохранении
 
 Открытые:
