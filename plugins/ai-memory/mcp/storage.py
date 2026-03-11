@@ -203,7 +203,6 @@ def search_facts(
             {
                 "path": str(md_file.relative_to(base)),
                 "tags": file_tags,
-                "type": fm.get("type", ""),
                 "date": fm.get("date", ""),
                 "content": content,
                 # Internal sort key — stripped before returning
@@ -486,7 +485,6 @@ def _tags_to_dir(base: Path, tags: list[str], language: str | None = None) -> Pa
 def remember(
     content_text: str,
     tags: list[str],
-    type_: str = "preference",
     filename: str | None = None,
     language: str | None = None,
 ) -> str:
@@ -499,11 +497,12 @@ def remember(
       4. default → universal/
 
     Path-derived tags are excluded from front-matter to avoid duplication.
+    Fact type (rule vs preference) is encoded via directory: files in rules/ get
+    the 'rule' tag automatically from their path.
 
     Args:
         content_text: the fact/rule text to persist
         tags: tags including at least one scope tag
-        type_: 'preference' | 'rule' | 'critical-rule'
         filename: file stem; auto-derived from content if omitted
         language: explicit target language (e.g. 'clojure', 'python')
 
@@ -527,7 +526,7 @@ def remember(
 
     today = date.today().isoformat()
     file_content = (
-        f"---\ntags: {tags_str}\ntype: {type_}\ndate: {today}\n---\n\n{content_text}\n"
+        f"---\ntags: {tags_str}\ndate: {today}\n---\n\n{content_text}\n"
     )
     target.write_text(file_content, encoding="utf-8")
     return str(target.relative_to(base))

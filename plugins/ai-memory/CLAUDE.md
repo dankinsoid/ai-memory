@@ -4,9 +4,9 @@ Read before unfamiliar tasks; write when you learn something worth keeping.
 
 ## Before Starting a Task
 
-Query memory for rules relevant to the task topic. Use `any_tags` for rule types, `tags` for the topic:
+Query memory for rules relevant to the task topic:
 ```json
-{"tags": ["<task-topic>"], "any_tags": ["rule", "critical-rule", "preference", "conventions"]}
+{"tags": ["<task-topic>"], "any_tags": ["rule", "conventions"]}
 ```
 Example: refactoring Go code → `tags: ["go"]`, debugging Flutter → `tags: ["debugging", "flutter-cljd"]`.
 

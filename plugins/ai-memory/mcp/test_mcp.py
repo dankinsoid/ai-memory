@@ -34,14 +34,13 @@ def _write_fact(
     rel_path: str,
     body: str,
     fm_tags: list[str] | None = None,
-    type_: str = "preference",
     date_str: str = "2026-01-01",
 ) -> Path:
     """Create a fact .md file with front-matter under base."""
     path = base / rel_path
     path.parent.mkdir(parents=True, exist_ok=True)
     tags_str = "[" + ", ".join(fm_tags or []) + "]"
-    content = f"---\ntags: {tags_str}\ntype: {type_}\ndate: {date_str}\n---\n\n{body}\n"
+    content = f"---\ntags: {tags_str}\ndate: {date_str}\n---\n\n{body}\n"
     path.write_text(content, encoding="utf-8")
     return path
 
@@ -75,10 +74,9 @@ def _write_session(
 
 class TestParseFrontMatter(unittest.TestCase):
     def test_basic(self):
-        content = "---\ntags: [testing, workflow]\ntype: rule\ndate: 2026-01-01\n---\n\nbody"
+        content = "---\ntags: [testing, workflow]\ndate: 2026-01-01\n---\n\nbody"
         fm = tags.parse_front_matter(content)
         self.assertEqual(fm["tags"], "[testing, workflow]")
-        self.assertEqual(fm["type"], "rule")
         self.assertEqual(fm["date"], "2026-01-01")
 
     def test_no_front_matter(self):
@@ -322,13 +320,15 @@ class TestSearchFacts(StorageTestBase):
         paths2 = {r["path"] for r in page2}
         self.assertEqual(paths1 & paths2, set())
 
-    def test_sessions_excluded(self):
+    def test_sessions_excluded_via_tag(self):
+        """Sessions are excluded from facts when using exclude_tags=["session"]."""
         _write_fact(self.base, "universal/fact.md", "a fact")
         _write_session(self.base, "sessions/sess.md", "My session", "summary")
 
-        results = storage.search_facts()
+        results = storage.search_facts(exclude_tags=["session"])
         paths = [r["path"] for r in results]
         self.assertNotIn("sessions/sess.md", paths)
+        self.assertIn("universal/fact.md", paths)
 
     def test_result_includes_date_field(self):
         _write_fact(self.base, "universal/foo.md", "body", date_str="2026-03-11")
@@ -436,7 +436,8 @@ class TestUpsertSession(StorageTestBase):
         path2 = storage.upsert_session("id-2", None, "session two", "s", [])
         self.assertNotEqual(path1, path2)
 
-    def test_content_section_written_when_provided(self):
+    def test_content_written_to_messages_file(self):
+        """Content is written to a separate messages file, not the summary file."""
         path = storage.upsert_session(
             session_id="with-content",
             project=None,
@@ -445,9 +446,14 @@ class TestUpsertSession(StorageTestBase):
             tags=[],
             content="detailed content here",
         )
-        text = (self.base / path).read_text()
-        self.assertIn("## Content", text)
-        self.assertIn("detailed content here", text)
+        summary_text = (self.base / path).read_text()
+        # Summary file links to messages file
+        self.assertIn("messages:", summary_text)
+        # Messages file contains the actual content
+        stem = (self.base / path).stem
+        messages_path = (self.base / path).parent / f"{stem} messages.md"
+        self.assertTrue(messages_path.exists())
+        self.assertIn("detailed content here", messages_path.read_text())
 
 
 class TestRemember(StorageTestBase):
@@ -472,19 +478,13 @@ class TestRemember(StorageTestBase):
         self.assertNotIn("universal", fm_tags)
         self.assertIn("testing", fm_tags)
 
-    def test_type_written_to_fm(self):
-        path = storage.remember("critical rule", tags=["universal"], type_="critical-rule")
-        content = (self.base / path).read_text()
-        fm = tags.parse_front_matter(content)
-        self.assertEqual(fm["type"], "critical-rule")
-
     def test_custom_filename(self):
         path = storage.remember("some rule", tags=["universal"], filename="my-custom-rule")
         self.assertTrue(path.endswith("my-custom-rule.md"))
 
     def test_auto_filename_from_content(self):
         path = storage.remember("use test driven development", tags=["universal"])
-        self.assertIn("use-test-driven-development", path)
+        self.assertIn("use test driven development", path)
 
     def test_explicit_language_overrides_tag(self):
         # tags has no language tag — explicit language param should route correctly

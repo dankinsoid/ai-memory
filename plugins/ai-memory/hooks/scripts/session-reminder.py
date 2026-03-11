@@ -18,18 +18,10 @@ import json
 import os
 import subprocess
 import sys
-from datetime import date, datetime, timezone
 from pathlib import Path
-from urllib import request as urllib_request
-from urllib.error import URLError
 
 # ---- Config ----
 
-BASE_URL = os.environ.get("AI_MEMORY_URL", "http://localhost:8080")
-API_TOKEN = os.environ.get("AI_MEMORY_TOKEN")
-
-HEALTH_CHECK_INTERVAL = 10   # check server health every N prompts
-PROJECT_REMIND_INTERVAL_DAYS = 3  # remind about project summary at most once every N days
 CHUNK_TOKEN_STEP = 20_000    # create a new chunk every N tokens of context growth
 SHORT_PROMPT_LEN = 50        # prompts shorter than this are likely greetings
 SUMMARY_REMIND_TURNS = 3     # remind about summary for this many early turns
@@ -86,29 +78,6 @@ def get_context_tokens(transcript_path: str | None) -> int | None:
     return None
 
 
-def health_ok() -> bool:
-    """Lightweight health check — GET /api/health with short timeout.
-    Returns True if server responds 2xx, False otherwise.
-    """
-    headers = {}
-    if API_TOKEN:
-        headers["Authorization"] = f"Bearer {API_TOKEN}"
-    try:
-        req = urllib_request.Request(f"{BASE_URL}/api/health", headers=headers)
-        with urllib_request.urlopen(req, timeout=3) as resp:
-            return 200 <= resp.status <= 299
-    except Exception:
-        return False
-
-
-def days_since(date_str: str) -> int:
-    """Return days elapsed since ISO date string, or sys.maxsize on parse error."""
-    try:
-        past = date.fromisoformat(date_str)
-        return (date.today() - past).days
-    except Exception:
-        return sys.maxsize
-
 
 def main() -> None:
     if any(os.environ.get(v) for v in ("AI_MEMORY_DISABLED", "AI_MEMORY_NO_WRITE", "AI_MEMORY_NO_SESSIONS")):
@@ -161,36 +130,11 @@ def main() -> None:
         prompt_count <= SUMMARY_REMIND_TURNS and first_prompt_len < SHORT_PROMPT_LEN
     )
 
-    # Project summary reminder: once per N days per project
-    project_remind_file = state_dir / f"project-remind-{project_name}.json" if project_name else None
-    project_remind_state: dict = {}
-    if project_remind_file and project_remind_file.exists():
-        try:
-            project_remind_state = json.loads(project_remind_file.read_text())
-        except Exception:
-            pass
-    need_project_remind = bool(
-        project_name
-        and prompt_count == 1
-        and days_since(project_remind_state.get("last_reminded", "")) >= PROJECT_REMIND_INTERVAL_DAYS
-    )
-
-    # Periodic health check — every N prompts (skip first, session-start covers it)
-    need_health_check = (prompt_count > 1) and (prompt_count % HEALTH_CHECK_INTERVAL == 0)
-    server_down = need_health_check and not health_ok()
-
     # Persist state
     reminder_file.write_text(json.dumps(new_state))
-    if need_project_remind and project_remind_file:
-        project_remind_file.write_text(json.dumps({"last_reminded": date.today().isoformat()}))
 
     # Build output message
     parts: list[str] = []
-
-    if server_down:
-        parts.append(
-            "⚠ ai-memory server is unreachable — MCP tools and memory-scribe will fail silently. Tell the user."
-        )
 
     if need_chunk:
         k = context_tokens // 1000
@@ -212,12 +156,6 @@ def main() -> None:
                 f'Call memory_session with session_id: "{session_id}"'
                 f'{session_part}, title, summary, and tags.'
             )
-
-    if need_project_remind:
-        parts.append(
-            f'Call memory_project(project="{project_name}", summary="...") '
-            "if the project description has changed or is not yet stored."
-        )
 
     if parts:
         print(" ".join(parts))

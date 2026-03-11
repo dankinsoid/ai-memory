@@ -132,8 +132,10 @@ Next: implement storage layer
 - [ ] Обновить `/save` скилл — записывать новый .md формат (Summary + Compact + Content)
 - [ ] Обновить `/load` скилл — читать .md напрямую (без memory_read_blob)
   - Traverse `continues:` chain через front-matter вместо API
-- [ ] Обновить `session-start.py` hook — читать сессии из файлов, не из HTTP API
-- [ ] Обновить `session-end.py` и `session-sync.py` — аналогично
+- [x] Обновить `session-start.py` hook — читать сессии из файлов, не из HTTP API
+- [x] Обновить `session-sync.py` — no-op (синхронизация через memory_session MCP)
+- [x] Убрать поле `type` из формата файлов и хранилища (только тег `rule` из пути)
+- [x] Убрать health check и `memory_project` из `session-reminder.py`
 - [ ] Конфиг: `AI_MEMORY_SESSIONS_DIR` — путь для сессий (можно указать Obsidian vault)
 
 ---

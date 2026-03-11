@@ -99,11 +99,6 @@ TOOLS = [
                         "or a language name. Plus topic tags like 'testing', 'git'."
                     ),
                 },
-                "type": {
-                    "type": "string",
-                    "enum": ["preference", "rule", "critical-rule"],
-                    "description": "Fact type (default: preference)",
-                },
                 "language": {
                     "type": "string",
                     "description": (
@@ -242,7 +237,6 @@ def _handle_tools_call(params: dict) -> dict:
             path = storage.remember(
                 content_text=args["content"],
                 tags=args.get("tags") or [],
-                type_=args.get("type", "preference"),
                 language=args.get("language"),
                 filename=args.get("filename"),
             )
