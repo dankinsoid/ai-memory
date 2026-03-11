@@ -163,8 +163,11 @@ def _handle_tools_call(params: dict) -> dict:
 
     try:
         if name == "memory_session":
+            auto_tags = ["session"]
+            if args.get("project"):
+                auto_tags.append(f"project/{args['project']}")
             session_tags: list[str] = list(dict.fromkeys(
-                ["session"] + (args.get("tags") or [])
+                auto_tags + (args.get("tags") or [])
             ))
             path = storage.upsert_session(
                 session_id=args["session_id"],
