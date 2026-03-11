@@ -31,7 +31,8 @@
           {
             "type": "command",
             "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/session-sync.py",
-            "timeout": 30000
+            "timeout": 30000,
+            "async": true
           }
         ]
       }
