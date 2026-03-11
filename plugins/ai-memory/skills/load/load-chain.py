@@ -19,12 +19,12 @@ import re
 import sys
 from pathlib import Path
 
-# Allow importing storage module from mcp/
+# Allow importing from the shared lib/ package regardless of cwd
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(_PLUGIN_ROOT / "mcp"))
+sys.path.insert(0, str(_PLUGIN_ROOT))
 
-import storage
-from tags import parse_front_matter  # noqa: E402
+from lib import storage  # noqa: E402
+from lib.tags import parse_front_matter  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

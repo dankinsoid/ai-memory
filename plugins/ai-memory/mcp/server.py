@@ -24,10 +24,10 @@ import sys
 import traceback
 from pathlib import Path
 
-# Allow importing sibling modules (tags.py, storage.py) regardless of cwd
-sys.path.insert(0, str(Path(__file__).parent))
+# Allow importing from the shared lib/ package regardless of cwd
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import storage  # noqa: E402 — must come after sys.path patch
+from lib import storage  # noqa: E402 — must come after sys.path patch
 
 # ---------------------------------------------------------------------------
 # Constants

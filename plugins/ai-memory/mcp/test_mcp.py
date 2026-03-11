@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @ai-generated(solo)
 from __future__ import annotations
-"""Tests for tags.py and storage.py.
+"""Tests for lib/tags.py and lib/storage.py.
 
 Run: python3 -m pytest mcp/test_mcp.py  OR  python3 mcp/test_mcp.py
 Uses only stdlib — no external dependencies.
@@ -18,11 +18,10 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-# Allow importing siblings regardless of cwd
-sys.path.insert(0, str(Path(__file__).parent))
+# Allow importing from the shared lib/ package regardless of cwd
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import storage
-import tags
+from lib import storage, tags
 
 
 # ---------------------------------------------------------------------------

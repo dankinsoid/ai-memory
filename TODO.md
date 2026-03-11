@@ -213,10 +213,10 @@ plugins/ai-memory/
     load-chain.py     ← import from lib
 ```
 
-- [ ] Создать `lib/__init__.py` с `get_plugin_root() -> Path`
-- [ ] Переместить `mcp/storage.py` → `lib/storage.py`
-- [ ] Переместить `mcp/tags.py` → `lib/tags.py`
-- [ ] Обновить все импорты (`mcp/server.py`, `hooks/scripts/*.py`, `skills/load/load-chain.py`)
+- [x] Создать `lib/__init__.py` с `get_plugin_root() -> Path`
+- [x] Переместить `mcp/storage.py` → `lib/storage.py`
+- [x] Переместить `mcp/tags.py` → `lib/tags.py`
+- [x] Обновить все импорты (`mcp/server.py`, `hooks/scripts/*.py`, `skills/load/load-chain.py`)
 - [ ] При росте: добавить `lib/protocols.py` с `typing.Protocol` интерфейсами для подмены реализации
 
 ---

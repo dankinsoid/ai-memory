@@ -31,7 +31,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from tags import (
+from .tags import (
     all_tags_for_file,
     derive_tags_from_path,
     parse_front_matter,

@@ -25,11 +25,11 @@ from datetime import datetime
 from pathlib import Path
 
 # ---- Storage import ----
-# MCP package lives two directories above this script in mcp/
+# lib/ package lives at the plugin root (three levels up from this script)
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(_PLUGIN_ROOT / "mcp"))
+sys.path.insert(0, str(_PLUGIN_ROOT))
 
-import storage  # noqa: E402
+from lib import storage  # noqa: E402
 
 # ---- Config ----
 
