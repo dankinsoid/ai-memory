@@ -40,40 +40,39 @@ TOOLS = [
     {
         "name": "memory_session",
         "description": (
-            "Upsert a session .md file. Call at end of session or on /save "
-            "to persist context across restarts. Each call replaces the "
-            "previous content for the same session_id."
+            "Upsert a session summary"
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "session_id": {
                     "type": "string",
-                    "description": "Unique session identifier (UUID or similar)",
+                    "description": "Unique session identifier",
                 },
                 "project": {
                     "type": "string",
-                    "description": "Project name; routes to projects/<name>/sessions/",
+                    "description": "Project name",
                 },
                 "title": {
                     "type": "string",
-                    "description": "Session title, 2-5 words, English",
+                    "description": "2-5 words, English",
                 },
                 "summary": {
                     "type": "string",
                     "description": (
                         "1-2 sentences: problem, approach, key decisions. "
-                        "Each call replaces previous, so include full arc."
+                        "Each call replaces previous, so include the full arc — not just the latest change. "
+                        "No file or function names."
                     ),
                 },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Topic tags (e.g. ['architecture', 'refactoring'])",
+                    "description": "Topic tags describing what this session is about (e.g. ['architecture', 'refactoring'])",
                 },
                 "content": {
                     "type": "string",
-                    "description": "Compact session content saved to a separate messages file for /load recovery",
+                    "description": "Full compact content for /load recovery (written to a separate messages file)",
                 },
             },
             "required": ["session_id", "title", "summary"],
@@ -90,29 +89,29 @@ TOOLS = [
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "The fact/rule text to save",
+                    "description": "The rule or fact text to save",
                 },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "Tags including a scope: 'universal', 'project/<name>', "
-                        "or a language name. Plus topic tags like 'testing', 'git'."
+                        "Three tiers: "
+                        "(1) context — 'universal' or 'project/<name>' or a 'lang/<name>' tag; "
+                        "add 'rule' if this is a rule/preference (canonical, no synonyms); "
+                        "(2) aspect — some aspect tags describing what kind of knowledge this is; "
+                        "(3) specific — concrete topic/technology tags if applicable"
                     ),
                 },
-                "language": {
+                "title": {
                     "type": "string",
                     "description": (
-                        "Target language for routing to languages/<lang>/. "
-                        "Falls back to a language tag in 'tags' if omitted."
+                        "Descriptive file title used as the filename stem. "
+                        "Should be specific enough to distinguish from rules on similar topics. "
+                        "Use kebab-case, e.g. 'always-run-regression-test-before-fixing-bug'. "
                     ),
                 },
-                "filename": {
-                    "type": "string",
-                    "description": "File stem (auto-derived from content if omitted)",
-                },
             },
-            "required": ["content", "tags"],
+            "required": ["content", "tags", "title"],
         },
     },
     {
@@ -303,13 +302,19 @@ def _handle_tools_call(params: dict) -> dict:
             return _text(f"Session saved → {path}{rules_text}")
 
         if name == "memory_remember":
-            path = storage.remember(
+            raw_tags: list[str] = args.get("tags") or []
+            # Normalize tags: resolve approximate names to existing canonical tags,
+            # deduplicating near-synonyms (e.g. "tests" → "testing").
+            resolved = storage.resolve_tags(raw_tags)
+            # Preserve any tags not matched by resolve (e.g. new scope tags like 'universal')
+            known = set(resolved)
+            merged = resolved + [t for t in raw_tags if t not in known]
+            storage.remember(
                 content_text=args["content"],
-                tags=args.get("tags") or [],
-                language=args.get("language"),
-                filename=args.get("filename"),
+                tags=merged,
+                title=args.get("title"),
             )
-            return _text(f"Saved → {path}")
+            return _text("ok")
 
         if name == "memory_search":
             results = storage.search_facts(

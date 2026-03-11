@@ -136,7 +136,7 @@ class TestDeriveTagsFromPath(unittest.TestCase):
     def test_language(self):
         self.assertEqual(
             tags.derive_tags_from_path(self._path("languages/clojure/foo.md"), self.base),
-            ["clojure"],
+            ["lang/clojure"],
         )
 
     def test_project_rules(self):
@@ -495,7 +495,12 @@ class TestRemember(StorageTestBase):
         path = storage.remember("use integrant", tags=["project/my-app", "architecture"])
         self.assertTrue(path.startswith("projects/my-app/rules/"))
 
-    def test_language_routing(self):
+    def test_language_routing_explicit_format(self):
+        path = storage.remember("prefer kaocha", tags=["lang/clojure", "testing"])
+        self.assertTrue(path.startswith("languages/clojure/"))
+
+    def test_language_routing_fallback(self):
+        # Bare language name still works as fallback
         path = storage.remember("prefer kaocha", tags=["clojure", "testing"])
         self.assertTrue(path.startswith("languages/clojure/"))
 
@@ -508,8 +513,8 @@ class TestRemember(StorageTestBase):
         self.assertNotIn("universal", fm_tags)
         self.assertIn("testing", fm_tags)
 
-    def test_custom_filename(self):
-        path = storage.remember("some rule", tags=["universal"], filename="my-custom-rule")
+    def test_custom_title(self):
+        path = storage.remember("some rule", tags=["universal"], title="my-custom-rule")
         self.assertTrue(path.endswith("my-custom-rule.md"))
 
     def test_auto_filename_from_content(self):
@@ -527,7 +532,7 @@ class TestRemember(StorageTestBase):
         self.assertTrue(path.startswith("languages/python/"))
 
     def test_language_tag_fallback(self):
-        # No explicit language — language tag used as fallback
+        # Bare language name routes correctly as fallback
         path = storage.remember("prefer kaocha", tags=["clojure", "testing"])
         self.assertTrue(path.startswith("languages/clojure/"))
 

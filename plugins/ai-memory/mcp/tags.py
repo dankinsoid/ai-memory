@@ -106,11 +106,14 @@ def derive_tags_from_path(path: Path, base_dir: Path) -> list[str]:
     top = parts[0]
 
     if top == "universal":
+        # universal/rules/ → [universal, rule]; universal/ → [universal]
+        if len(parts) >= 3 and parts[1] == "rules":
+            return ["universal", "rule"]
         return ["universal"]
 
     if top == "languages" and len(parts) >= 3:
-        # languages/<lang>/...
-        return [parts[1]]
+        # languages/<lang>/... → canonical tag is lang/<lang>
+        return [f"lang/{parts[1]}"]
 
     if top == "projects" and len(parts) >= 3:
         project = parts[1]

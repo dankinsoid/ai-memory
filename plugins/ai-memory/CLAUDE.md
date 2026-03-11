@@ -1,7 +1,5 @@
 # External Memory (ai-memory)
 
-Read before unfamiliar tasks; write when you learn something worth keeping.
-
 ## When to Query Memory
 
 **Always** call `memory_search` before proceeding when you:
@@ -20,12 +18,4 @@ You can query memory freely anytime you need user or project-specific info — i
 
 ## Failure Handling
 
-If any memory operation fails (memory-scribe, MCP tools, "Memory Unavailable" in hook output) — tell the user in one line, don't retry, continue your task.
-
-## Session Metadata
-
-Hook reminders tell you when to call `memory_session` and which params to include.
-
-- `title` — 2-5 words, English
-- `summary` — 1-2 sentences: problem, approach, key decisions. Each call replaces previous, so include full arc. No file/function names.
-- `tags` — topic tags (e.g. `["refactoring", "architecture"]`)
+If any memory operation fails (MCP tools, "Memory Unavailable" in hook output) — tell the user in one line, don't retry, continue your task.

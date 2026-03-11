@@ -535,7 +535,8 @@ def _tags_to_dir(base: Path, tags: list[str], language: str | None = None) -> Pa
     """Choose storage directory based on explicit language or scope tags.
 
     Priority: project/<name> tag → explicit language param →
-              language tag (fallback) → universal/
+              lang/<name> tag → bare language name tag (fallback) →
+              universal/rules/ (if rule tag) → universal/
     """
     for t in tags:
         if t.startswith("project/"):
@@ -545,10 +546,19 @@ def _tags_to_dir(base: Path, tags: list[str], language: str | None = None) -> Pa
     if language:
         return base / "languages" / language
 
-    # Language from tags as fallback only
+    # Explicit lang/<name> tag — canonical format
+    for t in tags:
+        if t.startswith("lang/"):
+            return base / "languages" / t[len("lang/"):]
+
+    # Bare language name as fallback (e.g. "clojure", "python")
     for t in tags:
         if t in _KNOWN_LANGS:
             return base / "languages" / t
+
+    # Universal rules go to universal/rules/ so the 'rule' tag is path-derived
+    if "rule" in tags:
+        return base / "universal" / "rules"
 
     return base / "universal"
 
@@ -556,7 +566,7 @@ def _tags_to_dir(base: Path, tags: list[str], language: str | None = None) -> Pa
 def remember(
     content_text: str,
     tags: list[str],
-    filename: str | None = None,
+    title: str | None = None,
     language: str | None = None,
 ) -> str:
     """Save a fact or rule as a .md file.
@@ -565,7 +575,8 @@ def remember(
       1. project/<name> in tags → projects/<name>/rules/
       2. explicit language param → languages/<language>/
       3. language name in tags (fallback) → languages/<lang>/
-      4. default → universal/
+      4. rule tag → universal/rules/
+      5. default → universal/
 
     Path-derived tags are excluded from front-matter to avoid duplication.
     Fact type (rule vs preference) is encoded via directory: files in rules/ get
@@ -574,7 +585,7 @@ def remember(
     Args:
         content_text: the fact/rule text to persist
         tags: tags including at least one scope tag
-        filename: file stem; auto-derived from content if omitted
+        title: descriptive filename stem; auto-derived from content if omitted
         language: explicit target language (e.g. 'clojure', 'python')
 
     Returns:
@@ -584,7 +595,7 @@ def remember(
     target_dir = _tags_to_dir(base, tags, language)
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    stem = filename or _safe_title(content_text)[:60] or "untitled"
+    stem = title or _safe_title(content_text)[:60] or "untitled"
     if not stem.endswith(".md"):
         stem += ".md"
 
