@@ -169,7 +169,7 @@ Next: implement storage layer
 
 ### С OpenAI (опционально)
 
-- [ ] Семантический поиск сессий и правил по содержанию
+- [x] Семантический поиск сессий и правил по содержанию
 - [ ] `memory_resolve_tags`: embedding-based tag normalization
 - [ ] `Stop` hook + 4o-mini: автосохранение compact без участия основного агента
 - [ ] `UserPromptSubmit` hook + 4o-mini: классификация топика → загрузка правил

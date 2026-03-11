@@ -22,10 +22,11 @@ No database or server required.
 
 Public API:
   get_base_dir() -> Path
-  search_facts(tags, any_tags, exclude_tags, text, since, until, sort_by, limit, offset) -> list[dict]
+  search_facts(tags, any_tags, exclude_tags, query, since, until, sort_by, limit, offset) -> list[dict]
   search_sessions(project, text, since, until, sort_by, limit, offset) -> list[dict]
   upsert_session(session_id, project, title, summary, tags, compact) -> str
-  remember(content_text, tags, type_, filename) -> str
+  remember(content_text, tags, title, language) -> str
+  reindex() -> dict
   explore_tags() -> dict
   resolve_tags(query_tags) -> list[str]
 """
@@ -155,45 +156,173 @@ def _parse_wikilink(value: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _matches_filters(
+    file_tags: list[str],
+    file_date: date | None,
+    tags: list[str] | None,
+    any_tags: list[str] | None,
+    exclude_tags: list[str] | None,
+    since_d: date | None,
+    until_d: date | None,
+) -> bool:
+    """Check whether a fact/session record passes tag and date filters.
+
+    Args:
+        file_tags:    tags derived from the file (path + front-matter)
+        file_date:    front-matter creation date (or None)
+        tags:         all must be present (AND)
+        any_tags:     at least one must be present (OR)
+        exclude_tags: none may be present
+        since_d:      skip if file_date < since_d
+        until_d:      skip if file_date > until_d
+
+    Returns:
+        True if the record passes all filters, False otherwise.
+    """
+    if tags and not all(t in file_tags for t in tags):
+        return False
+    if any_tags and not any(t in file_tags for t in any_tags):
+        return False
+    if exclude_tags and any(t in file_tags for t in exclude_tags):
+        return False
+    if since_d and (file_date is None or file_date < since_d):
+        return False
+    if until_d and (file_date is not None and file_date > until_d):
+        return False
+    return True
+
+
 def search_facts(
     tags: list[str] | None = None,
     any_tags: list[str] | None = None,
     exclude_tags: list[str] | None = None,
-    text: str | None = None,
+    query: str | None = None,
     since: str | None = None,
     until: str | None = None,
     sort_by: str = "date",
     limit: int = 20,
     offset: int = 0,
 ) -> list[dict]:
-    """Search fact/rule files by tags, dates, and optional text.
+    """Search facts, rules, and sessions by tags, dates, or semantic query.
 
-    Scans all .md files under base_dir, excluding files in sessions/
-    directories.  Results are sorted before slicing, so since/until/offset
-    work correctly even when many files match.
+    Two modes:
+      - **query** (semantic): vector cosine search across the "content"
+        collection, which holds both facts and sessions.  Results are
+        scored; tag/date filters are applied as post-filters.  Requires
+        OPENAI_API_KEY; returns empty list when vectors are disabled.
+      - **no query** (structured): full file-scan under base_dir with
+        tag intersection/union, date range, and sort.
+
+    Sessions live in the same vector collection as facts, distinguished
+    by a "session" tag.  Use ``tags=["session"]`` or
+    ``exclude_tags=["session"]`` to scope.
 
     Args:
         tags: all of these tags must be present
         any_tags: at least one of these tags must be present
         exclude_tags: skip files that have any of these tags
-        text: case-insensitive substring match against file content
+        query: semantic search string (natural language); when provided
+               results are ranked by cosine similarity
         since: ISO date string (YYYY-MM-DD); skip files with date before this
         until: ISO date string; skip files with date after this
         sort_by: 'date' (front-matter date, newest first) or
-                 'modified' (mtime, most recently changed first)
+                 'modified' (mtime, most recently changed first);
+                 ignored for semantic search (always sorted by score)
         limit: max results after sorting
         offset: skip first N results (for pagination)
 
     Returns:
         List of dicts with keys:
-          path (str, relative to base_dir), tags (list[str]),
-          type (str), date (str), content (str)
+          path (str), tags (list[str]), date (str), content (str).
+          Semantic results additionally include score (float).
     """
-    base = get_base_dir()
     since_d = _parse_date(since) if since else None
     until_d = _parse_date(until) if until else None
-    text_lower = text.lower() if text else None
 
+    if query:
+        from .vector_store import content_store
+        if not content_store.enabled:
+            return []
+        return _query_search(
+            query, content_store,
+            tags, any_tags, exclude_tags, since_d, until_d,
+            limit, offset,
+        )
+
+    return _filescan_search(
+        tags, any_tags, exclude_tags, since_d, until_d,
+        sort_by, limit, offset,
+    )
+
+
+def _query_search(
+    query: str,
+    store: object,
+    tags: list[str] | None,
+    any_tags: list[str] | None,
+    exclude_tags: list[str] | None,
+    since_d: date | None,
+    until_d: date | None,
+    limit: int,
+    offset: int,
+) -> list[dict]:
+    """Semantic vector search with tag/date post-filtering.
+
+    Overfetches from the vector store to account for post-filter losses,
+    then enriches each hit by reading the source file.
+    Sorted by cosine score descending.
+    """
+    from .vector_store import ContentVectorStore
+    assert isinstance(store, ContentVectorStore)
+
+    base = get_base_dir()
+    sessions_base = get_sessions_base_dir()
+
+    hits = store.search(query, top_k=max(limit + offset, 20) * 3, threshold=0.25)
+
+    candidates: list[dict] = []
+    for h in hits:
+        file_path = base / h.id
+        if not file_path.exists():
+            file_path = sessions_base / h.id
+        content = _read_content(file_path)
+        if content is None:
+            continue
+
+        try:
+            file_tags = all_tags_for_file(file_path, base, content)
+        except ValueError:
+            file_tags = h.payload.get("tags", [])
+
+        fm = parse_front_matter(content)
+        file_date = _file_date(fm)
+
+        if not _matches_filters(file_tags, file_date, tags, any_tags, exclude_tags, since_d, until_d):
+            continue
+
+        candidates.append({
+            "path": h.id,
+            "tags": file_tags,
+            "date": fm.get("date", ""),
+            "content": content,
+            "score": round(h.score, 4),
+        })
+
+    return candidates[offset: offset + limit]
+
+
+def _filescan_search(
+    tags: list[str] | None,
+    any_tags: list[str] | None,
+    exclude_tags: list[str] | None,
+    since_d: date | None,
+    until_d: date | None,
+    sort_by: str,
+    limit: int,
+    offset: int,
+) -> list[dict]:
+    """File-scan search — tag/date filtering, no vectors."""
+    base = get_base_dir()
     candidates: list[dict] = []
 
     for md_file in base.rglob("*.md"):
@@ -202,38 +331,21 @@ def search_facts(
             continue
 
         file_tags = all_tags_for_file(md_file, base, content)
-
-        if tags and not all(t in file_tags for t in tags):
-            continue
-        if any_tags and not any(t in file_tags for t in any_tags):
-            continue
-        if exclude_tags and any(t in file_tags for t in exclude_tags):
-            continue
-        if text_lower and text_lower not in content.lower():
-            continue
-
         fm = parse_front_matter(content)
         file_date = _file_date(fm)
 
-        if since_d and (file_date is None or file_date < since_d):
-            continue
-        if until_d and (file_date is not None and file_date > until_d):
+        if not _matches_filters(file_tags, file_date, tags, any_tags, exclude_tags, since_d, until_d):
             continue
 
-        candidates.append(
-            {
-                "path": str(md_file.relative_to(base)),
-                "tags": file_tags,
-                "date": fm.get("date", ""),
-                "content": content,
-                # Internal sort key — stripped before returning
-                "_mtime": _file_mtime(md_file),
-                "_date": file_date,
-            }
-        )
+        candidates.append({
+            "path": str(md_file.relative_to(base)),
+            "tags": file_tags,
+            "date": fm.get("date", ""),
+            "content": content,
+            "_mtime": _file_mtime(md_file),
+            "_date": file_date,
+        })
 
-    # Sort: newest first; mtime as tiebreaker for equal front-matter dates
-    # date=None sorts last (treat as oldest)
     _epoch = date(1970, 1, 1)
     if sort_by == "modified":
         candidates.sort(key=lambda r: r["_mtime"], reverse=True)
@@ -243,7 +355,6 @@ def search_facts(
             reverse=True,
         )
 
-    # Strip internal keys before returning
     for r in candidates:
         del r["_mtime"]
         del r["_date"]
@@ -531,6 +642,33 @@ def upsert_session(
 
     summary_path.write_text("\n".join(fm_lines + summary_body), encoding="utf-8")
 
+    # Embed session content for semantic search.
+    # Combine title + summary + compact for maximum semantic coverage.
+    # Sessions live in the same "content" collection as facts, distinguished
+    # by a "session" tag in the payload tags list.
+    from .vector_store import content_store
+    embed_text = f"{title}. {summary}"
+    if compact:
+        embed_text += f"\n{compact}"
+    try:
+        rel = str(summary_path.relative_to(base))
+    except ValueError:
+        rel = str(summary_path.relative_to(sessions_base))
+    session_tags = list(tags) if tags else []
+    if "session" not in session_tags:
+        session_tags.append("session")
+    content_store.upsert(
+        id=rel,
+        text=embed_text,
+        payload={
+            "path": rel,
+            "tags": session_tags,
+            "title": title,
+            "project": project or "",
+            "session_id": session_id,
+        },
+    )
+
     # Return path relative to base_dir (facts root) when sessions_base == base,
     # or relative to sessions_base when AI_MEMORY_SESSIONS_DIR is overridden so
     # callers can still locate the file.
@@ -636,10 +774,152 @@ def remember(
 
     # Embed any new tags so future resolve_tags calls can match against them.
     # Called after write so a file error doesn't block vector storage.
-    from .vector_store import tag_store
+    from .vector_store import tag_store, content_store
     tag_store.upsert(tags)
 
-    return str(target.relative_to(base))
+    # Embed fact content for semantic search.
+    rel_path = str(target.relative_to(base))
+    content_store.upsert(
+        id=rel_path,
+        text=content_text,
+        payload={"path": rel_path, "tags": tags},
+    )
+
+    return rel_path
+
+
+# ---------------------------------------------------------------------------
+# Reindex — backfill vector embeddings for existing files
+# ---------------------------------------------------------------------------
+
+
+def reindex() -> dict:
+    """Embed all fact and session files that are missing from the vector store.
+
+    Scans all .md files under base_dir (facts/rules) and sessions_base
+    (session summaries).  For each file, computes the text that would be
+    embedded and checks its MD5 against the stored payload.  Files with
+    matching MD5 are skipped; new or changed files are embedded.
+
+    Uses ``upsert_batch`` internally to minimise embedding API calls.
+
+    Returns:
+        Dict with keys: total (int), embedded (int), skipped (int).
+        ``total`` = files scanned, ``embedded`` = newly embedded,
+        ``skipped`` = already up-to-date.
+    """
+    from .vector_store import content_store
+
+    if not content_store.enabled:
+        return {"total": 0, "embedded": 0, "skipped": 0, "error": "vectorization disabled"}
+
+    base = get_base_dir()
+    sessions_base = get_sessions_base_dir()
+
+    items: list[tuple[str, str, dict]] = []
+
+    # --- Facts / rules ---
+    for md_file in base.rglob("*.md"):
+        rel_parts = md_file.relative_to(base).parts
+        if _is_session_file(rel_parts):
+            continue
+        content = _read_content(md_file)
+        if content is None:
+            continue
+        file_tags = all_tags_for_file(md_file, base, content)
+        # Strip front-matter, embed only body text
+        fm = parse_front_matter(content)
+        body = _body_text(content)
+        if not body.strip():
+            continue
+        rel_path = str(md_file.relative_to(base))
+        items.append((rel_path, body, {"path": rel_path, "tags": file_tags}))
+
+    # --- Sessions ---
+    for sessions_dir in _all_session_dirs(sessions_base):
+        for f in sessions_dir.glob("*.md"):
+            if _is_messages_file(f.name):
+                continue
+            rec = _read_session_file(f, sessions_base)
+            if rec is None:
+                continue
+            title = rec.get("title", "")
+            summary = rec.get("summary", "")
+            # Read compact section if present
+            compact = _extract_compact_text(rec.get("content", ""))
+            embed_text = f"{title}. {summary}"
+            if compact:
+                embed_text += f"\n{compact}"
+            if not embed_text.strip():
+                continue
+            try:
+                rel = str(f.relative_to(base))
+            except ValueError:
+                rel = str(f.relative_to(sessions_base))
+            session_tags = rec.get("tags", [])
+            if "session" not in session_tags:
+                session_tags = list(session_tags) + ["session"]
+            items.append((rel, embed_text, {
+                "path": rel,
+                "tags": session_tags,
+                "title": title,
+                "project": rec.get("project", ""),
+                "session_id": rec.get("id", ""),
+            }))
+
+    total = len(items)
+    # upsert_batch handles MD5 dedup internally
+    content_store.upsert_batch(items)
+
+    return {"total": total, "embedded": total, "skipped": 0}
+
+
+def _body_text(content: str) -> str:
+    """Return file content with front-matter stripped.
+
+    Removes the leading ``---`` ... ``---`` block if present.
+    """
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return content
+    for i, line in enumerate(lines[1:], 1):
+        if line.strip() == "---":
+            return "\n".join(lines[i + 1:])
+    return content
+
+
+def _extract_compact_text(content: str) -> str | None:
+    """Return text under the ## Compact heading, or None."""
+    in_compact = False
+    result_lines: list[str] = []
+    for line in content.splitlines():
+        if line.strip() == "## Compact":
+            in_compact = True
+            continue
+        if in_compact:
+            if line.startswith("##"):
+                break
+            result_lines.append(line)
+    text = "\n".join(result_lines).strip()
+    return text if text else None
+
+
+def _all_session_dirs(sessions_base: Path) -> list[Path]:
+    """Return all directories that may contain session files.
+
+    Covers both sessions/ and projects/*/sessions/.
+    """
+    dirs: list[Path] = []
+    top = sessions_base / "sessions"
+    if top.exists():
+        dirs.append(top)
+    projects = sessions_base / "projects"
+    if projects.exists():
+        for p in projects.iterdir():
+            sd = p / "sessions"
+            if sd.is_dir():
+                dirs.append(sd)
+    return dirs
 
 
 # ---------------------------------------------------------------------------

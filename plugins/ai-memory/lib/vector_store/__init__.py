@@ -10,6 +10,7 @@ from .factory import get_vector_store
 from .json_store import JsonVectorStore
 from .qdrant_store import QdrantVectorStore
 from .tag_store import TagVectorStore, tag_store
+from .content_store import ContentVectorStore, ContentHit, content_store
 
 __all__ = [
     "VectorStore",
@@ -20,5 +21,8 @@ __all__ = [
     "QdrantVectorStore",
     "TagVectorStore",
     "tag_store",
+    "ContentVectorStore",
+    "ContentHit",
+    "content_store",
     "get_vector_store",
 ]

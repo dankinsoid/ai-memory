@@ -59,6 +59,10 @@ class JsonVectorStore(VectorStore):
         data = self._load()
         return {id: data[id]["vector"] for id in ids if id in data}
 
+    def get_payloads(self, ids: list[str]) -> dict[str, dict[str, Any]]:
+        data = self._load()
+        return {id: data[id].get("payload", {}) for id in ids if id in data}
+
     def delete(self, id: str) -> None:
         data = self._load()
         if id in data:

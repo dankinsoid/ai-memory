@@ -124,6 +124,29 @@ class QdrantVectorStore(VectorStore):
                 result[orig_id] = p["vector"]
         return result
 
+    def get_payloads(self, ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Fetch stored payloads for a batch of ids in one Qdrant request.
+
+        Args:
+            ids: original string identifiers to look up
+
+        Returns:
+            Dict mapping found ids to their payload dicts.
+        """
+        uuid_to_id = {_to_uuid(id): id for id in ids}
+        resp = self._req("POST", f"/collections/{self._collection}/points", {
+            "ids": list(uuid_to_id.keys()),
+            "with_payload": True,
+            "with_vector": False,
+        })
+        result = {}
+        for p in resp.get("result", []):
+            orig_id = uuid_to_id.get(str(p["id"]))
+            if orig_id:
+                payload = p.get("payload", {})
+                result[orig_id] = {k: v for k, v in payload.items() if k != "_id"}
+        return result
+
     def delete(self, id: str) -> None:
         self._req("POST", f"/collections/{self._collection}/points/delete", {
             "points": [_to_uuid(id)],

@@ -257,19 +257,6 @@ class TestSearchFacts(StorageTestBase):
         self.assertIn("universal/keep.md", paths)
         self.assertNotIn("universal/drop.md", paths)
 
-    def test_text_filter(self):
-        _write_fact(self.base, "universal/a.md", "use kaocha for testing")
-        _write_fact(self.base, "universal/b.md", "prefer leiningen")
-
-        results = storage.search_facts(text="kaocha")
-        self.assertEqual(len(results), 1)
-        self.assertIn("kaocha", results[0]["content"])
-
-    def test_text_case_insensitive(self):
-        _write_fact(self.base, "universal/a.md", "Use Kaocha For Testing")
-        results = storage.search_facts(text="kaocha")
-        self.assertEqual(len(results), 1)
-
     def test_since_filter(self):
         _write_fact(self.base, "universal/old.md", "old", date_str="2025-06-01")
         _write_fact(self.base, "universal/new.md", "new", date_str="2026-03-01")
@@ -534,6 +521,200 @@ class TestRemember(StorageTestBase):
         # Bare language name routes correctly as fallback
         path = storage.remember("prefer kaocha", tags=["clojure", "testing"])
         self.assertTrue(path.startswith("languages/clojure/"))
+
+
+# ---------------------------------------------------------------------------
+# ContentVectorStore tests
+# ---------------------------------------------------------------------------
+
+
+def _fake_embed_batch(texts: list[str]) -> list[list[float] | None]:
+    """Deterministic fake embeddings: hash text to a 4-dim unit vector."""
+    import hashlib, struct
+    result = []
+    for t in texts:
+        h = hashlib.md5(t.encode()).digest()
+        raw = struct.unpack("4f", h)
+        mag = sum(x * x for x in raw) ** 0.5 or 1.0
+        result.append([x / mag for x in raw])
+    return result
+
+
+class TestContentVectorStore(StorageTestBase):
+    """Tests for ContentVectorStore with mock embeddings."""
+
+    def setUp(self):
+        super().setUp()
+        self._patches = [
+            unittest.mock.patch("lib.embedding.is_enabled", return_value=True),
+            unittest.mock.patch("lib.embedding.embed_batch", side_effect=_fake_embed_batch),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self._patches:
+            p.stop()
+        super().tearDown()
+
+    def _store(self):
+        from lib.vector_store.content_store import ContentVectorStore
+        return ContentVectorStore("test-content")
+
+    def test_upsert_and_search(self):
+        store = self._store()
+        store.upsert("f1", "how to write unit tests in python", {"path": "f1", "tags": ["testing"]})
+        store.upsert("f2", "deploying docker containers", {"path": "f2", "tags": ["devops"]})
+        # Search for exact indexed text — guarantees score=1.0 with fake embeddings
+        hits = store.search("how to write unit tests in python", top_k=2, threshold=0.0)
+        self.assertTrue(len(hits) > 0)
+        self.assertEqual(hits[0].id, "f1")
+        self.assertAlmostEqual(hits[0].score, 1.0, places=4)
+
+    def test_md5_skips_unchanged(self):
+        """Repeated upsert with same text should not call embed_batch again."""
+        store = self._store()
+        import lib.embedding as emb
+        store.upsert("f1", "some content", {"path": "f1"})
+        first_call_count = emb.embed_batch.call_count
+        store.upsert("f1", "some content", {"path": "f1"})
+        # Second call should be skipped (MD5 match in payload)
+        self.assertEqual(emb.embed_batch.call_count, first_call_count)
+
+    def test_md5_reembeds_on_change(self):
+        """Changing text triggers re-embedding."""
+        store = self._store()
+        import lib.embedding as emb
+        store.upsert("f1", "version one", {"path": "f1"})
+        first_count = emb.embed_batch.call_count
+        store.upsert("f1", "version two", {"path": "f1"})
+        self.assertGreater(emb.embed_batch.call_count, first_count)
+
+    def test_upsert_batch_md5_dedup(self):
+        """upsert_batch skips items whose MD5 already matches."""
+        store = self._store()
+        import lib.embedding as emb
+        store.upsert("f1", "alpha", {"path": "f1"})
+        first_count = emb.embed_batch.call_count
+        # Batch: f1 unchanged, f2 is new
+        store.upsert_batch([
+            ("f1", "alpha", {"path": "f1"}),
+            ("f2", "beta", {"path": "f2"}),
+        ])
+        # Only f2 should be embedded
+        self.assertEqual(emb.embed_batch.call_count, first_count + 1)
+
+    def test_search_strips_md5_from_payload(self):
+        """_md5 internal field should not leak into search results."""
+        store = self._store()
+        store.upsert("f1", "test content", {"path": "f1"})
+        # Search for exact text to guarantee a hit
+        hits = store.search("test content", top_k=1, threshold=0.0)
+        self.assertTrue(len(hits) > 0)
+        self.assertNotIn("_md5", hits[0].payload)
+
+    def test_delete_removes_entry(self):
+        store = self._store()
+        store.upsert("f1", "test", {"path": "f1"})
+        store.delete("f1")
+        hits = store.search("test", top_k=1, threshold=0.0)
+        ids = {h.id for h in hits}
+        self.assertNotIn("f1", ids)
+
+    def test_disabled_is_noop(self):
+        """When embedding is disabled, upsert is a no-op and search returns empty."""
+        from lib.vector_store.content_store import ContentVectorStore
+        with unittest.mock.patch("lib.embedding.is_enabled", return_value=False):
+            store = ContentVectorStore("test-disabled")
+            store.upsert("f1", "content", {"path": "f1"})
+            hits = store.search("content", top_k=1)
+            self.assertEqual(hits, [])
+
+
+class TestReindex(StorageTestBase):
+    """Tests for storage.reindex() with mock embeddings."""
+
+    def setUp(self):
+        super().setUp()
+        from lib.vector_store import content_store
+        content_store._store = None
+        self._patches = [
+            unittest.mock.patch("lib.embedding.is_enabled", return_value=True),
+            unittest.mock.patch("lib.embedding.embed_batch", side_effect=_fake_embed_batch),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self._patches:
+            p.stop()
+        super().tearDown()
+
+    def test_indexes_facts_and_sessions(self):
+        _write_fact(self.base, "universal/f1.md", "clojure testing with kaocha")
+        _write_session(self.base, "sessions/s1.md", "Debug session", "fixed a bug in auth")
+        result = storage.reindex()
+        self.assertEqual(result["total"], 2)
+
+    def test_skips_messages_files(self):
+        _write_session(self.base, "sessions/s1.md", "Sess", "summary")
+        # Write a messages file — should be skipped
+        msg = self.base / "sessions" / "s1.messages.md"
+        msg.write_text("transcript here", encoding="utf-8")
+        result = storage.reindex()
+        self.assertEqual(result["total"], 1)
+
+
+class TestSearchFactsSemanticQuery(StorageTestBase):
+    """Tests for search_facts(query=...) semantic search path."""
+
+    def setUp(self):
+        super().setUp()
+        # Reset the module-level singleton so it re-initializes with the new temp dir
+        from lib.vector_store import content_store
+        content_store._store = None
+        self._patches = [
+            unittest.mock.patch("lib.embedding.is_enabled", return_value=True),
+            unittest.mock.patch("lib.embedding.embed_batch", side_effect=_fake_embed_batch),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self._patches:
+            p.stop()
+        super().tearDown()
+
+    def test_query_returns_results_with_score(self):
+        """Semantic search returns results with a score field."""
+        storage.remember("always use type hints in python", tags=["universal", "rule"], title="type-hints")
+        # Search for exact embedded text — guarantees score=1.0 with fake embeddings
+        results = storage.search_facts(query="always use type hints in python")
+        self.assertTrue(len(results) > 0)
+        self.assertIn("score", results[0])
+        self.assertAlmostEqual(results[0]["score"], 1.0, places=2)
+
+    def test_query_respects_tag_filter(self):
+        """Tag filters apply as post-filters on semantic results."""
+        text = "rule about testing frameworks"
+        storage.remember(text, tags=["universal", "rule", "testing"], title="testing-rule")
+        storage.remember(text, tags=["universal", "devops"], title="deploy-note")
+        # Both have same embedding (same text), but tag filter should exclude devops
+        results = storage.search_facts(query=text, tags=["universal"], exclude_tags=["devops"])
+        paths = [r["path"] for r in results]
+        self.assertTrue(all("deploy-note" not in p for p in paths))
+
+    def test_query_returns_empty_when_disabled(self):
+        """When vectorization is off, query returns empty list."""
+        with unittest.mock.patch("lib.embedding.is_enabled", return_value=False):
+            results = storage.search_facts(query="anything")
+            self.assertEqual(results, [])
+
+    def test_no_query_uses_filescan(self):
+        """Without query, search uses regular file scan."""
+        _write_fact(self.base, "universal/f1.md", "a fact", fm_tags=["testing"])
+        results = storage.search_facts(any_tags=["testing"])
+        self.assertEqual(len(results), 1)
 
 
 # ---------------------------------------------------------------------------

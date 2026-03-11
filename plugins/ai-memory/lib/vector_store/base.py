@@ -109,6 +109,20 @@ class VectorStore(ABC):
         """
 
     @abstractmethod
+    def get_payloads(self, ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Return stored payloads for the given ids in a single batch operation.
+
+        Ids not present in the store are simply absent from the result dict.
+
+        Args:
+            ids: point identifiers to look up
+
+        Returns:
+            Dict mapping found ids to their payload dicts.
+            Missing ids are not included.
+        """
+
+    @abstractmethod
     def scroll_all(self) -> list[VectorPoint]:
         """Return all stored points.
 

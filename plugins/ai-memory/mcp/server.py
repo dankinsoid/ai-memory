@@ -116,14 +116,22 @@ TOOLS = [
     {
         "name": "memory_search",
         "description": (
-            "Search all memory files by tags, text, and dates. Covers facts, rules, "
-            "and sessions — use tags to scope: 'universal', 'project/<name>', 'session', "
-            "'rule', 'preference', etc. Results are sorted before slicing, so "
-            "offset/since/until work correctly."
+            "Search memory by semantic query or structured filters. "
+            "Covers facts, rules, and sessions (sessions have 'session' tag). "
+            "Use 'query' for natural-language semantic search, "
+            "or tags/dates for structured lookup."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Semantic search query (natural language). "
+                        "Finds facts and sessions by meaning similarity. "
+                        "Tag/date filters still apply as post-filters."
+                    ),
+                },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -139,10 +147,6 @@ TOOLS = [
                     "items": {"type": "string"},
                     "description": "Skip files that have any of these tags",
                 },
-                "text": {
-                    "type": "string",
-                    "description": "Substring to search in file content (case-insensitive)",
-                },
                 "since": {
                     "type": "string",
                     "description": "ISO date (YYYY-MM-DD); skip files created before this date",
@@ -156,7 +160,8 @@ TOOLS = [
                     "enum": ["date", "modified"],
                     "description": (
                         "'date': front-matter creation date, newest first (default). "
-                        "'modified': file mtime, most recently changed first."
+                        "'modified': file mtime, most recently changed first. "
+                        "Ignored for semantic search (sorted by score)."
                     ),
                 },
                 "limit": {
@@ -324,7 +329,7 @@ def _handle_tools_call(params: dict) -> dict:
                 tags=args.get("tags"),
                 any_tags=args.get("any_tags"),
                 exclude_tags=args.get("exclude_tags"),
-                text=args.get("text"),
+                query=args.get("query"),
                 since=args.get("since"),
                 until=args.get("until"),
                 sort_by=args.get("sort_by", "date"),
