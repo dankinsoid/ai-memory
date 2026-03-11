@@ -10,208 +10,211 @@
 
 ---
 
-## Блок 1 — Локальное хранилище (убрать зависимость от сервера)
+## Блок 1 — Локальное хранилище + Python MCP сервер
 
-**Цель:** плагин должен работать без запущенного Clojure-сервера.
+**Цель:** плагин работает без Clojure-сервера. Python MCP stdio сервер, файловая система как хранилище.
 
-- [ ] Определить локальный формат хранилища (директория, структура файлов)
-  - Кандидат: `~/.claude/ai-memory/` как корень
-  - `sessions/` — файлы сессий
-  - `rules/` — файлы правил (по топику)
-  - `facts/` — прочие факты (если нужны)
-- [ ] MCP-инструменты переписать на прямую работу с файлами (без HTTP API)
-  - Или: сделать MCP-сервер как легковесный babashka-процесс без Clojure
-- [ ] Clojure-сервер сделать опциональным (для advanced: Datomic, Qdrant Cloud)
-- [ ] Конфиг плагина: `AI_MEMORY_DIR` (путь к хранилищу), по умолчанию `~/.claude/ai-memory/`
+### Решения (закрытые)
 
----
+- Clojure-бэкенд убирается полностью (не fallback)
+- MCP транспорт: stdio (`python3 mcp/server.py`)
+- Хранилище: `~/.claude/ai-memory/` (переопределяется через `AI_MEMORY_DIR`)
+- Синхронизация: iCloud (target), git (опционально)
 
-## Блок 2 — Сессии в формате Obsidian
+### Структура хранилища
 
-**Цель:** сессии как markdown-файлы, читаемые в Obsidian и других инструментах.
+```
+~/.claude/ai-memory/
+  universal/
+    fix-bugs-test-first.md    # tags: [universal, testing, workflow]
+    write-docstrings.md       # tags: [universal, conventions]
+  languages/
+    clojure/
+      use-kaocha.md           # tags: [clojure, testing]
+      prefer-transducers.md   # tags: [clojure, performance]
+    python/
+      ...
+  projects/
+    ai-memory/
+      rules/
+        use-integrant.md      # tags: [project/ai-memory, architecture]
+      sessions/
+        2026-03-11 Local storage arch.md
+  sessions/                   # сессии без привязки к проекту
+    2026-03-11 General brainstorm.md
+```
 
-### Формат файла сессии
+Теги из пути (автоматически):
+- `universal/` → `[universal]`
+- `languages/clojure/` → `[clojure]`
+- `projects/ai-memory/rules/` → `[project/ai-memory, rule]`
+- `projects/ai-memory/sessions/` → `[project/ai-memory, session]`
+- `sessions/` → `[session]`
+
+Front-matter добавляет топик-теги: `[testing]`, `[performance]`, `[git]` и т.д.
+
+### Формат facts файла (file-per-fact, решено)
 
 ```markdown
 ---
-id: <session-id>
-date: 2025-03-11
+tags: [testing, workflow]
+type: preference
+date: 2026-03-11
+---
+
+fix bugs test-first: write regression test, verify fails (red), fix, verify passes (green). Always in this order.
+```
+
+- Имя файла = саммари факта (`fix-bugs-test-first.md`)
+- Теги: path-derived + front-matter `tags:` (union)
+- `type`: preference | rule | critical-rule
+- Obsidian: нативные теги из front-matter, filename search, граф сессий через `continues:`
+
+### Формат session файла (решено)
+
+```markdown
+---
+id: 0d9efbcd-...
+date: 2026-03-11
 project: ai-memory
-title: Redesign local storage
+title: Local storage architecture
 type: planning
-tags: [architecture, refactoring]
-continues: [[2025-03-10 Fix blob export]]
-continued-by: [[2025-03-12 MCP rewrite]]
+tags: [architecture]
+continues: [[2026-03-10 Previous session]]
 ---
 
 ## Summary
-<1-2 предложения: задача + ключевые решения>
 
-## Detail
-<полный компакт сессии>
+1-2 предложения: задача + ключевые решения.
 
-## User requirements
-- <требования/предпочтения>
+## Compact
+
+Status: in-progress
+Next: implement storage layer
+
+Полный compact для resumption агентом.
+
+## Content
+
+Полный детальный контент сессии.
 ```
+
+- Один файл на сессию (не чанки — перезаписывается целиком)
+- Имя файла: `{date} {title}.md`
+
+### MCP инструменты (решено)
+
+| Инструмент | Назначение |
+|---|---|
+| `memory_session` | upsert сессии (.md файл) |
+| `memory_remember` | сохранить правило/факт в .md |
+| `memory_search` | поиск по тегам + опц. текст (бывший memory_get_facts) |
+| `memory_explore_tags` | обзор тегов и их иерархии |
+| `memory_resolve_tags` | нормализация тегов (поиск существующих по приближённым) |
+| ~~memory_read_blob~~ | агент читает файл напрямую по пути |
+| ~~memory_reinforce~~ | убран (нет весов) |
+| ~~memory_project~~ | убран |
 
 ### Задачи
 
-- [ ] Определить схему YAML front-matter для сессий
-- [ ] Реализовать сохранение сессий как `.md` файлов
-  - Имя файла: `{date} {title}.md` (Obsidian-style)
-  - Или: `{date}-{session-id}.md` для надёжной адресации
-- [ ] Конфиг: `AI_MEMORY_SESSIONS_DIR` — путь куда сохранять (можно указать Obsidian vault)
-- [ ] Механизм ссылок между сессиями:
-  - Автоматические: `continues:` и `continued-by:` (Obsidian wikilinks)
-  - Уже есть через `SessionEnd(clear) → SessionStart(clear)` цепочку — перенести в файловый формат
-  - Ручные: `/link` скилл или команда для явного указания "эта сессия продолжает ту"
-- [ ] `/load` скилл — читать `.md` файлы напрямую, traverse цепочку через front-matter
-- [ ] `/save` скилл — записывать `.md` файл
+- [ ] `plugins/ai-memory/mcp/tags.py` — парсинг front-matter + derivation тегов из пути
+- [ ] `plugins/ai-memory/mcp/storage.py` — файловые операции (search, upsert session, remember)
+- [ ] `plugins/ai-memory/mcp/server.py` — MCP stdio JSON-RPC сервер
+- [ ] Обновить `plugins/ai-memory/.mcp.json` → stdio транспорт
+- [ ] Bump plugin version
 
 ---
 
-## Блок 3 — Факты и правила: только явно
+## Блок 2 — Сессии: обновить скиллы и хуки
 
-**Цель:** убрать auto-nudge для фактов. Факты сохраняются только по явной просьбе пользователя.
+**Цель:** `/save` и `/load` скиллы работают с новым .md форматом.
 
-### Изменения в поведении
+- [ ] Обновить `/save` скилл — записывать новый .md формат (Summary + Compact + Content)
+- [ ] Обновить `/load` скилл — читать .md напрямую (без memory_read_blob)
+  - Traverse `continues:` chain через front-matter вместо API
+- [ ] Обновить `session-start.py` hook — читать сессии из файлов, не из HTTP API
+- [ ] Обновить `session-end.py` и `session-sync.py` — аналогично
+- [ ] Конфиг: `AI_MEMORY_SESSIONS_DIR` — путь для сессий (можно указать Obsidian vault)
 
-- [x] Убрать `memory-nudge.bb` (убран из hooks.json; файл оставлен как legacy)
-- [x] Убрать из `CLAUDE.md` инструкции "save when you observe" для фактов
-- [x] `memory-scribe` агент больше не вызывается автоматически агентом
-  - Остаётся только для явного `/remember` от пользователя
+---
 
-### Формат правил
+## Блок 3 — Факты и правила: только явно ✅
 
-Решено: **дерево папок + YAML front-matter теги** (гибрид).
-
-- [ ] Структура хранилища:
-  ```
-  ~/.claude/ai-memory/
-    rules/
-      _rules.md               # универсальные cross-cutting правила
-      git.md
-      testing.md
-      clojure/
-        _rules.md             # все правила для Clojure
-        testing.md            # clojure + testing
-        style.md
-      swift/
-        _rules.md
-    projects/
-      ai-memory/
-        _rules.md             # проектно-специфичные правила
-        architecture.md
-        sessions/
-          2025-03-11 Redesign storage.md
-  ```
-- [ ] Теги **частично выводятся из пути** автоматически (`rules/clojure/testing.md` → `[clojure, testing]`)
-- [ ] Явные теги в front-matter:
-  ```yaml
-  ---
-  tags: [performance]   # дополнительные теги, не выводимые из пути
-  updated: 2025-03-11
-  ---
-  ```
-- [ ] Тег правил: `rule`
-- [ ] **Без весов/приоритетов** — теги и их количество сами сигнализируют о важности
-- [ ] Поиск: Python парсит front-matter + путь всех `.md` файлов (~100ms для 200 файлов)
-- [ ] SQLite как опциональный индекс если масштаб потребует (в stdlib Python, нулевые зависимости)
+- [x] Убрать `memory-nudge.bb` (убран из hooks.json)
+- [x] Убрать из `CLAUDE.md` инструкции "save when you observe"
+- [x] `memory-scribe` агент только для явного `/remember`
 
 ---
 
 ## Блок 4 — Ленивая загрузка правил
 
-**Цель:** загружать только релевантные правила в зависимости от задачи, а не всё сразу.
+**Цель:** загружать только релевантные правила в зависимости от задачи.
 
-### Механизм
-
-- [ ] `SessionStart` hook: почти как сейчас
-- [ ] `UserPromptSubmit` hook: анализировать промпт, определять топики, подгружать правила
-  - Без AI: по ключевым словам в промпте → поиск по тегам файлов правил
-  - С 4o-mini (опционально): классифицировать топик промпта, загрузить релевантные правила
-- [ ] В `CLAUDE.md` плагина: инструкция агенту когда и как запрашивать правила через MCP
-  - Текущий паттерн: `memory_get_facts({tags: ["<topic>"], any_tags: ["rule", "preference"]})` — оставить
-  - Добавить: агент должен делать это ПЕРЕД началом задачи по новому топику
-
-- [ ] Ленивая загрузка = чтение нужного файла/папки по топику (тривиально при файловой структуре)
+- [ ] `UserPromptSubmit` hook: анализировать промпт по ключевым словам → подгружать правила по тегам
+- [ ] В `CLAUDE.md` плагина: инструкция агенту запрашивать правила через `memory_search` перед новым топиком
+- [ ] Ленивая загрузка = чтение нужного файла/папки по тегу (тривиально при файловой структуре)
 
 ---
 
 ## Блок 5 — Опциональный OpenAI
 
-**Цель:** система работает без AI, AI улучшает опыт.
-
 ### Без AI (базовый режим)
 
 - [ ] Поиск сессий: по дате, проекту, тегам из front-matter
 - [ ] Поиск правил: по тегам/папкам
-- [ ] Сохранение сессий: агент генерирует компакт (как сейчас через `/save`)
+- [ ] `memory_resolve_tags`: fuzzy/substring match без векторов
 
-### С OpenAI Embedding (опционально)
+### С OpenAI (опционально)
 
-- [ ] Семантический поиск сессий по содержанию
-- [ ] Поиск релевантных правил по смыслу промпта
-- [ ] Настройка: `OPENAI_API_KEY` + `VECTOR_BACKEND=openai`
-
-### С 4o-mini в хуках (опционально, большие возможности)
-
-- [ ] `Stop` hook: автоматически сохранять компакт сессии без участия основного агента
-  - Hook вызывает 4o-mini с историей и генерирует summary → пишет в `.md` файл + compact.md
-  - Устраняет необходимость явного `/save` перед `/clear`
-- [ ] `UserPromptSubmit` hook: классифицировать топик промпта → подгрузить нужные правила
-- [ ] Конфиг: `AI_MEMORY_LLM=openai` (или `none`)
-- [ ] Защита: ограничение на размер контекста передаваемого в 4o-mini
+- [ ] Семантический поиск сессий и правил по содержанию
+- [ ] `memory_resolve_tags`: embedding-based tag normalization
+- [ ] `Stop` hook + 4o-mini: автосохранение compact без участия основного агента
+- [ ] `UserPromptSubmit` hook + 4o-mini: классификация топика → загрузка правил
+- [ ] Конфиг: `OPENAI_API_KEY` + `AI_MEMORY_LLM=openai`
 
 ---
 
-## Блок 6 — Перевод хуков с Babashka на Python 3
+## Блок 6 — Перевод хуков с Babashka на Python 3 ✅
 
-**Цель:** Python 3 есть на любой машине, Babashka требует отдельной установки — это барьер для распространения.
-
-- [x] Переписать все хуки на Python 3 (без внешних зависимостей, только stdlib: `json`, `urllib`, `subprocess`, `pathlib`)
-- [x] Обновить `hooks.json`: заменить `bb ...` на `python3 ...`
-- [x] HTTP через `urllib.request` из stdlib (requests не нужен)
+- [x] Переписать все хуки на Python 3 (stdlib only)
+- [x] Обновить `hooks.json`
+- [x] HTTP через `urllib.request`
 
 ---
 
-## Блок 7 — Рефактор плагина
+## Блок 7 — Рефактор плагина (финальная сборка)
 
-- [ ] Обновить `hooks.json`: заменить `bb` на `python3`, пересмотреть триггеры
-  - `Stop`: запускать авто-сохранение сессии (с 4o-mini) или напоминание сделать `/save`
-  - `UserPromptSubmit`: убрать `memory-nudge` (или ограничить только сессиями), может догрузка правил если сможем составить четкий критерий их релевантности
-  - `SessionStart`: может немного оптимизировать
-- [ ] Обновить `CLAUDE.md` плагина
-- [ ] `/remember` скилл — явное сохранение правила/факта пользователем
-- [ ] `/load` скилл — обновить для работы с `.md` файлами
-- [ ] `/save` скилл — обновить для записи Obsidian-совместимого `.md`
+- [ ] Обновить `CLAUDE.md` плагина (новые инструменты, новые пути)
+- [ ] Пересмотреть триггеры хуков
+- [ ] `/remember` скилл — явное сохранение правила
+- [ ] Убрать legacy Clojure-зависимости из всех скриптов
 
 ---
 
 ## Порядок реализации
 
-1. **Блок 3 (быстро)** — убрать auto-nudge, самое простое изменение поведения
-2. **Блок 6** — переписать хуки на Python 3 (до остального, чтобы не переписывать дважды)
-3. **Блок 1** — локальное хранилище, фундамент для всего остального
-4. **Блок 2** — Obsidian формат сессий + `/save` и `/load`
+1. ~~**Блок 3**~~ ✅
+2. ~~**Блок 6**~~ ✅
+3. **Блок 1** ← сейчас (MCP сервер + файловое хранилище)
+4. **Блок 2** — обновить скиллы и хуки под новый формат
 5. **Блок 4** — ленивая загрузка правил
-6. **Блок 5** — опциональный AI (особенно 4o-mini в Stop hook)
-7. **Блок 7** — рефактор плагина как финальная сборка
+6. **Блок 5** — опциональный AI
+7. **Блок 7** — финальный рефактор плагина
 
 ---
 
 ## Открытые вопросы
 
 Закрытые:
-- [x] **Формат правил:** дерево папок + YAML front-matter теги;
-- [x] **Индексация:** Python парсит front-matter + путь (~100ms/200 файлов); SQLite опционально
-- [x] **Ссылки сессий:** Obsidian wikilinks `[[title]]` через `continues:` / `continued-by:`
-- [x] **Веса/приоритеты:** убраны — теги и их количество сигнализируют о важности
-- [x] **Тег характера сессии:** chat, planning, implementation, debugging, exploration, etc
-  - SessionStart не грузит `chat`; `planning`/`implementation` в приоритете (под вопросом)
-  - 4o-mini назначает тип автоматически при сохранении
+- [x] **Формат правил:** file-per-fact; базовое разбиение universal/languages/projects, топики в тегах
+- [x] **Формат сессий:** single .md, front-matter + Summary/Compact/Content
+- [x] **MCP транспорт:** Python stdio сервер
+- [x] **Clojure бэкенд:** убирается полностью
+- [x] **memory_reinforce:** убран (нет весов в новой системе)
+- [x] **Синхронизация:** iCloud target, git опционально
+- [x] **Чанки:** убраны, сессия перезаписывается целиком
 
 Открытые:
-- [ ] Нужен ли MCP-сервер вообще или Python скриптов достаточно?
-- [ ] Stop hook + 4o-mini: что передавать? (iterative накопление summary предпочтительнее полного transcript)
-- [ ] Clojure-бэкенд: сохранить как legacy/advanced или полностью убрать?
+- [ ] Stop hook + 4o-mini: что передавать в качестве контекста?
+- [ ] SQLite индекс: когда включать (>500 файлов? >1000?)
+- [ ] Clojure-бэкенд: архивировать или удалить из репо?
