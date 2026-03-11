@@ -76,9 +76,9 @@ continued-by: [[2025-03-12 MCP rewrite]]
 
 ### Изменения в поведении
 
-- [ ] Убрать `memory-nudge.bb` (или сделать его триггером только для сессий, не для фактов)
-- [ ] Убрать из `CLAUDE.md` инструкции "save when you observe" для фактов
-- [ ] `memory-scribe` агент больше не вызывается автоматически агентом
+- [x] Убрать `memory-nudge.bb` (убран из hooks.json; файл оставлен как legacy)
+- [x] Убрать из `CLAUDE.md` инструкции "save when you observe" для фактов
+- [x] `memory-scribe` агент больше не вызывается автоматически агентом
   - Остаётся только для явного `/remember` от пользователя
 
 ### Формат правил
@@ -169,9 +169,9 @@ continued-by: [[2025-03-12 MCP rewrite]]
 
 **Цель:** Python 3 есть на любой машине, Babashka требует отдельной установки — это барьер для распространения.
 
-- [ ] Переписать все хуки на Python 3 (без внешних зависимостей, только stdlib)
-- [ ] Обновить `hooks.json`: заменить `bb ...` на `python3 ...`
-- [ ] Проверить: `requests` библиотека нужна для HTTP — либо использовать `urllib` из stdlib, либо принять `requests` как зависимость с graceful degradation
+- [x] Переписать все хуки на Python 3 (без внешних зависимостей, только stdlib: `json`, `urllib`, `subprocess`, `pathlib`)
+- [x] Обновить `hooks.json`: заменить `bb ...` на `python3 ...`
+- [x] HTTP через `urllib.request` из stdlib (requests не нужен)
 
 ---
 

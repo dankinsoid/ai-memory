@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+# @ai-generated(solo)
+# UserPromptSubmit hook: reminds agent about session metadata updates.
+#
+# Two types of reminders:
+# 1. Summary — on early turns, prompt agent to call memory_session with summary
+# 2. Chunk naming — when context token usage crosses a fixed boundary (e.g. every 20K tokens)
+#
+# State file per session: ~/.claude/hooks/state/{session-id}-reminder.json
+#   {"prompt_count": N, "first_prompt_len": N, "last_chunk_tokens": N}
+#
+# Env-var toggles (set any to disable):
+#   AI_MEMORY_DISABLED=1     — master switch (all hooks)
+#   AI_MEMORY_NO_WRITE=1     — disable all writes/nudges
+#   AI_MEMORY_NO_SESSIONS=1  — disable session-specific features
+
+import json
+import os
+import subprocess
+import sys
+from datetime import date, datetime, timezone
+from pathlib import Path
+from urllib import request as urllib_request
+from urllib.error import URLError
+
+# ---- Config ----
+
+BASE_URL = os.environ.get("AI_MEMORY_URL", "http://localhost:8080")
+API_TOKEN = os.environ.get("AI_MEMORY_TOKEN")
+
+HEALTH_CHECK_INTERVAL = 10   # check server health every N prompts
+PROJECT_REMIND_INTERVAL_DAYS = 3  # remind about project summary at most once every N days
+CHUNK_TOKEN_STEP = 20_000    # create a new chunk every N tokens of context growth
+SHORT_PROMPT_LEN = 50        # prompts shorter than this are likely greetings
+SUMMARY_REMIND_TURNS = 3     # remind about summary for this many early turns
+
+
+def git_project_name(cwd: str) -> str | None:
+    """Extract repo name from git remote URL."""
+    if not cwd:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "remote", "get-url", "origin"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            url = result.stdout.strip().rstrip("/").removesuffix(".git")
+            return url.split("/")[-1].split(":")[-1]
+    except Exception:
+        pass
+    return None
+
+
+def derive_project(cwd: str) -> str | None:
+    """Derive project name from git remote, falling back to directory name."""
+    return git_project_name(cwd) or (cwd.rstrip("/").split("/")[-1] if cwd else None)
+
+
+def get_context_tokens(transcript_path: str | None) -> int | None:
+    """Extract total token usage from last assistant message in transcript JSONL.
+    Reads last 100 lines to find the most recent usage entry.
+    Returns None if transcript unavailable or unreadable.
+    """
+    if not transcript_path:
+        return None
+    p = Path(transcript_path)
+    if not p.exists():
+        return None
+    try:
+        lines = p.read_text().splitlines()
+        for line in reversed(lines[-100:]):
+            try:
+                entry = json.loads(line)
+                usage = (entry.get("message") or {}).get("usage")
+                if usage:
+                    return (
+                        usage.get("input_tokens", 0)
+                        + usage.get("cache_read_input_tokens", 0)
+                        + usage.get("cache_creation_input_tokens", 0)
+                    )
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return None
+
+
+def health_ok() -> bool:
+    """Lightweight health check — GET /api/health with short timeout.
+    Returns True if server responds 2xx, False otherwise.
+    """
+    headers = {}
+    if API_TOKEN:
+        headers["Authorization"] = f"Bearer {API_TOKEN}"
+    try:
+        req = urllib_request.Request(f"{BASE_URL}/api/health", headers=headers)
+        with urllib_request.urlopen(req, timeout=3) as resp:
+            return 200 <= resp.status <= 299
+    except Exception:
+        return False
+
+
+def days_since(date_str: str) -> int:
+    """Return days elapsed since ISO date string, or sys.maxsize on parse error."""
+    try:
+        past = date.fromisoformat(date_str)
+        return (date.today() - past).days
+    except Exception:
+        return sys.maxsize
+
+
+def main() -> None:
+    if any(os.environ.get(v) for v in ("AI_MEMORY_DISABLED", "AI_MEMORY_NO_WRITE", "AI_MEMORY_NO_SESSIONS")):
+        sys.exit(0)
+
+    data = json.loads(sys.stdin.read())
+    session_id = data.get("session_id")
+    prompt = data.get("prompt", "") or ""
+    transcript = data.get("transcript_path")
+    cwd = data.get("cwd", "")
+    project_name = derive_project(cwd)
+
+    if not session_id:
+        sys.exit(0)
+
+    state_dir = Path.home() / ".claude" / "hooks" / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    reminder_file = state_dir / f"{session_id}-reminder.json"
+
+    # Load or initialize state
+    reminder_state: dict = {}
+    if reminder_file.exists():
+        try:
+            reminder_state = json.loads(reminder_file.read_text())
+        except Exception:
+            pass
+
+    prompt_count = reminder_state.get("prompt_count", 0) + 1
+    first_prompt_len = reminder_state.get("first_prompt_len") or len(prompt)
+    last_chunk_tokens = reminder_state.get("last_chunk_tokens", 0)
+
+    context_tokens = get_context_tokens(transcript) or 0
+
+    # Reset after /clear or /compact (tokens dropped below last boundary)
+    if context_tokens < last_chunk_tokens:
+        last_chunk_tokens = (context_tokens // CHUNK_TOKEN_STEP) * CHUNK_TOKEN_STEP
+
+    current_bucket = (context_tokens // CHUNK_TOKEN_STEP) * CHUNK_TOKEN_STEP
+    need_chunk = (current_bucket > last_chunk_tokens) and (prompt_count > 1)
+
+    new_state = {
+        "prompt_count": prompt_count,
+        "first_prompt_len": first_prompt_len,
+        "last_chunk_tokens": current_bucket if need_chunk else last_chunk_tokens,
+        "context_tokens": context_tokens,
+    }
+
+    # Summary reminder on early turns
+    need_summary = (prompt_count == 1) or (
+        prompt_count <= SUMMARY_REMIND_TURNS and first_prompt_len < SHORT_PROMPT_LEN
+    )
+
+    # Project summary reminder: once per N days per project
+    project_remind_file = state_dir / f"project-remind-{project_name}.json" if project_name else None
+    project_remind_state: dict = {}
+    if project_remind_file and project_remind_file.exists():
+        try:
+            project_remind_state = json.loads(project_remind_file.read_text())
+        except Exception:
+            pass
+    need_project_remind = bool(
+        project_name
+        and prompt_count == 1
+        and days_since(project_remind_state.get("last_reminded", "")) >= PROJECT_REMIND_INTERVAL_DAYS
+    )
+
+    # Periodic health check — every N prompts (skip first, session-start covers it)
+    need_health_check = (prompt_count > 1) and (prompt_count % HEALTH_CHECK_INTERVAL == 0)
+    server_down = need_health_check and not health_ok()
+
+    # Persist state
+    reminder_file.write_text(json.dumps(new_state))
+    if need_project_remind and project_remind_file:
+        project_remind_file.write_text(json.dumps({"last_reminded": date.today().isoformat()}))
+
+    # Build output message
+    parts: list[str] = []
+
+    if server_down:
+        parts.append(
+            "⚠ ai-memory server is unreachable — MCP tools and memory-scribe will fail silently. Tell the user."
+        )
+
+    if need_chunk:
+        k = context_tokens // 1000
+        session_part = f', project: "{project_name}"' if project_name else ""
+        parts.append(
+            f'Chunk ~{k}K tokens. Call memory_session with session_id: "{session_id}"'
+            f'{session_part}, chunk_title, title, and summary.'
+        )
+    elif need_summary:
+        session_part = f', project: "{project_name}"' if project_name else ""
+        if prompt_count == 1:
+            parts.append(
+                f'After responding to this first message, call memory_session once with session_id: "{session_id}"'
+                f'{session_part}, title, summary, and tags.'
+                " Summary must describe the session intent, not repeat the user's message verbatim."
+            )
+        else:
+            parts.append(
+                f'Call memory_session with session_id: "{session_id}"'
+                f'{session_part}, title, summary, and tags.'
+            )
+
+    if need_project_remind:
+        parts.append(
+            f'Call memory_project(project="{project_name}", summary="...") '
+            "if the project description has changed or is not yet stored."
+        )
+
+    if parts:
+        print(" ".join(parts))
+
+
+if __name__ == "__main__":
+    main()

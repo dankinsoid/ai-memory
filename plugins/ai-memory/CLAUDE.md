@@ -14,26 +14,9 @@ Example: refactoring Go code → `tags: ["go"]`, debugging Flutter → `tags: ["
 
 You can query memory freely anytime you need any user or project-specific info - it's your external brain.
 
-## When to Save
-
-Pass to `memory-scribe` when you observe: **events** (implementations, bug fixes, reverts, failed approaches), **decisions** (tech choices, trade-offs), **lessons** (pitfalls, surprises, non-obvious constraints), **preferences** (style, workflow, "always/never" rules).
-
-```
-Task(subagent_type="memory-scribe", run_in_background=true,
-     prompt="observation: <what happened>\ncontext: project=<name>, <1 sentence of situation>")
-```
-
-Save **at the moment** — not at session end. One note per observation. Always include project. English only.
-Do NOT call `memory_remember` directly — always delegate to memory-scribe.
-
 ## Failure Handling
 
 If any memory operation fails (memory-scribe, MCP tools, "Memory Unavailable" in hook output) — tell the user in one line, don't retry, continue your task.
-
-## Reinforcing
-
-After completing a task where retrieved facts influenced your work, call `memory_reinforce`.
-Score: -1 (misled) to 1 (essential). Only facts with **direct impact**. Unused or near-zero = skip.
 
 ## Session Metadata
 

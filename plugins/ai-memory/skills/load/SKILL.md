@@ -11,7 +11,7 @@ Parse ARGUMENTS to determine which session to load:
 
 1. **No args** → traverse continuation chain from current session:
    ```bash
-   bb <this-skill-dir>/load-chain.bb <current-session-id> <project-name>
+   python3 <this-skill-dir>/load-chain.py <current-session-id> <project-name>
    ```
    `<this-skill-dir>` = the directory containing this SKILL.md (derive from the path you loaded it from).
    The current session ID is in SessionStart context. Determine the project name from the git repo name. The script picks up prev-session cache files for that project only, creates continuation edges, then traverses the chain.
@@ -25,7 +25,7 @@ Parse ARGUMENTS to determine which session to load:
 
 For continuation chain (no args), run the script — it traverses chain edges and outputs combined context:
 ```bash
-bb <this-skill-dir>/load-chain.bb <current-session-id> <project-name>
+python3 <this-skill-dir>/load-chain.py <current-session-id> <project-name>
 ```
 
 For a specific blob dir, use `memory_read_blob` to read its contents.
@@ -40,7 +40,7 @@ Present the candidates clearly (number, title, summary). Let the user pick by nu
 
 Once the user picks, load that session's blob via:
 ```bash
-bb <this-skill-dir>/load-chain.bb --blob <blob-dir>
+python3 <this-skill-dir>/load-chain.py --blob <blob-dir>
 ```
 
 ## After loading
