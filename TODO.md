@@ -38,8 +38,8 @@ id: <session-id>
 date: 2025-03-11
 project: ai-memory
 title: Redesign local storage
+type: planning
 tags: [architecture, refactoring]
-status: completed
 continues: [[2025-03-10 Fix blob export]]
 continued-by: [[2025-03-12 MCP rewrite]]
 ---
@@ -83,13 +83,40 @@ continued-by: [[2025-03-12 MCP rewrite]]
 
 ### Формат правил
 
-- [ ] Выделить специальный тег `rule` (уже есть) — основной тип хранимых фактов
-- [ ] Подтипы: `critical-rule`, `rule`, `preference`, `convention`
-- [ ] Решить формат хранения:
-  - **Вариант A**: один файл `rules.md` с YAML front-matter блоками (удобно, Obsidian-совместимо)
-  - **Вариант B**: отдельный `.md` файл на каждое правило + тег-папки
-  - **Вариант C**: `rules/` папка с файлами по топику (`rules/clojure.md`, `rules/git.md`)
-  - Вариант C предпочтительнее для ленивой загрузки по топику
+Решено: **дерево папок + YAML front-matter теги** (гибрид).
+
+- [ ] Структура хранилища:
+  ```
+  ~/.claude/ai-memory/
+    rules/
+      _rules.md               # универсальные cross-cutting правила
+      git.md
+      testing.md
+      clojure/
+        _rules.md             # все правила для Clojure
+        testing.md            # clojure + testing
+        style.md
+      swift/
+        _rules.md
+    projects/
+      ai-memory/
+        _rules.md             # проектно-специфичные правила
+        architecture.md
+        sessions/
+          2025-03-11 Redesign storage.md
+  ```
+- [ ] Теги **частично выводятся из пути** автоматически (`rules/clojure/testing.md` → `[clojure, testing]`)
+- [ ] Явные теги в front-matter:
+  ```yaml
+  ---
+  tags: [performance]   # дополнительные теги, не выводимые из пути
+  updated: 2025-03-11
+  ---
+  ```
+- [ ] Тег правил: `rule`
+- [ ] **Без весов/приоритетов** — теги и их количество сами сигнализируют о важности
+- [ ] Поиск: Python парсит front-matter + путь всех `.md` файлов (~100ms для 200 файлов)
+- [ ] SQLite как опциональный индекс если масштаб потребует (в stdlib Python, нулевые зависимости)
 
 ---
 
@@ -99,7 +126,7 @@ continued-by: [[2025-03-12 MCP rewrite]]
 
 ### Механизм
 
-- [ ] `SessionStart` hook: загружать только `critical-rule` и теги текущего проекта (уже есть частично)
+- [ ] `SessionStart` hook: почти как сейчас
 - [ ] `UserPromptSubmit` hook: анализировать промпт, определять топики, подгружать правила
   - Без AI: по ключевым словам в промпте → поиск по тегам файлов правил
   - С 4o-mini (опционально): классифицировать топик промпта, загрузить релевантные правила
@@ -107,21 +134,7 @@ continued-by: [[2025-03-12 MCP rewrite]]
   - Текущий паттерн: `memory_get_facts({tags: ["<topic>"], any_tags: ["rule", "preference"]})` — оставить
   - Добавить: агент должен делать это ПЕРЕД началом задачи по новому топику
 
-### Файловая структура для ленивой загрузки
-
-```
-~/.claude/ai-memory/
-  rules/
-    clojure.md        # правила для Clojure проектов
-    git.md            # git workflow
-    testing.md        # тестирование
-    universal.md      # универсальные правила
-  sessions/
-    2025-03-11 Redesign storage.md
-    2025-03-10 Fix blob export.md
-```
-
-- [ ] Индексный файл или метаданные для быстрого поиска без чтения всех файлов
+- [ ] Ленивая загрузка = чтение нужного файла/папки по топику (тривиально при файловой структуре)
 
 ---
 
@@ -166,12 +179,9 @@ continued-by: [[2025-03-12 MCP rewrite]]
 
 - [ ] Обновить `hooks.json`: заменить `bb` на `python3`, пересмотреть триггеры
   - `Stop`: запускать авто-сохранение сессии (с 4o-mini) или напоминание сделать `/save`
-  - `UserPromptSubmit`: убрать `memory-nudge` (или ограничить только сессиями)
-  - `SessionStart`: загружать сессии + только critical-rules
-- [ ] Обновить `CLAUDE.md` плагина:
-  - Убрать "when to save facts" автоматику
-  - Добавить "lazy rule loading" инструкции
-  - Упростить: основной агент не занимается памятью сам, делегирует хукам
+  - `UserPromptSubmit`: убрать `memory-nudge` (или ограничить только сессиями), может догрузка правил если сможем составить четкий критерий их релевантности
+  - `SessionStart`: может немного оптимизировать
+- [ ] Обновить `CLAUDE.md` плагина
 - [ ] `/remember` скилл — явное сохранение правила/факта пользователем
 - [ ] `/load` скилл — обновить для работы с `.md` файлами
 - [ ] `/save` скилл — обновить для записи Obsidian-совместимого `.md`
@@ -192,9 +202,16 @@ continued-by: [[2025-03-12 MCP rewrite]]
 
 ## Открытые вопросы
 
-- [ ] Формат правил: один файл vs файлы по топику (см. Блок 3)
-- [ ] Как индексировать файлы для быстрого поиска без векторов? (YAML front-matter + grep?)
-- [ ] Нужен ли MCP-сервер вообще или babashka скриптов достаточно?
-- [ ] Ссылки сессий: Obsidian wikilinks `[[title]]` vs UUID vs оба?
-- [ ] Stop hook + 4o-mini: что передавать в контекст? Только diff? Полный transcript?
+Закрытые:
+- [x] **Формат правил:** дерево папок + YAML front-matter теги; теги выводятся из пути автоматически
+- [x] **Индексация:** Python парсит front-matter + путь (~100ms/200 файлов); SQLite опционально
+- [x] **Ссылки сессий:** Obsidian wikilinks `[[title]]` через `continues:` / `continued-by:`
+- [x] **Веса/приоритеты:** убраны — теги и их количество сигнализируют о важности
+- [x] **Тег характера сессии:** `type: chat | planning | implementation | debugging | exploration`
+  - SessionStart не грузит `chat`; `planning`/`implementation` в приоритете
+  - 4o-mini назначает тип автоматически при сохранении
+
+Открытые:
+- [ ] Нужен ли MCP-сервер вообще или Python скриптов достаточно?
+- [ ] Stop hook + 4o-mini: что передавать? (iterative накопление summary предпочтительнее полного transcript)
 - [ ] Clojure-бэкенд: сохранить как legacy/advanced или полностью убрать?
