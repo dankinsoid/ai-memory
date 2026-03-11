@@ -76,6 +76,21 @@ def get_base_dir() -> Path:
     return p
 
 
+def get_sessions_base_dir() -> Path:
+    """Return the root under which sessions/ and projects/*/sessions/ live.
+
+    When AI_MEMORY_SESSIONS_DIR is set (e.g. an Obsidian vault), sessions are
+    stored there instead of inside AI_MEMORY_DIR.  Facts and rules always stay
+    in AI_MEMORY_DIR regardless.
+    """
+    override = os.environ.get("AI_MEMORY_SESSIONS_DIR")
+    if override:
+        p = Path(override)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    return get_base_dir()
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -307,15 +322,19 @@ def search_sessions(
         id, continues, summary, messages_path, content
     """
     base = get_base_dir()
+    sessions_base = get_sessions_base_dir()
     since_d = _parse_date(since) if since else None
     until_d = _parse_date(until) if until else None
     text_lower = text.lower() if text else None
 
     if project:
         # Strict filter: project= means only that project's sessions dir.
-        search_dirs = [base / "projects" / project / "sessions"]
+        search_dirs = [sessions_base / "projects" / project / "sessions"]
     else:
-        search_dirs = [base / "sessions"]
+        search_dirs = [sessions_base / "sessions"]
+
+    # _read_session_file uses base for relative path — use sessions_base when overridden
+    path_root = sessions_base
 
     candidates: list[dict] = []
     for d in search_dirs:
@@ -325,7 +344,7 @@ def search_sessions(
             # Skip messages files — only read summary files
             if _is_messages_file(f.name):
                 continue
-            rec = _read_session_file(f, base)
+            rec = _read_session_file(f, path_root)
             if rec is None:
                 continue
 
@@ -373,6 +392,36 @@ def _find_session_file(sessions_dir: Path, session_id: str) -> Path | None:
     return None
 
 
+def _find_latest_session_title(sessions_dir: Path) -> str | None:
+    """Return the title of the most recently modified session in sessions_dir.
+
+    Used to auto-populate continues: when creating a new session file.
+    Only looks at the immediate directory (no recursion).
+
+    Args:
+        sessions_dir: directory to scan for session summary .md files
+
+    Returns:
+        Title string from front-matter, or None if no sessions exist yet.
+    """
+    if not sessions_dir.exists():
+        return None
+    latest_mtime = -1.0
+    latest_title: str | None = None
+    for f in sessions_dir.glob("*.md"):
+        if _is_messages_file(f.name):
+            continue
+        mtime = _file_mtime(f)
+        if mtime > latest_mtime:
+            content = _read_content(f)
+            if content:
+                fm = parse_front_matter(content)
+                if fm.get("id"):  # skip non-session files
+                    latest_mtime = mtime
+                    latest_title = fm.get("title") or f.stem
+    return latest_title
+
+
 def upsert_session(
     session_id: str,
     project: str | None,
@@ -387,12 +436,17 @@ def upsert_session(
       {date} {title}.md          — summary (front-matter + ## Summary)
       {date} {title} messages.md — compact content (written when content given)
 
-    The summary file contains:
-      messages: [[{date} {title} messages]]  (when content provided)
-      continues: — left empty; caller or /save skill fills it if known
+    When creating a new session, auto-sets ``continues: [[prev-title]]`` to
+    the most recent existing session in the same directory, building the chain
+    without extra caller effort.
 
     Matches existing session by id field in summary front-matter; reuses
-    the existing filename if found (preserves original date in name).
+    the existing filename if found (preserves original date in name), and
+    preserves the existing ``continues:`` value on updates.
+
+    Sessions are written under AI_MEMORY_SESSIONS_DIR (or AI_MEMORY_DIR as
+    fallback) so users can point them at an Obsidian vault independently of
+    where facts/rules live.
 
     Args:
         session_id: unique session identifier (UUID or similar)
@@ -403,26 +457,34 @@ def upsert_session(
         content: optional compact content for the messages file
 
     Returns:
-        Path to the session summary file, relative to base_dir.
+        Path to the session summary file, relative to AI_MEMORY_DIR base.
     """
     base = get_base_dir()
+    sessions_base = get_sessions_base_dir()
     today = date.today().isoformat()
 
     if project:
-        sessions_dir = base / "projects" / project / "sessions"
+        sessions_dir = sessions_base / "projects" / project / "sessions"
     else:
-        sessions_dir = base / "sessions"
+        sessions_dir = sessions_base / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
     existing = _find_session_file(sessions_dir, session_id)
+    is_new = existing is None
+
     if existing:
         # Reuse existing filename (keeps original creation date in name)
         summary_path = existing
         stem = existing.stem
+        # Preserve existing continues: so we don't break the chain on updates
+        existing_fm = parse_front_matter(_read_content(existing) or "")
+        continues_value: str | None = existing_fm.get("continues") or None
     else:
         safe = _safe_title(title)
         stem = f"{today} {safe}"
         summary_path = sessions_dir / f"{stem}.md"
+        # Auto-link to the most recent session in the same dir
+        continues_value = _find_latest_session_title(sessions_dir)
 
     tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
 
@@ -433,6 +495,8 @@ def upsert_session(
     if project:
         fm_lines.append(f"project: {project}")
     fm_lines += [f"title: {title}", f"tags: {tags_str}"]
+    if continues_value:
+        fm_lines.append(f"continues: [[{continues_value}]]")
     if content:
         fm_lines.append(f"messages: {messages_link}")
     fm_lines += ["---", ""]
@@ -445,7 +509,14 @@ def upsert_session(
         messages_path = sessions_dir / f"{messages_stem}.md"
         messages_path.write_text(content, encoding="utf-8")
 
-    return str(summary_path.relative_to(base))
+    # Return path relative to base_dir (facts root) when sessions_base == base,
+    # or relative to sessions_base when AI_MEMORY_SESSIONS_DIR is overridden so
+    # callers can still locate the file.
+    try:
+        return str(summary_path.relative_to(base))
+    except ValueError:
+        # sessions_base is a different root — return relative to sessions_base
+        return str(summary_path.relative_to(sessions_base))
 
 
 # ---------------------------------------------------------------------------

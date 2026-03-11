@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 # Allow importing siblings regardless of cwd
@@ -454,6 +455,35 @@ class TestUpsertSession(StorageTestBase):
         messages_path = (self.base / path).parent / f"{stem} messages.md"
         self.assertTrue(messages_path.exists())
         self.assertIn("detailed content here", messages_path.read_text())
+
+    def test_continues_set_on_new_session(self):
+        """Second new session in same dir auto-sets continues: to first session title."""
+        storage.upsert_session("id-first", None, "first session", "s1", [])
+        path2 = storage.upsert_session("id-second", None, "second session", "s2", [])
+        content = (self.base / path2).read_text()
+        self.assertIn("continues:", content)
+        self.assertIn("first session", content)
+
+    def test_continues_not_set_when_updating(self):
+        """Updating an existing session must not overwrite its continues: field."""
+        # Create first session so auto-continues would kick in
+        storage.upsert_session("id-prev", None, "prev session", "s0", [])
+        # Create second session (will get continues: set automatically)
+        storage.upsert_session("id-target", None, "target session", "s1", [])
+        # Update second session again — continues: must not change
+        path = storage.upsert_session("id-target", None, "target session", "updated", [])
+        content = (self.base / path).read_text()
+        # continues: should still point to first session, not be re-written
+        self.assertIn("prev session", content)
+
+    def test_sessions_dir_env_override(self):
+        """AI_MEMORY_SESSIONS_DIR routes sessions to a different root directory."""
+        with tempfile.TemporaryDirectory() as sessions_root:
+            with unittest.mock.patch.dict(os.environ, {"AI_MEMORY_SESSIONS_DIR": sessions_root}):
+                path = storage.upsert_session("env-id", "myproj", "env session", "s", [])
+                self.assertTrue(path.startswith("projects/myproj/sessions/"))
+                full_path = Path(sessions_root) / path
+                self.assertTrue(full_path.exists(), f"Expected session at {full_path}")
 
 
 class TestRemember(StorageTestBase):

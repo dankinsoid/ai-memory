@@ -50,11 +50,11 @@ def _find_session_by_id(session_id: str, project: str | None) -> Path | None:
     Returns:
         Path to summary.md, or None if not found.
     """
-    base = storage.get_base_dir()
+    sessions_base = storage.get_sessions_base_dir()
     search_dirs: list[Path] = []
     if project:
-        search_dirs.append(base / "projects" / project / "sessions")
-    search_dirs.append(base / "sessions")
+        search_dirs.append(sessions_base / "projects" / project / "sessions")
+    search_dirs.append(sessions_base / "sessions")
 
     seen: set[Path] = set()
     for d in search_dirs:
@@ -154,6 +154,35 @@ def _traverse_chain(start: Path) -> list[Path]:
 
 
 # ---------------------------------------------------------------------------
+# Prev-session cache helpers
+# ---------------------------------------------------------------------------
+
+
+def _read_prev_session_cache(project: str | None) -> str | None:
+    """Read the prev-session cache written by session-end.py hook.
+
+    The hook writes ~/.claude/hooks/state/prev-session-{project}.json on
+    every clear event.  We use it to bootstrap the chain for new sessions
+    that haven't been saved yet (so _find_session_by_id returns None).
+
+    Args:
+        project: project name; if None, no cache file to read.
+
+    Returns:
+        Previous session ID string, or None if not found/unreadable.
+    """
+    if not project:
+        return None
+    cache_path = Path.home() / ".claude" / "hooks" / "state" / f"prev-session-{project}.json"
+    try:
+        import json
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        return data.get("session_id")
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -170,8 +199,13 @@ def main() -> None:
         if len(args) < 2:
             print("Usage: python3 load-chain.py --file <rel-path>")
             sys.exit(1)
+        # Try sessions_base first (handles AI_MEMORY_SESSIONS_DIR override),
+        # then fall back to base_dir for backwards compatibility.
+        sessions_base = storage.get_sessions_base_dir()
         base = storage.get_base_dir()
-        summary_path = base / args[1]
+        summary_path = sessions_base / args[1]
+        if not summary_path.exists() and sessions_base != base:
+            summary_path = base / args[1]
         if not summary_path.exists():
             print(f"Session file not found: {args[1]}")
             sys.exit(1)
@@ -211,26 +245,56 @@ def main() -> None:
         print("---")
 
     else:
-        # No session found by id — show recent candidates for user to pick
-        sessions = storage.search_sessions(project=project, limit=8)
-        candidates = [s for s in sessions if s.get("id", "")[:8] != sid_prefix]
+        # Current session not in storage yet (not saved) — try prev-session cache
+        # written by session-end.py hook so we can still traverse the chain.
+        prev_id = _read_prev_session_cache(project)
+        if prev_id and prev_id[:8] != sid_prefix:
+            start = _find_session_by_id(prev_id, project)
 
-        if candidates:
-            print("# CHOOSE_SESSION")
+        if start:
+            chain = _traverse_chain(start)
+            latest = chain[0]
+            older = chain[1:]
+
+            print("# Session Chain Recovery")
             print()
-            print("No session found for current ID. Recent sessions:")
+            print(f"{len(chain)} previous session(s) in chain.")
+
+            for prev in older:
+                title = _get_title(prev)
+                summary = _get_summary_line(prev)
+                print()
+                print("---")
+                print(f"## {title} — {summary}")
+
             print()
-            for i, s in enumerate(candidates):
-                title = s.get("title", "(untitled)")
-                summary = s.get("summary", "")
-                path = s.get("path", "")
-                line = f"{i + 1}. **{title}**"
-                if summary:
-                    line += f" — {summary}"
-                line += f" `[file: {path}]`"
-                print(line)
+            print("---")
+            print(f"## {_get_title(latest)}")
+            print()
+            _print_session_content(latest)
+            print()
+            print("---")
         else:
-            print("No previous session found.")
+            # No chain found — show recent candidates for user to pick
+            sessions = storage.search_sessions(project=project, limit=8)
+            candidates = [s for s in sessions if s.get("id", "")[:8] != sid_prefix]
+
+            if candidates:
+                print("# CHOOSE_SESSION")
+                print()
+                print("No continuation chain found. Recent sessions:")
+                print()
+                for i, s in enumerate(candidates):
+                    title = s.get("title", "(untitled)")
+                    summary = s.get("summary", "")
+                    path = s.get("path", "")
+                    line = f"{i + 1}. **{title}**"
+                    if summary:
+                        line += f" — {summary}"
+                    line += f" `[file: {path}]`"
+                    print(line)
+            else:
+                print("No previous session found.")
 
 
 if __name__ == "__main__":
