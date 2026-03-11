@@ -2,17 +2,21 @@
 
 Read before unfamiliar tasks; write when you learn something worth keeping.
 
-## Before Starting a Task
+## When to Query Memory
 
-Query memory for rules relevant to the task topic:
-```json
-{"tags": ["<task-topic>"], "any_tags": ["rule", "conventions"]}
-```
-Example: refactoring Go code → `tags: ["go"]`, debugging Flutter → `tags: ["debugging", "flutter-cljd"]`.
+**Always** call `memory_search` before proceeding when you:
+- Start work on a new topic or technology
+- Are about to make any decision not explicitly stated — approach, naming, style, structure, tooling
+- Face any design or architectural choice
+- Feel uncertain about conventions or best practices
+
+Do not fill in gaps with defaults or assumptions — check memory first.
+
+Search by topic: `memory_search(any_tags=["<topic>", "<language>"])`
 
 ## Free Retrieval
 
-You can query memory freely anytime you need any user or project-specific info - it's your external brain.
+You can query memory freely anytime you need user or project-specific info — it's your external brain.
 
 ## Failure Handling
 

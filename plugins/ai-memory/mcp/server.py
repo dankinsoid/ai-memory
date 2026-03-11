@@ -19,6 +19,7 @@ Usage (stdio MCP):
 """
 
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -217,21 +218,89 @@ def _handle_tools_list(_params: dict) -> dict:
     return {"tools": TOOLS}
 
 
+def _first_content_line(content: str) -> str:
+    """Return the first non-empty body line of a .md file, skipping front-matter.
+
+    Front-matter is delimited by leading/trailing '---' lines.
+    Returns empty string if no body content found.
+    """
+    in_fm = False
+    for i, line in enumerate(content.splitlines()):
+        if i == 0 and line.strip() == "---":
+            in_fm = True
+            continue
+        if in_fm:
+            if line.strip() == "---":
+                in_fm = False
+            continue
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
 def _handle_tools_call(params: dict) -> dict:
     name = params.get("name")
     args: dict = params.get("arguments") or {}
 
     try:
         if name == "memory_session":
+            session_tags: list[str] = args.get("tags") or []
             path = storage.upsert_session(
                 session_id=args["session_id"],
                 project=args.get("project"),
                 title=args["title"],
                 summary=args["summary"],
-                tags=args.get("tags") or [],
+                tags=session_tags,
                 content=args.get("content"),
             )
-            return _text(f"Session saved → {path}")
+            # Lazy-load rules relevant to the session's topic tags.
+            # Scope/meta tags are already in context from SessionStart — skip them.
+            _SCOPE_TAGS = {"universal", "session", "rule", "preference"}
+            topic_tags = [
+                t for t in session_tags
+                if t not in _SCOPE_TAGS and not t.startswith("project/")
+            ]
+            rules_text = ""
+            if topic_tags:
+                # Load dedup state — tracks rule paths already returned this session.
+                # Stored alongside session-reminder.json in ~/.claude/hooks/state/.
+                state_dir = Path.home() / ".claude" / "hooks" / "state"
+                state_dir.mkdir(parents=True, exist_ok=True)
+                dedup_file = state_dir / f"{args['session_id']}-loaded-rules.json"
+                already_loaded: set[str] = set()
+                if dedup_file.exists():
+                    try:
+                        already_loaded = set(json.loads(dedup_file.read_text()))
+                    except Exception:
+                        pass
+
+                candidates = storage.search_facts(
+                    any_tags=topic_tags,
+                    exclude_tags=["session"],
+                    sort_by="date",
+                    limit=10,
+                )
+                # Only surface rules/preferences; skip already-shown ones
+                rules = [
+                    f for f in candidates
+                    if ("rule" in f.get("tags", []) or "preference" in f.get("tags", []))
+                    and f.get("path", "") not in already_loaded
+                ][:5]
+                if rules:
+                    lines = []
+                    for r in rules:
+                        tag_str = ", ".join(r.get("tags", []))
+                        content_line = _first_content_line(r.get("content") or "")
+                        lines.append(f"- [{tag_str}] {content_line}")
+                    rules_text = "\n\nRelevant rules for current session topics:\n" + "\n".join(lines)
+                    # Persist newly shown rule paths
+                    newly_loaded = already_loaded | {r["path"] for r in rules if r.get("path")}
+                    try:
+                        dedup_file.write_text(json.dumps(list(newly_loaded)))
+                    except Exception:
+                        pass  # dedup is best-effort; don't fail the save
+            return _text(f"Session saved → {path}{rules_text}")
 
         if name == "memory_remember":
             path = storage.remember(

@@ -66,11 +66,20 @@ def main() -> None:
             f"reason={hook_reason!r} | session={session_id} | cwd={cwd}\n"
         )
 
-    # Matcher should filter, but double-check
-    if hook_reason != "clear":
+    if not session_id:
         sys.exit(0)
 
-    if not session_id:
+    # Clean up loaded-rules dedup cache regardless of reason — keyed by session_id
+    # so a new session always starts fresh, but we clean up promptly to avoid accumulation.
+    dedup_file = state_dir / f"{session_id}-loaded-rules.json"
+    if dedup_file.exists():
+        try:
+            dedup_file.unlink()
+        except Exception:
+            pass
+
+    # Matcher should filter, but double-check: prev-session cache only on /clear
+    if hook_reason != "clear":
         sys.exit(0)
 
     project = derive_project(cwd)

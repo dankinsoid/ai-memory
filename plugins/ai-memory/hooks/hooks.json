@@ -38,7 +38,7 @@
     ],
     "SessionEnd": [
       {
-        "matcher": "clear",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
