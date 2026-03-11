@@ -1,6 +1,6 @@
 ---
 name: save
-description: Save a detailed session summary to memory before clearing context. Generates a comprehensive compact summary, stores it via memory_session MCP tool. Use before /clear or /compact, at the end of a long session, or when switching tasks. The "write" side of session continuity — /load is the "read" side.
+description: Save a detailed session summary to memory. The "write" side of session continuity — /load is the "read" side.
 ---
 
 # Save Session
@@ -40,33 +40,7 @@ Include code snippets, exact error messages, specific function names.>
 - **Include dead ends** — rejected approaches and *why* they were rejected, so the next agent doesn't retry them.
 - **User requirements** — capture preferences, corrections, and constraints specific to this task. Skip section if there were none.
 
-## 2. Call `memory_session`
-
-```
-memory_session({
-  session_id: "<session-id from SessionStart context>",
-  project: "<project name, e.g. ai-memory>",
-  title: "<2-5 word session name>",
-  summary: "<1-2 sentences: what was done and key decisions>",
-  tags: ["<topic1>", "<topic2>"],
-  content: "<compact content from step 1>"
-})
-```
-
-`title` — 2-5 words, short session name, always English:
-```
-updated load/save skills
-```
-
-`summary` — 1-2 sentences capturing the **essence**: what problem, what approach, what decisions. No file names, function names, or counts — those go in content.
-```
-Reworked /load and /save skills to use new file-based storage. Removed HTTP API dependency from hooks.
-```
-Bad: `Updated SKILL.md, save.bb, session-start.bb; removed 3 functions, added memory_session call` (implementation noise, not essence)
-
-`tags` — topic tags describing what the session was about, e.g. `["architecture", "refactoring"]`.
-
-`content` — the full compact from step 1. This is what `/load` will display for session recovery.
+## 2. Call `memory_session` mcp tool
 
 ## 3. Confirm to user
 
