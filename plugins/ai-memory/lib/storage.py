@@ -7,11 +7,15 @@ All facts/rules are stored as individual .md files under AI_MEMORY_DIR
 (default: ~/.claude/ai-memory/).  Sessions are stored as flat .md files
 inside sessions/ directories, using full human-readable names:
 
-  sessions/2026-03-11 Block 2 skills update.md          # summary (Obsidian-friendly)
-  sessions/2026-03-11 Block 2 skills update messages.md  # compact content for /load
+  sessions/2026-03-11 Block 2 skills update.md          # summary + compact (Obsidian-friendly)
+  sessions/2026-03-11 Block 2 skills update messages.md  # full conversation transcript
 
-The summary file contains Obsidian wiki-links:
-  messages: [[2026-03-11 Block 2 skills update messages]]
+The summary file contains:
+  ## Summary — 1-2 sentence arc
+  ## Compact — detailed /save notes (if agent ran /save)
+
+The summary file may contain Obsidian wiki-links:
+  messages: [[2026-03-11 Block 2 skills update messages]]  (added by Stop hook)
   continues: [[2026-03-10 Block 1 Python MCP server]]
 
 No database or server required.
@@ -20,7 +24,7 @@ Public API:
   get_base_dir() -> Path
   search_facts(tags, any_tags, exclude_tags, text, since, until, sort_by, limit, offset) -> list[dict]
   search_sessions(project, text, since, until, sort_by, limit, offset) -> list[dict]
-  upsert_session(session_id, project, title, summary, tags, content) -> str
+  upsert_session(session_id, project, title, summary, tags, compact) -> str
   remember(content_text, tags, type_, filename) -> str
   explore_tags() -> dict
   resolve_tags(query_tags) -> list[str]
@@ -114,12 +118,14 @@ def _read_content(path: Path) -> str | None:
 
 
 def _safe_title(text: str) -> str:
-    """Strip filesystem-invalid characters from a title string.
+    """Normalize a title string for use in a filename.
 
-    Keeps spaces and most punctuation; removes chars that are invalid
-    on macOS/Windows: / \\ : * ? \" < > |
+    Removes chars invalid on macOS/Windows (/ \\ : * ? " < > |),
+    removes dots (used as separator in .{session_id}.md naming),
+    collapses runs of whitespace to a single space, and strips ends.
     """
-    return re.sub(r'[/\\:*?"<>|]', "", text).strip()
+    cleaned = re.sub(r'[/\\:*?"<>|.]', "", text)
+    return re.sub(r'\s+', " ", cleaned).strip()
 
 
 def _extract_summary_text(content: str) -> str | None:
@@ -251,8 +257,8 @@ def search_facts(
 
 
 def _is_messages_file(filename: str) -> bool:
-    """True if this is a session messages file (ends with ' messages.md')."""
-    return filename.endswith(" messages.md")
+    """True if this is a session messages file (ends with '.messages.md')."""
+    return filename.endswith(".messages.md")
 
 
 def _read_session_file(summary_path: Path, base: Path) -> dict | None:
@@ -274,7 +280,7 @@ def _read_session_file(summary_path: Path, base: Path) -> dict | None:
     if not fm.get("id"):
         return None
 
-    messages_stem = summary_path.stem + " messages"
+    messages_stem = summary_path.stem + ".messages"
     messages_path = summary_path.parent / f"{messages_stem}.md"
 
     return {
@@ -380,9 +386,19 @@ def search_sessions(
 
 
 def _find_session_file(sessions_dir: Path, session_id: str) -> Path | None:
-    """Locate an existing session summary file by id in front-matter."""
+    """Locate an existing session summary file by session_id suffix in filename.
+
+    New format: {date} {title}.{session_id[:8]}.md — O(1) lookup via glob suffix.
+    Falls back to front-matter scan for legacy files without the id suffix.
+    """
     if not sessions_dir.exists():
         return None
+    sid8 = session_id[:8]
+    # Fast path: new-format files have the id embedded in the filename
+    for f in sessions_dir.glob(f"*.{sid8}.md"):
+        if not _is_messages_file(f.name):
+            return f
+    # Slow path: legacy files without id suffix — scan front-matter
     for f in sessions_dir.glob("*.md"):
         if _is_messages_file(f.name):
             continue
@@ -393,21 +409,22 @@ def _find_session_file(sessions_dir: Path, session_id: str) -> Path | None:
 
 
 def _find_latest_session_title(sessions_dir: Path) -> str | None:
-    """Return the title of the most recently modified session in sessions_dir.
+    """Return the stem of the most recently modified session file in sessions_dir.
 
-    Used to auto-populate continues: when creating a new session file.
+    Used to auto-populate continues: [[stem]] when creating a new session file.
+    Returns the filename stem (without .md) so the wiki-link resolves by filename.
     Only looks at the immediate directory (no recursion).
 
     Args:
         sessions_dir: directory to scan for session summary .md files
 
     Returns:
-        Title string from front-matter, or None if no sessions exist yet.
+        Stem of the most recent session file (used as wiki-link target), or None.
     """
     if not sessions_dir.exists():
         return None
     latest_mtime = -1.0
-    latest_title: str | None = None
+    latest_stem: str | None = None
     for f in sessions_dir.glob("*.md"):
         if _is_messages_file(f.name):
             continue
@@ -418,8 +435,8 @@ def _find_latest_session_title(sessions_dir: Path) -> str | None:
                 fm = parse_front_matter(content)
                 if fm.get("id"):  # skip non-session files
                     latest_mtime = mtime
-                    latest_title = fm.get("title") or f.stem
-    return latest_title
+                    latest_stem = f.stem
+    return latest_stem
 
 
 def upsert_session(
@@ -428,21 +445,20 @@ def upsert_session(
     title: str,
     summary: str,
     tags: list[str],
-    content: str | None = None,
+    compact: str | None = None,
 ) -> str:
-    """Create or update a session .md file pair.
+    """Create or update a session summary .md file.
 
     File naming:
-      {date} {title}.md          — summary (front-matter + ## Summary)
-      {date} {title} messages.md — compact content (written when content given)
+      {date} {title}.md          — summary file: front-matter + ## Summary [+ ## Compact]
+      {date} {title} messages.md — full conversation transcript (written by Stop hook)
 
     When creating a new session, auto-sets ``continues: [[prev-title]]`` to
-    the most recent existing session in the same directory, building the chain
-    without extra caller effort.
+    the most recent existing session in the same directory.
 
     Matches existing session by id field in summary front-matter; reuses
     the existing filename if found (preserves original date in name), and
-    preserves the existing ``continues:`` value on updates.
+    preserves the existing ``continues:`` and ``messages:`` values on updates.
 
     Sessions are written under AI_MEMORY_SESSIONS_DIR (or AI_MEMORY_DIR as
     fallback) so users can point them at an Obsidian vault independently of
@@ -454,7 +470,7 @@ def upsert_session(
         title: short session title, 2-5 words
         summary: 1-2 sentence summary for quick reading
         tags: topic tags (path-derived tags are added automatically)
-        content: optional compact content for the messages file
+        compact: optional detailed notes from /save (written as ## Compact section)
 
     Returns:
         Path to the session summary file, relative to AI_MEMORY_DIR base.
@@ -481,15 +497,19 @@ def upsert_session(
         continues_value: str | None = existing_fm.get("continues") or None
     else:
         safe = _safe_title(title)
-        stem = f"{today} {safe}"
+        stem = f"{today} {safe}.{session_id[:8]}"
         summary_path = sessions_dir / f"{stem}.md"
         # Auto-link to the most recent session in the same dir
         continues_value = _find_latest_session_title(sessions_dir)
 
     tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
 
-    messages_stem = f"{stem} messages"
-    messages_link = f"[[{messages_stem}]]"
+    messages_stem = f"{stem}.messages"
+
+    # Preserve existing messages: link — Stop hook manages it independently
+    existing_messages_link: str | None = None
+    if existing:
+        existing_messages_link = (parse_front_matter(_read_content(existing) or "")).get("messages") or None
 
     fm_lines = ["---", f"id: {session_id}", f"date: {today}"]
     if project:
@@ -497,17 +517,19 @@ def upsert_session(
     fm_lines += [f"title: {title}", f"tags: {tags_str}"]
     if continues_value:
         fm_lines.append(f"continues: [[{continues_value}]]")
-    if content:
-        fm_lines.append(f"messages: {messages_link}")
+    if existing_messages_link:
+        fm_lines.append(f"messages: {existing_messages_link}")
+    elif (sessions_dir / f"{messages_stem}.md").exists():
+        # messages.md was already written by Stop hook — keep the link
+        fm_lines.append(f"messages: [[{messages_stem}]]")
     fm_lines += ["---", ""]
 
     summary_body = ["## Summary", "", summary, ""]
+    # Compact (detailed /save notes) lives in the summary file, not a separate messages file
+    if compact:
+        summary_body += ["## Compact", "", compact, ""]
 
     summary_path.write_text("\n".join(fm_lines + summary_body), encoding="utf-8")
-
-    if content:
-        messages_path = sessions_dir / f"{messages_stem}.md"
-        messages_path.write_text(content, encoding="utf-8")
 
     # Return path relative to base_dir (facts root) when sessions_base == base,
     # or relative to sessions_base when AI_MEMORY_SESSIONS_DIR is overridden so

@@ -72,7 +72,7 @@ TOOLS = [
                 },
                 "content": {
                     "type": "string",
-                    "description": "Full compact content for /load recovery (written to a separate messages file)",
+                    "description": "Detailed compact notes for /load recovery (written as ## Compact section in the summary file)",
                 },
             },
             "required": ["session_id", "title", "summary"],
@@ -251,7 +251,7 @@ def _handle_tools_call(params: dict) -> dict:
                 title=args["title"],
                 summary=args["summary"],
                 tags=session_tags,
-                content=args.get("content"),
+                compact=args.get("content"),
             )
             # Lazy-load rules relevant to the session's topic tags.
             # Scope/meta tags are already in context from SessionStart — skip them.

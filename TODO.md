@@ -248,4 +248,6 @@ plugins/ai-memory/
 Открытые:
 - [ ] Stop hook + 4o-mini: что передавать в качестве контекста?
 - [ ] SQLite индекс: когда включать (>500 файлов? >1000?)
+- [ ] Индекс сессий `sessions/.index.json` (session_id → filename) — O(1) lookup вместо скана front-matter всех файлов
+- [ ] Индекс тегов `tags/.index.json` (tag → [file paths]) — O(1) lookup вместо сканирования всех .md
 - [ ] Clojure-бэкенд: архивировать или удалить из репо?

@@ -93,8 +93,8 @@ def _find_session_by_wikilink(ref: str, sessions_dir: Path) -> Path | None:
 
 
 def _read_messages(summary_path: Path) -> str | None:
-    """Read the paired messages.md file for a session summary, or None."""
-    messages_path = summary_path.parent / f"{summary_path.stem} messages.md"
+    """Read the paired .messages.md file for a session summary, or None."""
+    messages_path = summary_path.parent / f"{summary_path.stem}.messages.md"
     return storage._read_content(messages_path)
 
 
@@ -111,13 +111,23 @@ def _get_summary_line(summary_path: Path) -> str:
 
 
 def _print_session_content(summary_path: Path) -> None:
-    """Print session content: messages.md if available, otherwise summary.md."""
-    messages = _read_messages(summary_path)
-    if messages:
-        print(messages)
-    else:
-        content = storage._read_content(summary_path) or ""
+    """Print session content for /load recovery.
+
+    Priority:
+    1. Summary file with ## Compact section (agent ran /save — most useful)
+    2. Full conversation transcript from messages.md (auto-saved by Stop hook)
+    3. Summary file alone (short summary, last resort)
+    """
+    content = storage._read_content(summary_path) or ""
+    if "## Compact" in content:
+        # Compact notes written by /save — best recovery source
         print(content)
+    else:
+        messages = _read_messages(summary_path)
+        if messages:
+            print(messages)
+        else:
+            print(content)
 
 
 def _traverse_chain(start: Path) -> list[Path]:

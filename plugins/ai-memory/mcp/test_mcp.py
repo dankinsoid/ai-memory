@@ -436,24 +436,24 @@ class TestUpsertSession(StorageTestBase):
         path2 = storage.upsert_session("id-2", None, "session two", "s", [])
         self.assertNotEqual(path1, path2)
 
-    def test_content_written_to_messages_file(self):
-        """Content is written to a separate messages file, not the summary file."""
+    def test_compact_written_to_summary_file(self):
+        """Compact notes are written as ## Compact section in the summary file, not a separate file."""
         path = storage.upsert_session(
-            session_id="with-content",
+            session_id="with-compact",
             project=None,
             title="full session",
             summary="summary text",
             tags=[],
-            content="detailed content here",
+            compact="detailed compact notes here",
         )
         summary_text = (self.base / path).read_text()
-        # Summary file links to messages file
-        self.assertIn("messages:", summary_text)
-        # Messages file contains the actual content
+        # Compact is embedded in summary file
+        self.assertIn("## Compact", summary_text)
+        self.assertIn("detailed compact notes here", summary_text)
+        # No separate messages file created by upsert_session
         stem = (self.base / path).stem
-        messages_path = (self.base / path).parent / f"{stem} messages.md"
-        self.assertTrue(messages_path.exists())
-        self.assertIn("detailed content here", messages_path.read_text())
+        messages_path = (self.base / path).parent / f"{stem}.messages.md"
+        self.assertFalse(messages_path.exists())
 
     def test_continues_set_on_new_session(self):
         """Second new session in same dir auto-sets continues: to first session title."""
