@@ -22,7 +22,8 @@
       "Bash(clj -M:datalevin:run)",
       "Bash(clj -M:edn -e '\\(require \\(quote ai-memory.web.handler\\) \\(quote ai-memory.web.api\\)\\)')",
       "Read(//private/tmp/**)",
-      "Bash(unzip -t /tmp/test-export2.zip)"
+      "Bash(unzip -t /tmp/test-export2.zip)",
+      "Bash(pipx run:*)"
     ]
   }
 }
