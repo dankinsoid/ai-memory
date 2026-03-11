@@ -11,8 +11,7 @@ Tools exposed:
   memory_session      — upsert session .md file
   memory_remember     — save a rule/preference .md file
   memory_search       — search all memory files by tags/text/date
-  memory_explore_tags — list all tags with file counts
-  memory_resolve_tags — fuzzy-match approximate tag names to existing ones
+  memory_explore_tags — list all tags (or fuzzy-resolve approximate tag names)
 
 Usage (stdio MCP):
   python3 server.py
@@ -38,40 +37,24 @@ SERVER_INFO = {"name": "ai-memory", "version": "1.0.0"}
 TOOLS = [
     {
         "name": "memory_session",
-        "description": (
-            "Upsert a session summary"
-        ),
+        "description": "Upsert a session summary",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "session_id": {
-                    "type": "string",
-                    "description": "Unique session identifier",
-                },
-                "project": {
-                    "type": "string",
-                    "description": "Project name",
-                },
-                "title": {
-                    "type": "string",
-                    "description": "2-5 words, English",
-                },
+                "session_id": {"type": "string"},
+                "project": {"type": "string"},
+                "title": {"type": "string", "description": "3-8 words, English"},
                 "summary": {
                     "type": "string",
-                    "description": (
-                        "1-2 sentences: problem, approach, key decisions. "
-                        "Each call replaces previous, so include the full arc — not just the latest change. "
-                        "No file or function names."
-                    ),
+                    "description": "1-5 sentences: full arc (replaces previous). No file/function names.",
                 },
                 "tags": {
                     "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Topic tags describing what this session is about (e.g. ['architecture', 'refactoring'])",
+                    "items": {"type": "string"}
                 },
-                "content": {
+                "compact": {
                     "type": "string",
-                    "description": "Detailed compact notes for /load recovery (written as ## Compact section in the summary file)",
+                    "description": "Detailed compact notes for /load recovery",
                 },
             },
             "required": ["session_id", "title", "summary"],
@@ -79,35 +62,25 @@ TOOLS = [
     },
     {
         "name": "memory_remember",
-        "description": (
-            "Save a rule, preference, or fact to long-term memory as a .md file. "
-            "Use explicit scope tags to route to the right directory."
-        ),
+        "description": "Save a rule, preference, or fact to long-term memory",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "content": {
-                    "type": "string",
-                    "description": "The rule or fact text to save",
-                },
+                "content": {"type": "string", "description": "The rule or fact text"},
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
                         "Three tiers: "
-                        "(1) context — 'universal' or 'project/<name>' or a 'lang/<name>' tag; "
-                        "add 'rule' if this is a rule/preference (canonical, no synonyms); "
-                        "(2) aspect — some aspect tags describing what kind of knowledge this is; "
-                        "(3) specific — concrete topic/technology tags if applicable"
+                        "(1) context — 'universal' or 'project/<name>' or 'lang/<name>'; "
+                        "add 'rule' if rule/preference; "
+                        "(2) aspect tags; "
+                        "(3) specific topic/technology tags"
                     ),
                 },
                 "title": {
                     "type": "string",
-                    "description": (
-                        "Descriptive file title used as the filename stem. "
-                        "Should be specific enough to distinguish from rules on similar topics. "
-                        "Use kebab-case, e.g. 'always-run-regression-test-before-fixing-bug'. "
-                    ),
+                    "description": "Kebab-case filename stem, e.g. 'always-run-regression-test-before-fixing-bug'",
                 },
             },
             "required": ["content", "tags", "title"],
@@ -115,90 +88,32 @@ TOOLS = [
     },
     {
         "name": "memory_search",
-        "description": (
-            "Search memory by semantic query or structured filters. "
-            "Covers facts, rules, and sessions (sessions have 'session' tag). "
-            "Use 'query' for natural-language semantic search, "
-            "or tags/dates for structured lookup."
-        ),
+        "description": "Search memory by semantic query and/or tag/date filters. Covers facts, rules, sessions.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": (
-                        "Semantic search query (natural language). "
-                        "Finds facts and sessions by meaning similarity. "
-                        "Tag/date filters still apply as post-filters."
-                    ),
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "All of these tags must be present",
-                },
-                "any_tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "At least one of these tags must be present",
-                },
-                "exclude_tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Skip files that have any of these tags",
-                },
-                "since": {
-                    "type": "string",
-                    "description": "ISO date (YYYY-MM-DD); skip files created before this date",
-                },
-                "until": {
-                    "type": "string",
-                    "description": "ISO date (YYYY-MM-DD); skip files created after this date",
-                },
-                "sort_by": {
-                    "type": "string",
-                    "enum": ["date", "modified"],
-                    "description": (
-                        "'date': front-matter creation date, newest first (default). "
-                        "'modified': file mtime, most recently changed first. "
-                        "Ignored for semantic search (sorted by score)."
-                    ),
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max results to return (default: 20)",
-                },
-                "offset": {
-                    "type": "integer",
-                    "description": "Skip first N results for pagination (default: 0)",
-                },
+                "query": {"type": "string", "description": "Semantic search (natural language)"},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "All must match"},
+                "any_tags": {"type": "array", "items": {"type": "string"}, "description": "At least one must match"},
+                "exclude_tags": {"type": "array", "items": {"type": "string"}},
+                "since": {"type": "string", "description": "YYYY-MM-DD"},
+                "until": {"type": "string", "description": "YYYY-MM-DD"},
+                "limit": {"type": "integer", "description": "Default 20"},
             },
         },
     },
     {
         "name": "memory_explore_tags",
-        "description": (
-            "Get an overview of all tags in the storage tree with file counts. "
-            "Useful for orientation before searching."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "memory_resolve_tags",
-        "description": (
-            "Normalize approximate tag names to existing tags via substring match. "
-            "Use before memory_search to avoid misses from typos or short forms."
-        ),
+        "description": "List all tags with file counts. If 'tags' given, fuzzy-resolve approximate names to existing tags.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Approximate tag names to resolve",
-                }
+                    "description": "Approximate tag names to resolve (optional)",
+                },
             },
-            "required": ["tags"],
         },
     },
 ]
@@ -248,18 +163,20 @@ def _handle_tools_call(params: dict) -> dict:
 
     try:
         if name == "memory_session":
-            session_tags: list[str] = args.get("tags") or []
+            session_tags: list[str] = list(dict.fromkeys(
+                ["session"] + (args.get("tags") or [])
+            ))
             path = storage.upsert_session(
                 session_id=args["session_id"],
                 project=args.get("project"),
                 title=args["title"],
                 summary=args["summary"],
                 tags=session_tags,
-                compact=args.get("content"),
+                compact=args.get("compact"),
             )
             # Lazy-load rules relevant to the session's topic tags.
             # Scope/meta tags are already in context from SessionStart — skip them.
-            _SCOPE_TAGS = {"universal", "session", "rule", "preference"}
+            _SCOPE_TAGS = {"universal", "session", "rule"}
             topic_tags = [
                 t for t in session_tags
                 if t not in _SCOPE_TAGS and not t.startswith("project/")
@@ -284,10 +201,10 @@ def _handle_tools_call(params: dict) -> dict:
                     sort_by="date",
                     limit=10,
                 )
-                # Only surface rules/preferences; skip already-shown ones
+                # Only surface rules; skip already-shown ones
                 rules = [
                     f for f in candidates
-                    if ("rule" in f.get("tags", []) or "preference" in f.get("tags", []))
+                    if ("rule" in f.get("tags", []))
                     and f.get("path", "") not in already_loaded
                 ][:5]
                 if rules:
@@ -339,23 +256,19 @@ def _handle_tools_call(params: dict) -> dict:
             return _text(json.dumps({"results": results}, indent=2, ensure_ascii=False))
 
         if name == "memory_explore_tags":
-            return _text(
-                json.dumps(storage.explore_tags(), indent=2, ensure_ascii=False)
-            )
-
-        if name == "memory_resolve_tags":
-            from lib.vector_store import tag_store
-            if not tag_store.enabled:
-                return _text(
-                    json.dumps(
-                        {"resolved": [], "note": "vectorization disabled (OPENAI_API_KEY not set)"},
+            resolve_input = args.get("tags")
+            if resolve_input:
+                # Fuzzy-resolve mode: normalize approximate tag names
+                from lib.vector_store import tag_store
+                if not tag_store.enabled:
+                    return _text(json.dumps(
+                        {"resolved": [], "note": "vectorization disabled"},
                         ensure_ascii=False,
-                    )
-                )
-            resolved = storage.resolve_tags(args.get("tags") or [])
-            return _text(
-                json.dumps({"resolved": resolved}, ensure_ascii=False)
-            )
+                    ))
+                resolved = storage.resolve_tags(resolve_input)
+                return _text(json.dumps({"resolved": resolved}, ensure_ascii=False))
+            # Default: list all tags with counts
+            return _text(json.dumps(storage.explore_tags(), indent=2, ensure_ascii=False))
 
         return _error(f"Unknown tool: {name!r}")
 
@@ -375,7 +288,9 @@ def _error(text: str) -> dict:
     return {"content": [{"type": "text", "text": text}], "isError": True}
 
 
-_HANDLERS: dict[str, object] = {
+from typing import Callable
+
+_HANDLERS: dict[str, Callable[[dict], dict]] = {
     "initialize": _handle_initialize,
     "tools/list": _handle_tools_list,
     "tools/call": _handle_tools_call,
