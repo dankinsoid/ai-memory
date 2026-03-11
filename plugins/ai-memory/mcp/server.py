@@ -19,7 +19,6 @@ Usage (stdio MCP):
 """
 
 import json
-import os
 import sys
 import traceback
 from pathlib import Path
@@ -303,15 +302,19 @@ def _handle_tools_call(params: dict) -> dict:
 
         if name == "memory_remember":
             raw_tags: list[str] = args.get("tags") or []
-            # Normalize tags: resolve approximate names to existing canonical tags,
-            # deduplicating near-synonyms (e.g. "tests" → "testing").
-            resolved = storage.resolve_tags(raw_tags)
-            # Preserve any tags not matched by resolve (e.g. new scope tags like 'universal')
-            known = set(resolved)
-            merged = resolved + [t for t in raw_tags if t not in known]
+            # Deduplicate tags via vector similarity when vectorization is on.
+            # Without it there's no reliable fuzzy match, so tags are stored as-is.
+            from lib.vector_store import tag_store
+            if tag_store.enabled:
+                resolved = storage.resolve_tags(raw_tags)
+                # Preserve originals that had no match (new tags, scope tags, etc.)
+                known = set(resolved)
+                tags = resolved + [t for t in raw_tags if t not in known]
+            else:
+                tags = raw_tags
             storage.remember(
                 content_text=args["content"],
-                tags=merged,
+                tags=tags,
                 title=args.get("title"),
             )
             return _text("ok")
@@ -336,6 +339,14 @@ def _handle_tools_call(params: dict) -> dict:
             )
 
         if name == "memory_resolve_tags":
+            from lib.vector_store import tag_store
+            if not tag_store.enabled:
+                return _text(
+                    json.dumps(
+                        {"resolved": [], "note": "vectorization disabled (OPENAI_API_KEY not set)"},
+                        ensure_ascii=False,
+                    )
+                )
             resolved = storage.resolve_tags(args.get("tags") or [])
             return _text(
                 json.dumps({"resolved": resolved}, ensure_ascii=False)

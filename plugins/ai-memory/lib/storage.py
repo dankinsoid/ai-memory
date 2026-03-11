@@ -633,6 +633,12 @@ def remember(
         f"---\ntags: {tags_str}\ndate: {today}\n---\n\n{content_text}\n"
     )
     target.write_text(file_content, encoding="utf-8")
+
+    # Embed any new tags so future resolve_tags calls can match against them.
+    # Called after write so a file error doesn't block vector storage.
+    from .vector_store import tag_store
+    tag_store.upsert(tags)
+
     return str(target.relative_to(base))
 
 
@@ -669,17 +675,28 @@ def explore_tags() -> dict:
 
 
 def resolve_tags(query_tags: list[str]) -> list[str]:
-    """Normalize approximate tag names to existing tags via substring match.
+    """Normalize approximate tag names to existing tags.
 
-    For each query tag: exact match wins; otherwise all existing tags that
-    contain the query as a substring (case-insensitive) are returned, up to 3.
+    Resolution strategy (priority order):
+      1. Exact match — always accepted.
+      2. Vector similarity (cosine) — used when OPENAI_API_KEY is set;
+         only matches with score ≥ 0.88 are accepted.
+      3. No match — query tag is omitted from results.
+
+    Fuzzy substring matching was removed: it produced false positives on
+    short tag names (e.g. "rule" matching "preference" via overlap).
+    Vector similarity is the only reliable fuzzy method.
 
     Args:
         query_tags: list of approximate or abbreviated tag names
 
     Returns:
-        Ordered, deduplicated list of matched existing tags.
+        Ordered, deduplicated list of resolved existing tags.
+        Query tags with no match are excluded — callers must re-merge
+        the originals if they want to preserve unmatched tags.
     """
+    from .vector_store import tag_store
+
     base = get_base_dir()
     all_tags: set[str] = set()
 
@@ -692,20 +709,18 @@ def resolve_tags(query_tags: list[str]) -> list[str]:
     resolved: list[str] = []
     seen: set[str] = set()
 
-    for q in query_tags:
-        if q in all_tags:
-            if q not in seen:
+    if tag_store.enabled:
+        similar = tag_store.find_similar(query_tags, all_tags)
+        for q in query_tags:
+            match = similar.get(q)
+            if match and match not in seen:
+                seen.add(match)
+                resolved.append(match)
+    else:
+        # Vectorization off — exact matches only, no fuzzy dedup
+        for q in query_tags:
+            if q in all_tags and q not in seen:
                 seen.add(q)
                 resolved.append(q)
-            continue
-        q_lower = q.lower()
-        matches = [
-            t for t in sorted(all_tags)
-            if q_lower in t.lower() or t.lower() in q_lower
-        ]
-        for m in matches[:3]:
-            if m not in seen:
-                seen.add(m)
-                resolved.append(m)
 
     return resolved
