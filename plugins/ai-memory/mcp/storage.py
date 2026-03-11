@@ -9,8 +9,8 @@ subdirectories.  No database or server required.
 
 Public API:
   get_base_dir() -> Path
-  search_facts(tags, any_tags, text, limit) -> list[dict]
-  search_sessions(project, limit) -> list[dict]
+  search_facts(tags, any_tags, exclude_tags, text, since, until, sort_by, limit, offset) -> list[dict]
+  search_sessions(project, since, until, sort_by, limit, offset) -> list[dict]
   upsert_session(session_id, project, title, summary, tags, content) -> str
   remember(content_text, tags, type_, filename) -> str
   explore_tags() -> dict
@@ -28,6 +28,32 @@ from tags import (
     parse_front_matter,
     parse_tags_field,
 )
+
+
+# ---------------------------------------------------------------------------
+# Date helpers
+# ---------------------------------------------------------------------------
+
+
+def _parse_date(s: str) -> date | None:
+    """Parse an ISO date string (YYYY-MM-DD) into a date object, or None."""
+    try:
+        return date.fromisoformat(s.strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+def _file_date(fm: dict) -> date | None:
+    """Extract creation date from front-matter 'date:' field."""
+    return _parse_date(fm.get("date", ""))
+
+
+def _file_mtime(path: Path) -> float:
+    """Return file modification time as a float (seconds since epoch)."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def get_base_dir() -> Path:
@@ -78,34 +104,46 @@ def _safe_filename(text: str, max_len: int = 60) -> str:
 def search_facts(
     tags: list[str] | None = None,
     any_tags: list[str] | None = None,
+    exclude_tags: list[str] | None = None,
     text: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    sort_by: str = "date",
     limit: int = 20,
+    offset: int = 0,
 ) -> list[dict]:
-    """Search fact/rule files by tags and optional text.
+    """Search fact/rule files by tags, dates, and optional text.
 
     Scans all .md files under base_dir, excluding files in sessions/
-    directories.
+    directories.  Results are sorted before slicing, so since/until/offset
+    work correctly even when many files match.
 
     Args:
-        tags: all of these tags must be present on the file
+        tags: all of these tags must be present
         any_tags: at least one of these tags must be present
+        exclude_tags: skip files that have any of these tags
         text: case-insensitive substring match against file content
-        limit: maximum number of results to return
+        since: ISO date string (YYYY-MM-DD); skip files with date before this
+        until: ISO date string; skip files with date after this
+        sort_by: 'date' (front-matter date, newest first) or
+                 'modified' (mtime, most recently changed first)
+        limit: max results after sorting
+        offset: skip first N results (for pagination)
 
     Returns:
-        List of dicts, each with keys:
-          path (str, relative to base_dir)
-          tags (list[str])
-          type (str, from front-matter or '')
-          content (str, full file text)
+        List of dicts with keys:
+          path (str, relative to base_dir), tags (list[str]),
+          type (str), date (str), content (str)
     """
     base = get_base_dir()
-    results: list[dict] = []
+    since_d = _parse_date(since) if since else None
+    until_d = _parse_date(until) if until else None
     text_lower = text.lower() if text else None
 
+    candidates: list[dict] = []
+
     for md_file in base.rglob("*.md"):
-        rel_parts = md_file.relative_to(base).parts
-        if _is_session_file(rel_parts):
+        if _is_session_file(md_file.relative_to(base).parts):
             continue
 
         content = _read_content(md_file)
@@ -118,23 +156,49 @@ def search_facts(
             continue
         if any_tags and not any(t in file_tags for t in any_tags):
             continue
+        if exclude_tags and any(t in file_tags for t in exclude_tags):
+            continue
         if text_lower and text_lower not in content.lower():
             continue
 
         fm = parse_front_matter(content)
-        results.append(
+        file_date = _file_date(fm)
+
+        if since_d and (file_date is None or file_date < since_d):
+            continue
+        if until_d and (file_date is not None and file_date > until_d):
+            continue
+
+        candidates.append(
             {
                 "path": str(md_file.relative_to(base)),
                 "tags": file_tags,
                 "type": fm.get("type", ""),
+                "date": fm.get("date", ""),
                 "content": content,
+                # Internal sort key — stripped before returning
+                "_mtime": _file_mtime(md_file),
+                "_date": file_date,
             }
         )
 
-        if len(results) >= limit:
-            break
+    # Sort: newest first; mtime as tiebreaker for equal front-matter dates
+    # date=None sorts last (treat as oldest)
+    _epoch = date(1970, 1, 1)
+    if sort_by == "modified":
+        candidates.sort(key=lambda r: r["_mtime"], reverse=True)
+    else:
+        candidates.sort(
+            key=lambda r: (r["_date"] or _epoch, r["_mtime"]),
+            reverse=True,
+        )
 
-    return results
+    # Strip internal keys before returning
+    for r in candidates:
+        del r["_mtime"]
+        del r["_date"]
+
+    return candidates[offset: offset + limit]
 
 
 # ---------------------------------------------------------------------------
@@ -142,54 +206,88 @@ def search_facts(
 # ---------------------------------------------------------------------------
 
 
-def search_sessions(project: str | None = None, limit: int = 5) -> list[dict]:
-    """Return recent session files, newest first.
+def search_sessions(
+    project: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    sort_by: str = "date",
+    limit: int = 5,
+    offset: int = 0,
+) -> list[dict]:
+    """Return session files, sorted and filtered.
 
     Searches projects/<project>/sessions/ (if project given) and sessions/.
 
     Args:
-        project: optional project name to restrict search
+        project: restrict to this project's sessions dir
+        since: ISO date; skip sessions with date before this
+        until: ISO date; skip sessions with date after this
+        sort_by: 'date' (front-matter date, newest first) or
+                 'modified' (mtime, newest first)
         limit: max sessions to return
+        offset: skip first N results
 
     Returns:
         List of dicts with keys:
-          path (str, relative), title, date, project, tags (list[str]),
-          id (str), content (str)
+          path (str, relative), title, date, project,
+          tags (list[str]), id (str), content (str)
     """
     base = get_base_dir()
+    since_d = _parse_date(since) if since else None
+    until_d = _parse_date(until) if until else None
 
     search_dirs: list[Path] = []
     if project:
+        # Strict filter: project= means only that project's sessions dir.
+        # Generic sessions/ is for unscoped sessions only.
         search_dirs.append(base / "projects" / project / "sessions")
-    search_dirs.append(base / "sessions")
+    else:
+        search_dirs.append(base / "sessions")
 
-    all_files: list[Path] = []
+    candidates: list[dict] = []
     for d in search_dirs:
-        if d.exists():
-            all_files.extend(d.glob("*.md"))
-
-    # Newest first by modification time
-    all_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-
-    sessions: list[dict] = []
-    for f in all_files[:limit]:
-        content = _read_content(f)
-        if content is None:
+        if not d.exists():
             continue
-        fm = parse_front_matter(content)
-        sessions.append(
-            {
-                "path": str(f.relative_to(base)),
-                "title": fm.get("title", f.stem),
-                "date": fm.get("date", ""),
-                "project": fm.get("project", ""),
-                "tags": parse_tags_field(fm.get("tags", "")),
-                "id": fm.get("id", ""),
-                "content": content,
-            }
+        for f in d.glob("*.md"):
+            content = _read_content(f)
+            if content is None:
+                continue
+            fm = parse_front_matter(content)
+            file_date = _file_date(fm)
+
+            if since_d and (file_date is None or file_date < since_d):
+                continue
+            if until_d and (file_date is not None and file_date > until_d):
+                continue
+
+            candidates.append(
+                {
+                    "path": str(f.relative_to(base)),
+                    "title": fm.get("title", f.stem),
+                    "date": fm.get("date", ""),
+                    "project": fm.get("project", ""),
+                    "tags": parse_tags_field(fm.get("tags", "")),
+                    "id": fm.get("id", ""),
+                    "content": content,
+                    "_mtime": _file_mtime(f),
+                    "_date": file_date,
+                }
+            )
+
+    _epoch = date(1970, 1, 1)
+    if sort_by == "modified":
+        candidates.sort(key=lambda r: r["_mtime"], reverse=True)
+    else:
+        candidates.sort(
+            key=lambda r: (r["_date"] or _epoch, r["_mtime"]),
+            reverse=True,
         )
 
-    return sessions
+    for r in candidates:
+        del r["_mtime"]
+        del r["_date"]
+
+    return candidates[offset: offset + limit]
 
 
 # ---------------------------------------------------------------------------
@@ -268,23 +366,30 @@ def upsert_session(
 # ---------------------------------------------------------------------------
 
 
-def _tags_to_dir(base: Path, tags: list[str]) -> Path:
-    """Choose storage directory based on scope tags.
+_KNOWN_LANGS = {
+    "clojure", "python", "javascript", "typescript", "go", "rust",
+    "java", "kotlin", "swift", "ruby", "bash", "shell", "elixir",
+    "haskell", "ocaml", "scala",
+}
 
-    Priority: project/<name> → languages/<lang> → universal/
+
+def _tags_to_dir(base: Path, tags: list[str], language: str | None = None) -> Path:
+    """Choose storage directory based on explicit language or scope tags.
+
+    Priority: project/<name> tag → explicit language param →
+              language tag (fallback) → universal/
     """
     for t in tags:
         if t.startswith("project/"):
             project = t[len("project/"):]
             return base / "projects" / project / "rules"
 
-    known_langs = {
-        "clojure", "python", "javascript", "typescript", "go", "rust",
-        "java", "kotlin", "swift", "ruby", "bash", "shell", "elixir",
-        "haskell", "ocaml", "scala",
-    }
+    if language:
+        return base / "languages" / language
+
+    # Language from tags as fallback only
     for t in tags:
-        if t in known_langs:
+        if t in _KNOWN_LANGS:
             return base / "languages" / t
 
     return base / "universal"
@@ -295,24 +400,30 @@ def remember(
     tags: list[str],
     type_: str = "preference",
     filename: str | None = None,
+    language: str | None = None,
 ) -> str:
     """Save a fact or rule as a .md file.
 
-    The target directory is inferred from scope tags (project/<name>,
-    language, or universal).  Path-derived tags are excluded from the
-    front-matter to avoid duplication.
+    Directory routing priority:
+      1. project/<name> in tags → projects/<name>/rules/
+      2. explicit language param → languages/<language>/
+      3. language name in tags (fallback) → languages/<lang>/
+      4. default → universal/
+
+    Path-derived tags are excluded from front-matter to avoid duplication.
 
     Args:
         content_text: the fact/rule text to persist
         tags: tags including at least one scope tag
         type_: 'preference' | 'rule' | 'critical-rule'
         filename: file stem; auto-derived from content if omitted
+        language: explicit target language (e.g. 'clojure', 'python')
 
     Returns:
         Path to the created/updated file, relative to base_dir.
     """
     base = get_base_dir()
-    target_dir = _tags_to_dir(base, tags)
+    target_dir = _tags_to_dir(base, tags, language)
     target_dir.mkdir(parents=True, exist_ok=True)
 
     stem = filename or _safe_filename(content_text)

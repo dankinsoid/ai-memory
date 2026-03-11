@@ -104,6 +104,13 @@ TOOLS = [
                     "enum": ["preference", "rule", "critical-rule"],
                     "description": "Fact type (default: preference)",
                 },
+                "language": {
+                    "type": "string",
+                    "description": (
+                        "Target language for routing to languages/<lang>/. "
+                        "Falls back to a language tag in 'tags' if omitted."
+                    ),
+                },
                 "filename": {
                     "type": "string",
                     "description": "File stem (auto-derived from content if omitted)",
@@ -115,8 +122,8 @@ TOOLS = [
     {
         "name": "memory_search",
         "description": (
-            "Search facts/rules by tags and optional text substring. "
-            "Optionally include session files in results."
+            "Search facts/rules (and optionally sessions) by tags, text, and dates. "
+            "Results are sorted before slicing, so offset/since/until work correctly."
         ),
         "inputSchema": {
             "type": "object",
@@ -131,21 +138,46 @@ TOOLS = [
                     "items": {"type": "string"},
                     "description": "At least one of these tags must be present",
                 },
+                "exclude_tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Skip files that have any of these tags",
+                },
                 "text": {
                     "type": "string",
                     "description": "Substring to search in file content (case-insensitive)",
+                },
+                "since": {
+                    "type": "string",
+                    "description": "ISO date (YYYY-MM-DD); skip files created before this date",
+                },
+                "until": {
+                    "type": "string",
+                    "description": "ISO date (YYYY-MM-DD); skip files created after this date",
+                },
+                "sort_by": {
+                    "type": "string",
+                    "enum": ["date", "modified"],
+                    "description": (
+                        "'date': front-matter creation date, newest first (default). "
+                        "'modified': file mtime, most recently changed first."
+                    ),
                 },
                 "limit": {
                     "type": "integer",
                     "description": "Max results to return (default: 20)",
                 },
+                "offset": {
+                    "type": "integer",
+                    "description": "Skip first N results for pagination (default: 0)",
+                },
                 "include_sessions": {
                     "type": "boolean",
-                    "description": "Also include session files in results (default: false)",
+                    "description": "Also search session files (default: false)",
                 },
                 "project": {
                     "type": "string",
-                    "description": "Filter sessions by project (used with include_sessions)",
+                    "description": "Restrict session search to this project (with include_sessions)",
                 },
             },
         },
@@ -217,6 +249,7 @@ def _handle_tools_call(params: dict) -> dict:
                 content_text=args["content"],
                 tags=args.get("tags") or [],
                 type_=args.get("type", "preference"),
+                language=args.get("language"),
                 filename=args.get("filename"),
             )
             return _text(f"Saved → {path}")
@@ -225,14 +258,23 @@ def _handle_tools_call(params: dict) -> dict:
             facts = storage.search_facts(
                 tags=args.get("tags"),
                 any_tags=args.get("any_tags"),
+                exclude_tags=args.get("exclude_tags"),
                 text=args.get("text"),
+                since=args.get("since"),
+                until=args.get("until"),
+                sort_by=args.get("sort_by", "date"),
                 limit=args.get("limit", 20),
+                offset=args.get("offset", 0),
             )
             result: dict = {"facts": facts}
             if args.get("include_sessions"):
                 result["sessions"] = storage.search_sessions(
                     project=args.get("project"),
+                    since=args.get("since"),
+                    until=args.get("until"),
+                    sort_by=args.get("sort_by", "date"),
                     limit=5,
+                    offset=args.get("offset", 0),
                 )
             return _text(json.dumps(result, indent=2, ensure_ascii=False))
 
