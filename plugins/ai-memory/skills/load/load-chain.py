@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 # @ai-generated(solo)
-# Load skill helper: discovers session chain and outputs combined context.
+# Load skill helper: finds previous session and outputs its content.
 #
 # Usage:
-#   python3 load-chain.py <session-id> [project]  # traverse continuation chain
+#   python3 load-chain.py <session-id> [project]  # find prev session via cache
 #   python3 load-chain.py --file <rel-path>        # load specific session by path
+#   python3 load-chain.py --blob <blob-dir>        # load session by blob dir name
 #
-# Chain mode: finds session summary.md by id field, then follows continues:
-# Obsidian wiki-links to build the full chain.
+# Session linking relies on prev-session cache written by session-end.py hook
+# (stored in SQLite state table, keyed by project name).
 #
-# Content strategy: shows messages.md (compact) for the most recent session.
-# Older sessions in chain: just title + summary line.
-# If no session found by id: shows CHOOSE_SESSION list of recent sessions.
-#
-# File paths in output use [file: rel-path] markers that /load SKILL.md parses.
+# Content strategy: shows Compact section (from /save) if available,
+# then messages.md (from Stop hook), then summary as fallback.
 
-import re
 import sys
 from pathlib import Path
 
@@ -30,12 +27,6 @@ from lib.tags import parse_front_matter  # noqa: E402
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _parse_wikilink(value: str) -> str | None:
-    """Extract the page name from [[wiki-link]], or None if not a wiki-link."""
-    m = re.match(r"^\[\[(.+)\]\]$", value.strip())
-    return m.group(1) if m else None
 
 
 def _find_session_by_id(session_id: str, project: str | None) -> Path | None:
@@ -70,28 +61,6 @@ def _find_session_by_id(session_id: str, project: str | None) -> Path | None:
     return None
 
 
-def _find_session_by_wikilink(ref: str, sessions_dir: Path) -> Path | None:
-    """Resolve an Obsidian wiki-link ref to a summary.md in the same directory.
-
-    Tries exact filename match first, then case-insensitive fallback.
-
-    Args:
-        ref: the page name extracted from [[ref]]
-        sessions_dir: directory to search in
-
-    Returns:
-        Path to summary.md, or None if not found.
-    """
-    candidate = sessions_dir / f"{ref}.md"
-    if candidate.exists():
-        return candidate
-    ref_lower = ref.lower()
-    for f in sessions_dir.glob("*.md"):
-        if not storage._is_messages_file(f.name) and f.stem.lower() == ref_lower:
-            return f
-    return None
-
-
 def _read_messages(summary_path: Path) -> str | None:
     """Read the paired .messages.md file for a session summary, or None."""
     messages_path = summary_path.parent / f"{summary_path.stem}.messages.md"
@@ -104,12 +73,6 @@ def _get_title(summary_path: Path) -> str:
     return parse_front_matter(content).get("title", summary_path.stem)
 
 
-def _get_summary_line(summary_path: Path) -> str:
-    """Extract the first line of ## Summary from a summary.md file."""
-    content = storage._read_content(summary_path) or ""
-    return storage._extract_summary_text(content) or "(no summary)"
-
-
 def _print_session_content(summary_path: Path) -> None:
     """Print session content for /load recovery.
 
@@ -120,7 +83,6 @@ def _print_session_content(summary_path: Path) -> None:
     """
     content = storage._read_content(summary_path) or ""
     if "## Compact" in content:
-        # Compact notes written by /save — best recovery source
         print(content)
     else:
         messages = _read_messages(summary_path)
@@ -130,53 +92,29 @@ def _print_session_content(summary_path: Path) -> None:
             print(content)
 
 
-def _traverse_chain(start: Path) -> list[Path]:
-    """Follow continues: wiki-links starting from start, newest first.
-
-    Args:
-        start: Path to the most recent session summary.md
-
-    Returns:
-        List of session summary.md paths, newest first.
-        Stops after 10 hops or when continues: is absent/unresolvable.
-    """
-    chain = [start]
-    seen = {start.resolve()}
-    current = start
-
-    for _ in range(10):  # guard against cycles or excessively long chains
-        content = storage._read_content(current) or ""
-        fm = parse_front_matter(content)
-        continues = fm.get("continues", "").strip()
-        if not continues:
-            break
-        ref = _parse_wikilink(continues)
-        if not ref:
-            break
-        prev = _find_session_by_wikilink(ref, current.parent)
-        if prev is None or prev.resolve() in seen:
-            break
-        seen.add(prev.resolve())
-        chain.append(prev)
-        current = prev
-
-    return chain
+def _print_recovery(summary_path: Path) -> None:
+    """Print full session recovery output."""
+    print("# Session Recovery")
+    print()
+    print(f"*git: {_get_title(summary_path)}*")
+    print()
+    _print_session_content(summary_path)
 
 
 # ---------------------------------------------------------------------------
-# Prev-session cache helpers
+# Prev-session cache
 # ---------------------------------------------------------------------------
 
 
 def _read_prev_session_cache(project: str | None) -> str | None:
     """Read the prev-session cache written by session-end.py hook.
 
-    The hook writes ~/.claude/hooks/state/prev-session-{project}.json on
-    every clear event.  We use it to bootstrap the chain for new sessions
-    that haven't been saved yet (so _find_session_by_id returns None).
+    The hook saves {session_id, project, timestamp} to SQLite state on every
+    /clear event.  This is the only mechanism for linking sessions — it bridges
+    the gap between the old session (already ended) and the new one (not yet saved).
 
     Args:
-        project: project name; if None, no cache file to read.
+        project: project name; if None, no cache to read.
 
     Returns:
         Previous session ID string, or None if not found/unreadable.
@@ -212,14 +150,13 @@ def main() -> None:
     if not args:
         print("Usage: python3 load-chain.py <session-id> [project]")
         print("       python3 load-chain.py --file <rel-path>")
+        print("       python3 load-chain.py --blob <blob-dir>")
         sys.exit(1)
 
     if args[0] == "--file":
         if len(args) < 2:
             print("Usage: python3 load-chain.py --file <rel-path>")
             sys.exit(1)
-        # Try sessions_base first (handles AI_MEMORY_SESSIONS_DIR override),
-        # then fall back to base_dir for backwards compatibility.
         sessions_base = storage.get_sessions_base_dir()
         base = storage.get_base_dir()
         summary_path = sessions_base / args[1]
@@ -228,92 +165,68 @@ def main() -> None:
         if not summary_path.exists():
             print(f"Session file not found: {args[1]}")
             sys.exit(1)
-        print("# Session Recovery")
-        print()
-        _print_session_content(summary_path)
+        _print_recovery(summary_path)
         return
+
+    if args[0] == "--blob":
+        if len(args) < 2:
+            print("Usage: python3 load-chain.py --blob <blob-dir>")
+            sys.exit(1)
+        # blob-dir is a stem like "2026-03-12 title.sid8" — search for it
+        blob_dir = args[1]
+        sessions_base = storage.get_sessions_base_dir()
+        # Search all session directories for a file matching the blob dir
+        for d in sessions_base.rglob("sessions"):
+            if not d.is_dir():
+                continue
+            candidate = d / f"{blob_dir}.md"
+            if candidate.exists():
+                _print_recovery(candidate)
+                return
+            # Try glob match for partial stem
+            for f in d.glob(f"*{blob_dir}*"):
+                if f.is_file() and not storage._is_messages_file(f.name):
+                    _print_recovery(f)
+                    return
+        print(f"Session not found for blob: {blob_dir}")
+        sys.exit(1)
 
     session_id = args[0]
     project = args[1] if len(args) > 1 else None
     sid_prefix = session_id[:8]
 
+    # Try to find the current session in storage (already saved via memory_session)
     start = _find_session_by_id(session_id, project)
 
-    if start:
-        chain = _traverse_chain(start)
-        latest = chain[0]
-        older = chain[1:]
-
-        print("# Session Chain Recovery")
-        print()
-        print(f"{len(chain)} previous session(s) in chain.")
-
-        for prev in older:
-            title = _get_title(prev)
-            summary = _get_summary_line(prev)
-            print()
-            print("---")
-            print(f"## {title} — {summary}")
-
-        print()
-        print("---")
-        print(f"## {_get_title(latest)}")
-        print()
-        _print_session_content(latest)
-        print()
-        print("---")
-
-    else:
-        # Current session not in storage yet (not saved) — try prev-session cache
-        # written by session-end.py hook so we can still traverse the chain.
+    if not start:
+        # Current session not saved yet — try prev-session cache from session-end hook
         prev_id = _read_prev_session_cache(project)
         if prev_id and prev_id[:8] != sid_prefix:
             start = _find_session_by_id(prev_id, project)
 
-        if start:
-            chain = _traverse_chain(start)
-            latest = chain[0]
-            older = chain[1:]
+    if start:
+        _print_recovery(start)
+    else:
+        # No link found — show recent candidates for user to pick
+        sessions = storage.search_sessions(project=project, limit=8)
+        candidates = [s for s in sessions if s.get("id", "")[:8] != sid_prefix]
 
-            print("# Session Chain Recovery")
+        if candidates:
+            print("# CHOOSE_SESSION")
             print()
-            print(f"{len(chain)} previous session(s) in chain.")
-
-            for prev in older:
-                title = _get_title(prev)
-                summary = _get_summary_line(prev)
-                print()
-                print("---")
-                print(f"## {title} — {summary}")
-
+            print("No continuation chain found. Recent sessions:")
             print()
-            print("---")
-            print(f"## {_get_title(latest)}")
-            print()
-            _print_session_content(latest)
-            print()
-            print("---")
+            for i, s in enumerate(candidates):
+                title = s.get("title", "(untitled)")
+                summary = s.get("summary", "")
+                path = s.get("path", "")
+                line = f"{i + 1}. **{title}**"
+                if summary:
+                    line += f" — {summary}"
+                line += f" `[file: {path}]`"
+                print(line)
         else:
-            # No chain found — show recent candidates for user to pick
-            sessions = storage.search_sessions(project=project, limit=8)
-            candidates = [s for s in sessions if s.get("id", "")[:8] != sid_prefix]
-
-            if candidates:
-                print("# CHOOSE_SESSION")
-                print()
-                print("No continuation chain found. Recent sessions:")
-                print()
-                for i, s in enumerate(candidates):
-                    title = s.get("title", "(untitled)")
-                    summary = s.get("summary", "")
-                    path = s.get("path", "")
-                    line = f"{i + 1}. **{title}**"
-                    if summary:
-                        line += f" — {summary}"
-                    line += f" `[file: {path}]`"
-                    print(line)
-            else:
-                print("No previous session found.")
+            print("No previous session found.")
 
 
 if __name__ == "__main__":

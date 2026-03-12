@@ -213,14 +213,21 @@ class TestAllTagsForFile(unittest.TestCase):
 
 
 class StorageTestBase(unittest.TestCase):
-    """Base class: creates a temp AI_MEMORY_DIR and restores env after each test."""
+    """Base class: creates a temp AI_MEMORY_DIR and restores env after each test.
+
+    Patches db.is_populated to return False so tests always use the filesystem
+    fallback path (tests create files in a temp dir, not in the SQLite index).
+    """
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name)
         os.environ["AI_MEMORY_DIR"] = str(self.base)
+        self._db_patch = unittest.mock.patch("lib.db.is_populated", return_value=False)
+        self._db_patch.start()
 
     def tearDown(self):
+        self._db_patch.stop()
         del os.environ["AI_MEMORY_DIR"]
         self.tmp.cleanup()
 
@@ -442,25 +449,12 @@ class TestUpsertSession(StorageTestBase):
         messages_path = (self.base / path).parent / f"{stem}.messages.md"
         self.assertFalse(messages_path.exists())
 
-    def test_continues_set_on_new_session(self):
-        """Second new session in same dir auto-sets continues: to first session title."""
+    def test_no_continues_in_new_session(self):
+        """New sessions should not have a continues: field — linking is via prev-session cache."""
         storage.upsert_session("id-first", None, "first session", "s1", [])
         path2 = storage.upsert_session("id-second", None, "second session", "s2", [])
         content = (self.base / path2).read_text()
-        self.assertIn("continues:", content)
-        self.assertIn("first session", content)
-
-    def test_continues_not_set_when_updating(self):
-        """Updating an existing session must not overwrite its continues: field."""
-        # Create first session so auto-continues would kick in
-        storage.upsert_session("id-prev", None, "prev session", "s0", [])
-        # Create second session (will get continues: set automatically)
-        storage.upsert_session("id-target", None, "target session", "s1", [])
-        # Update second session again — continues: must not change
-        path = storage.upsert_session("id-target", None, "target session", "updated", [])
-        content = (self.base / path).read_text()
-        # continues: should still point to first session, not be re-written
-        self.assertIn("prev session", content)
+        self.assertNotIn("continues:", content)
 
     def test_sessions_dir_env_override(self):
         """AI_MEMORY_SESSIONS_DIR routes sessions to a different root directory."""

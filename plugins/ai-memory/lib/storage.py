@@ -14,9 +14,8 @@ The summary file contains:
   ## Summary — 1-2 sentence arc
   ## Compact — detailed /save notes (if agent ran /save)
 
-The summary file may contain Obsidian wiki-links:
+The summary file may contain an Obsidian wiki-link to its messages file:
   messages: [[2026-03-11 Block 2 skills update messages]]  (added by Stop hook)
-  continues: [[2026-03-10 Block 1 Python MCP server]]
 
 No database or server required.
 
@@ -144,12 +143,6 @@ def _extract_summary_text(content: str) -> str | None:
             if stripped:
                 return stripped
     return None
-
-
-def _parse_wikilink(value: str) -> str | None:
-    """Extract the page name from an Obsidian wiki-link [[name]], or None."""
-    m = re.match(r"^\[\[(.+)\]\]$", value.strip())
-    return m.group(1) if m else None
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +468,7 @@ def _read_session_file(summary_path: Path, base: Path) -> dict | None:
     A paired messages file is expected at '<stem> messages.md'.
 
     Returns dict with keys: path, title, date, project, tags, id,
-    continues, summary, messages_path, content (full summary.md text),
+    summary, messages_path, content (full summary.md text),
     _mtime (internal), _date (internal).
     """
     content = _read_content(summary_path)
@@ -497,7 +490,6 @@ def _read_session_file(summary_path: Path, base: Path) -> dict | None:
         "project": fm.get("project", ""),
         "tags": parse_tags_field(fm.get("tags", "")),
         "id": fm.get("id", ""),
-        "continues": fm.get("continues", ""),
         "summary": _extract_summary_text(content) or "",
         "messages_path": str(messages_path.relative_to(base)) if messages_path.exists() else None,
         "content": content,
@@ -532,7 +524,7 @@ def search_sessions(
 
     Returns:
         List of dicts with keys: path, title, date, project, tags,
-        id, continues, summary, messages_path, content
+        id, summary, messages_path, content
     """
     base = get_base_dir()
     sessions_base = get_sessions_base_dir()
@@ -615,37 +607,6 @@ def _find_session_file(sessions_dir: Path, session_id: str) -> Path | None:
     return None
 
 
-def _find_latest_session_title(sessions_dir: Path) -> str | None:
-    """Return the stem of the most recently modified session file in sessions_dir.
-
-    Used to auto-populate continues: [[stem]] when creating a new session file.
-    Returns the filename stem (without .md) so the wiki-link resolves by filename.
-    Only looks at the immediate directory (no recursion).
-
-    Args:
-        sessions_dir: directory to scan for session summary .md files
-
-    Returns:
-        Stem of the most recent session file (used as wiki-link target), or None.
-    """
-    if not sessions_dir.exists():
-        return None
-    latest_mtime = -1.0
-    latest_stem: str | None = None
-    for f in sessions_dir.glob("*.md"):
-        if _is_messages_file(f.name):
-            continue
-        mtime = _file_mtime(f)
-        if mtime > latest_mtime:
-            content = _read_content(f)
-            if content:
-                fm = parse_front_matter(content)
-                if fm.get("id"):  # skip non-session files
-                    latest_mtime = mtime
-                    latest_stem = f.stem
-    return latest_stem
-
-
 def upsert_session(
     session_id: str,
     project: str | None,
@@ -660,12 +621,9 @@ def upsert_session(
       {date} {title}.md          — summary file: front-matter + ## Summary [+ ## Compact]
       {date} {title} messages.md — full conversation transcript (written by Stop hook)
 
-    When creating a new session, auto-sets ``continues: [[prev-title]]`` to
-    the most recent existing session in the same directory.
-
     Matches existing session by id field in summary front-matter; reuses
     the existing filename if found (preserves original date in name), and
-    preserves the existing ``continues:`` and ``messages:`` values on updates.
+    preserves the existing ``messages:`` value on updates.
 
     Sessions are written under AI_MEMORY_SESSIONS_DIR (or AI_MEMORY_DIR as
     fallback) so users can point them at an Obsidian vault independently of
@@ -699,15 +657,10 @@ def upsert_session(
         # Reuse existing filename (keeps original creation date in name)
         summary_path = existing
         stem = existing.stem
-        # Preserve existing continues: so we don't break the chain on updates
-        existing_fm = parse_front_matter(_read_content(existing) or "")
-        continues_value: str | None = existing_fm.get("continues") or None
     else:
         safe = _safe_title(title)
         stem = f"{today} {safe}.{session_id[:8]}"
         summary_path = sessions_dir / f"{stem}.md"
-        # Auto-link to the most recent session in the same dir
-        continues_value = _find_latest_session_title(sessions_dir)
 
     tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
 
@@ -722,8 +675,6 @@ def upsert_session(
     if project:
         fm_lines.append(f"project: {project}")
     fm_lines += [f"title: {title}", f"tags: {tags_str}"]
-    if continues_value:
-        fm_lines.append(f"continues: [[{continues_value}]]")
     if existing_messages_link:
         fm_lines.append(f"messages: {existing_messages_link}")
     elif (sessions_dir / f"{messages_stem}.md").exists():

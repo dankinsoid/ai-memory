@@ -9,13 +9,13 @@ description: Deep recovery from a previous session — read session content and 
 
 Parse ARGUMENTS to determine which session to load:
 
-1. **No args** → traverse continuation chain from current session:
+1. **No args** → find previous session via prev-session cache:
    ```bash
    python3 <this-skill-dir>/load-chain.py <current-session-id> <project-name>
    ```
    `<this-skill-dir>` = the directory containing this SKILL.md (derive from the path you loaded it from).
    The current session ID is in SessionStart context. Determine the project name from the git repo name.
-   The script finds the previous session by ID, traverses `continues:` wiki-links, then outputs combined context.
+   The script finds the previous session via the prev-session cache (written by session-end hook on /clear).
 
 2. **Free text** → translate the user's request to English and pass as the first positional arg... no: instead call `memory_search` with `tags: ["session", "project/<project>"]` and `text: "<english query>"`, pick the best match, then load via `--file`:
    ```bash
@@ -29,8 +29,8 @@ Parse ARGUMENTS to determine which session to load:
 
 ## Load content
 
-Run the script — it reads `messages.md` (compact content) for the most recent session,
-and shows just title + summary for older sessions in the chain.
+Run the script — it outputs session content with priority: Compact section (from /save),
+then messages.md (from Stop hook), then summary as fallback.
 
 ## Handling CHOOSE_SESSION
 
