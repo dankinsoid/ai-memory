@@ -77,7 +77,7 @@ def get_base_dir() -> Path:
     Controlled by AI_MEMORY_DIR env var; defaults to ~/.claude/ai-memory/.
     """
     d = os.environ.get("AI_MEMORY_DIR", str(Path.home() / ".claude" / "ai-memory"))
-    p = Path(d)
+    p = Path(d).expanduser()
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -91,7 +91,7 @@ def get_sessions_base_dir() -> Path:
     """
     override = os.environ.get("AI_MEMORY_SESSIONS_DIR")
     if override:
-        p = Path(override)
+        p = Path(override).expanduser()
         p.mkdir(parents=True, exist_ok=True)
         return p
     return get_base_dir()
