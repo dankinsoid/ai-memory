@@ -45,7 +45,7 @@ TOOLS = [
             "properties": {
                 "session_id": {"type": "string"},
                 "project": {"type": "string"},
-                "title": {"type": "string", "description": "3-8 words, English"},
+                "title": {"type": "string", "description": "3-8 words"},
                 "summary": {
                     "type": "string",
                     "description": "1-3 sentences: full arc (replaces previous). No file/function names.",

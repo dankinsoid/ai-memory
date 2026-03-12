@@ -360,14 +360,14 @@ def main() -> None:
 
     project = derive_project(cwd)
     sessions_base = storage.get_sessions_base_dir()
-    sessions_dir = (
+    sessions_parent = (
         sessions_base / "projects" / project / "sessions"
         if project
         else sessions_base / "sessions"
     )
 
     # Find or create session summary file
-    existing = storage._find_session_file(sessions_dir, session_id)
+    existing = storage._find_session_file(sessions_parent, session_id)
 
     if existing is None:
         # Agent never called memory_session — create minimal summary
@@ -379,7 +379,7 @@ def main() -> None:
             summary="(auto-saved)",
             tags=[],
         )
-        existing = storage._find_session_file(sessions_dir, session_id)
+        existing = storage._find_session_file(sessions_parent, session_id)
 
     if existing is None:
         # Should not happen — upsert_session always creates the file

@@ -16,6 +16,10 @@ Search by topic: `memory_search(any_tags=["<topic>", "<language>"])`
 
 You can query memory freely anytime you need user or project-specific info — it's your external brain.
 
+## Language
+
+All memory writes must be in **English** — titles, summaries, content, tags, compact notes. Translate from user's language if needed.
+
 ## Failure Handling
 
 If any memory operation fails (MCP tools, "Memory Unavailable" in hook output) — tell the user in one line, don't retry, continue your task.

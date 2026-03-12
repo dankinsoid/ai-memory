@@ -58,7 +58,7 @@ def _find_session_by_id(session_id: str, project: str | None) -> Path | None:
         if not d.exists() or d in seen:
             continue
         seen.add(d)
-        for f in sorted(d.glob("*.md"), reverse=True):  # newest first for speed
+        for f in sorted(d.rglob("*.md"), reverse=True):  # newest first for speed
             if storage._is_messages_file(f.name):
                 continue
             content = storage._read_content(f)

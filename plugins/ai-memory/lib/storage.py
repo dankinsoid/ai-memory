@@ -530,8 +530,9 @@ def search_sessions(
 ) -> list[dict]:
     """Return session summary records, sorted and filtered.
 
-    Searches projects/<project>/sessions/ (if project given) or sessions/.
-    Only reads summary .md files (skips ' messages.md' files).
+    Searches projects/<project>/sessions/ (if project given) or sessions/,
+    including date subdirectories (YYYY-MM-DD/) and flat layout for backward
+    compatibility. Only reads summary .md files (skips .messages.md files).
 
     Args:
         project: restrict to this project's sessions dir
@@ -566,7 +567,7 @@ def search_sessions(
     for d in search_dirs:
         if not d.exists():
             continue
-        for f in d.glob("*.md"):
+        for f in d.rglob("*.md"):
             # Skip messages files — only read summary files
             if _is_messages_file(f.name):
                 continue
@@ -605,21 +606,32 @@ def search_sessions(
 # ---------------------------------------------------------------------------
 
 
-def _find_session_file(sessions_dir: Path, session_id: str) -> Path | None:
+def _find_session_file(sessions_parent: Path, session_id: str) -> Path | None:
     """Locate an existing session summary file by session_id suffix in filename.
+
+    Searches date subdirs (sessions_parent/YYYY-MM-DD/) and the flat
+    sessions_parent/ directory for backward compatibility with pre-date-subdir
+    layout.
 
     New format: {date} {title}.{session_id[:8]}.md — O(1) lookup via glob suffix.
     Falls back to front-matter scan for legacy files without the id suffix.
+
+    Args:
+        sessions_parent: parent sessions directory (e.g. projects/<name>/sessions/)
+        session_id: full session UUID
+
+    Returns:
+        Path to the session summary .md file, or None if not found.
     """
-    if not sessions_dir.exists():
+    if not sessions_parent.exists():
         return None
     sid8 = session_id[:8]
-    # Fast path: new-format files have the id embedded in the filename
-    for f in sessions_dir.glob(f"*.{sid8}.md"):
+    # Fast path: search recursively for files with the id embedded in the filename
+    for f in sessions_parent.rglob(f"*.{sid8}.md"):
         if not _is_messages_file(f.name):
             return f
     # Slow path: legacy files without id suffix — scan front-matter
-    for f in sessions_dir.glob("*.md"):
+    for f in sessions_parent.rglob("*.md"):
         if _is_messages_file(f.name):
             continue
         content = _read_content(f)
@@ -666,12 +678,11 @@ def upsert_session(
     today = date.today().isoformat()
 
     if project:
-        sessions_dir = sessions_base / "projects" / project / "sessions"
+        sessions_parent = sessions_base / "projects" / project / "sessions"
     else:
-        sessions_dir = sessions_base / "sessions"
-    sessions_dir.mkdir(parents=True, exist_ok=True)
+        sessions_parent = sessions_base / "sessions"
 
-    existing = _find_session_file(sessions_dir, session_id)
+    existing = _find_session_file(sessions_parent, session_id)
     is_new = existing is None
 
     if existing:
@@ -681,6 +692,9 @@ def upsert_session(
     else:
         safe = _safe_title(title)
         stem = f"{today} {safe}.{session_id[:8]}"
+        # New sessions go into a date subdirectory
+        sessions_dir = sessions_parent / today
+        sessions_dir.mkdir(parents=True, exist_ok=True)
         summary_path = sessions_dir / f"{stem}.md"
 
     tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
@@ -698,7 +712,7 @@ def upsert_session(
     fm_lines += [f"title: {title}", f"tags: {tags_str}"]
     if existing_messages_link:
         fm_lines.append(f"messages: {existing_messages_link}")
-    elif (sessions_dir / f"{messages_stem}.md").exists():
+    elif (summary_path.parent / f"{messages_stem}.md").exists():
         # messages.md was already written by Stop hook — keep the link
         fm_lines.append(f"messages: [[{messages_stem}]]")
     fm_lines += ["---", ""]
