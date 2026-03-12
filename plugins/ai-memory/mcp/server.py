@@ -80,8 +80,10 @@ TOOLS = [
                     "items": {"type": "string"},
                     "description": (
                         "Three tiers: "
-                        "(1) context — 'universal' or 'project/<name>' or 'lang/<name>'; "
-                        "add 'rule' if rule/preference; "
+                        "(1) context — 'universal' (applies everywhere), "
+                        "'project/<name>' (specific to one project only), "
+                        "or 'lang/<name>' (language-specific); "
+                        "add 'rule' for rules/preferences/conventions; "
                         "(2) aspect tags; "
                         "(3) specific topic/technology tags"
                     ),
@@ -348,8 +350,10 @@ def _handle_tools_call(params: dict) -> dict:
                     ))
                 resolved = storage.resolve_tags(resolve_input)
                 return _text(json.dumps({"resolved": resolved}, ensure_ascii=False))
-            # Default: list all tags with counts
-            return _text(json.dumps(storage.explore_tags(), indent=2, ensure_ascii=False))
+            # Default: list all tags with counts — compact "tag count" format
+            tag_data = storage.explore_tags()
+            lines = [f"{t['name']} {t['count']}" for t in tag_data.get("tags", [])]
+            return _text("\n".join(lines) if lines else "No tags found.")
 
         return _error(f"Unknown tool: {name!r}")
 

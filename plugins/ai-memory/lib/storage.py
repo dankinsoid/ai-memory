@@ -794,7 +794,9 @@ def _tags_to_dir(base: Path, tags: list[str], language: str | None = None) -> Pa
     for t in tags:
         if t.startswith("project/"):
             project = t[len("project/"):]
-            return base / "projects" / project / "rules"
+            if "rule" in tags:
+                return base / "projects" / project / "rules"
+            return base / "projects" / project / "facts"
 
     if language:
         return base / "languages" / language

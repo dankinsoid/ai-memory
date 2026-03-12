@@ -77,8 +77,9 @@ def derive_tags_from_path(path: Path, base_dir: Path) -> list[str]:
 
     Mapping:
       universal/...              → [universal]
-      languages/<lang>/...       → [<lang>]
+      languages/<lang>/...       → [lang/<lang>]
       projects/<name>/rules/...  → [project/<name>, rule]
+      projects/<name>/facts/...  → [project/<name>]
       projects/<name>/sessions/  → [project/<name>, session]
       projects/<name>/...        → [project/<name>]
       sessions/...               → [session]
