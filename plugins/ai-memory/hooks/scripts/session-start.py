@@ -121,6 +121,7 @@ def format_timestamp() -> str:
 
 def main() -> None:
     data = json.loads(sys.stdin.read())
+    session_id = data.get("session_id", "")
     cwd = data.get("cwd", "")
 
     # Skip resume — context already present
@@ -200,8 +201,14 @@ def main() -> None:
             sections.append(f"## Project: {project_name}\n" + "\n".join(proj_parts))
 
     timestamp = format_timestamp()
-    if sections:
-        print("# Memory Context\n\n" + "\n\n".join(sections) + "\n\n---\n" + timestamp)
+    meta = f"session_id: {session_id}" if session_id else ""
+    if sections or meta:
+        header = "# Memory Context\n"
+        if meta:
+            header += f"\n{meta}\n"
+        if sections:
+            header += "\n" + "\n\n".join(sections)
+        print(header + "\n\n---\n" + timestamp)
 
 
 if __name__ == "__main__":
