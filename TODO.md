@@ -206,6 +206,84 @@ Next: implement storage layer
 
 ---
 
+## Блок 9 — SQLite как локальный индекс
+
+**Цель:** единая SQLite БД как локальный кэш/индекс поверх файловой системы. Ноль внешних зависимостей (sqlite3 в stdlib). Файлы остаются source of truth.
+
+**Расположение:** `~/Library/Caches/ai-memory/index.db` (macOS) / `~/.cache/ai-memory/index.db` (Linux). Кэш-директория, не синхронизируется iCloud. Вся БД восстановима из файлов (кроме векторов — re-embedding платный, но дешёвый). Для экономии на embeddings при нескольких девайсах — подключить внешний Qdrant (`QDRANT_URL`).
+
+### Что заменяет
+
+| Было | Стало |
+|------|-------|
+| `explore_tags()` — rglob + чтение всех .md | `SELECT tag, count FROM file_tags GROUP BY tag` |
+| `resolve_tags()` — rglob для сбора all_tags | `SELECT DISTINCT tag FROM file_tags` |
+| `_filescan_search()` — rglob + фильтр | `SELECT rel_path FROM file_tags WHERE tag IN (...)` |
+| `json_store.py` — полная загрузка JSON на каждый read/write | SQLite BLOB vectors, частичное чтение |
+| `~/.claude/hooks/state/*.json` — россыпь файлов | таблица `state` с атомарными записями (WAL) |
+
+### Схема
+
+```sql
+-- Индекс файлов (source of truth = filesystem, это кэш)
+CREATE TABLE files (
+    rel_path  TEXT PRIMARY KEY,
+    mtime     REAL,           -- os.stat().st_mtime для freshness check
+    md5       TEXT,            -- content hash (для векторов)
+    tags_json TEXT,            -- cached "[tag1, tag2, ...]"
+    date      TEXT             -- front-matter date (для сортировки)
+);
+
+-- Теги — денормализованная таблица для быстрого поиска
+CREATE TABLE file_tags (
+    rel_path TEXT,
+    tag      TEXT,
+    PRIMARY KEY (rel_path, tag)
+);
+CREATE INDEX idx_file_tags_tag ON file_tags(tag);
+
+-- Векторы (замена json_store.py)
+CREATE TABLE vectors (
+    collection TEXT,
+    id         TEXT,
+    vector     BLOB,           -- struct.pack float32 array
+    payload    TEXT,            -- JSON
+    PRIMARY KEY (collection, id)
+);
+
+-- Hook state (замена ~/.claude/hooks/state/*.json)
+CREATE TABLE state (
+    key        TEXT PRIMARY KEY,
+    value      TEXT,            -- JSON
+    updated_at TEXT
+);
+```
+
+### Синхронизация (filesystem → SQLite)
+
+- **Write-path** (remember, upsert_session): обновить индекс синхронно сразу после записи файла
+- **Read-path** (explore_tags, search_facts): если данные в SQLite есть — использовать; иначе fallback на filescan
+- **Session-start reindex**: reconciliation при старте сессии (~50ms на 500 файлов):
+  - Файл на диске, нет в БД → insert
+  - Файл на диске, mtime изменился → re-read, update
+  - Запись в БД, файла нет → delete
+- **БД удалена/отсутствует**: CREATE TABLE IF NOT EXISTS → полный reindex
+- **force reindex**: игнорировать mtime, пересчитать всё (для edge cases)
+
+### Задачи
+
+- [ ] `lib/db.py` — SQLite wrapper: init, migrate (user_version pragma), connection management
+- [ ] `lib/db.py` — reindex: filesystem ↔ SQLite reconciliation (mtime-based)
+- [ ] Заменить `explore_tags()` на SQL query с fallback
+- [ ] Заменить `_filescan_search()` на SQL query с fallback
+- [ ] Заменить `resolve_tags()` all_tags scan на SQL query
+- [ ] `lib/vector_store/sqlite_store.py` — VectorStore impl (BLOB vectors, brute-force cosine)
+- [ ] Перенести hook state из JSON файлов в таблицу `state`
+- [ ] Вызов reindex в session-start hook
+- [ ] Обновить remember/upsert_session — синхронное обновление индекса после записи файла
+
+---
+
 ## Порядок реализации
 
 1. ~~**Блок 3**~~ ✅
@@ -215,7 +293,8 @@ Next: implement storage layer
 5. ~~**Блок 4**~~ ✅
 6. ~~**Блок 8**~~ ✅
 7. **Блок 5** — опциональный AI (векторы ✅, LLM-хуки остались)
-8. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
+8. **Блок 9** — SQLite локальный индекс
+9. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
 
 ---
 
@@ -232,7 +311,7 @@ Next: implement storage layer
 
 Открытые:
 - [ ] Stop hook + 4o-mini: что передавать в качестве контекста?
-- [ ] SQLite индекс: когда включать (>500 файлов? >1000?)
+- [x] SQLite индекс: → Блок 9, всегда включён (stdlib, нулевой overhead)
 - [x] Индекс сессий (session_id → filename) — решено через `{date} {title}.{sid8}.md` формат + glob O(1)
-- [ ] Индекс тегов (tag → [file paths]) — O(1) lookup вместо сканирования всех .md
+- [x] Индекс тегов (tag → [file paths]) — → Блок 9, таблица file_tags с индексом
 - [ ] Clojure-бэкенд: архивировать или удалить из репо?

@@ -3,7 +3,7 @@
     "ai-memory": {
       "type": "stdio",
       "command": "python3",
-      "args": ["mcp/server.py"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.py"]
     }
   }
 }
