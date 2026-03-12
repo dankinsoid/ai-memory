@@ -43,6 +43,7 @@ Include code snippets, exact error messages, specific function names.>
 ## 2. Call `memory_session` mcp tool
 
 Pass `session_id`: `${CLAUDE_SESSION_ID}`
+Pass `project`: from the SessionStart context
 
 ## 3. Confirm to user
 
