@@ -35,6 +35,7 @@ Public API:
 import json
 import os
 import re
+import uuid
 from datetime import date
 from pathlib import Path
 
@@ -845,11 +846,13 @@ def remember(
     target_dir = _tags_to_dir(base, tags, language)
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    stem = title or _safe_title(content_text)[:60] or "untitled"
-    if not stem.endswith(".md"):
-        stem += ".md"
+    name = title or _safe_title(content_text)[:60] or "untitled"
+    # Short random suffix for uniqueness (same scheme as sessions use sid8)
+    uid4 = uuid.uuid4().hex[:4]
+    stem = f"{name}.{uid4}"
+    filename = f"{stem}.md"
 
-    target = target_dir / stem
+    target = target_dir / filename
 
     # Write all tags to front-matter (including path-derived ones)
     tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
