@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 # @ai-generated(solo)
 # Load skill helper: finds previous session and outputs its content.
 #

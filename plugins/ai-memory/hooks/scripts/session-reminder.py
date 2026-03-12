@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 # @ai-generated(solo)
 # UserPromptSubmit hook: reminds agent about session metadata updates.
 #
@@ -156,8 +157,9 @@ def main() -> None:
         session_part = f', project: "{project_name}"' if project_name else ""
         if prompt_count == 1:
             parts.append(
-                f'After responding to this first message, call memory_session once with session_id: "{session_id}"'
+                f'IMPORTANT: After responding to this first message, you MUST call memory_session with session_id: "{session_id}"'
                 f'{session_part}, title, summary, and tags.'
+                " This is required for every conversation — do not skip it."
                 " Summary must describe the session intent, not repeat the user's message verbatim."
             )
         else:

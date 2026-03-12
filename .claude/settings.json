@@ -28,7 +28,10 @@
       "Bash(pip3 show:*)",
       "Bash(python3.14 migrate.py --dry-run)",
       "Bash(python3.14 migrate.py --target \"$HOME/Documents/Obsidian Vault/ai-memory\")",
-      "Bash(AI_MEMORY_DIR=\"$HOME/Documents/Obsidian Vault/ai-memory\" python3 /Users/danil/Code/ai-memory/plugins/ai-memory/cli.py reindex)"
+      "Bash(AI_MEMORY_DIR=\"$HOME/Documents/Obsidian Vault/ai-memory\" python3 /Users/danil/Code/ai-memory/plugins/ai-memory/cli.py reindex)",
+      "Bash(PY39=/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/bin/python3 echo '{\"\"\"\"session_id\"\"\"\":\"\"\"\"test\"\"\"\",\"\"\"\"cwd\"\"\"\":\"\"\"\"/tmp\"\"\"\",\"\"\"\"reason\"\"\"\":\"\"\"\"other\"\"\"\"}')",
+      "Bash($PY39 /Users/danil/Code/ai-memory/plugins/ai-memory/hooks/scripts/session-end.py)",
+      "Bash($PY39 /Users/danil/Code/ai-memory/plugins/ai-memory/hooks/scripts/session-reminder.py)"
     ],
     "additionalDirectories": [
       "/Users/danil/Downloads/ai-memory-snapshot-2026-03-12"

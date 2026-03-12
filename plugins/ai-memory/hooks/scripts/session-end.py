@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 # @ai-generated(solo)
 # SessionEnd hook: caches current session info for continuation linking.
 #

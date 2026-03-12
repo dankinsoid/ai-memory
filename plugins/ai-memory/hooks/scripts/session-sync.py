@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 # @ai-generated(solo)
 # Stop hook: appends conversation transcript to the session summary file.
 #
