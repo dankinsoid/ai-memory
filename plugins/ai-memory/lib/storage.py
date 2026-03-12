@@ -31,6 +31,7 @@ Public API:
   resolve_tags(query_tags) -> list[str]
 """
 
+import json
 import os
 import re
 from datetime import date
@@ -321,7 +322,102 @@ def _filescan_search(
     limit: int,
     offset: int,
 ) -> list[dict]:
-    """File-scan search — tag/date filtering, no vectors."""
+    """Structured search — SQL index when available, filesystem fallback."""
+    from .db import is_populated
+
+    if is_populated():
+        return _sql_search(tags, any_tags, exclude_tags, since_d, until_d,
+                           sort_by, limit, offset)
+
+    return _raw_filescan_search(tags, any_tags, exclude_tags, since_d, until_d,
+                                sort_by, limit, offset)
+
+
+def _sql_search(
+    tags: list[str] | None,
+    any_tags: list[str] | None,
+    exclude_tags: list[str] | None,
+    since_d: date | None,
+    until_d: date | None,
+    sort_by: str,
+    limit: int,
+    offset: int,
+) -> list[dict]:
+    """Search using SQLite file index — filters in SQL, content from files."""
+    from .db import get_connection
+
+    conn = get_connection()
+    conditions: list[str] = []
+    params: list = []
+
+    # AND tags: file must have ALL specified tags
+    if tags:
+        for t in tags:
+            conditions.append(
+                "rel_path IN (SELECT rel_path FROM file_tags WHERE tag = ?)"
+            )
+            params.append(t)
+
+    # OR tags: file must have AT LEAST ONE
+    if any_tags:
+        placeholders = ",".join("?" * len(any_tags))
+        conditions.append(
+            f"rel_path IN (SELECT rel_path FROM file_tags WHERE tag IN ({placeholders}))"
+        )
+        params.extend(any_tags)
+
+    # Exclude tags: file must have NONE
+    if exclude_tags:
+        placeholders = ",".join("?" * len(exclude_tags))
+        conditions.append(
+            f"rel_path NOT IN (SELECT rel_path FROM file_tags WHERE tag IN ({placeholders}))"
+        )
+        params.extend(exclude_tags)
+
+    if since_d:
+        conditions.append("date >= ?")
+        params.append(since_d.isoformat())
+    if until_d:
+        conditions.append("date <= ?")
+        params.append(until_d.isoformat())
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+    order = "mtime DESC" if sort_by == "modified" else "date DESC, mtime DESC"
+
+    sql = (
+        f"SELECT rel_path, tags_json, date FROM files "
+        f"WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?"
+    )
+    params.extend([limit, offset])
+
+    rows = conn.execute(sql, params).fetchall()
+
+    base = get_base_dir()
+    results: list[dict] = []
+    for rel_path, tags_json, date_str in rows:
+        content = _read_content(base / rel_path)
+        if content is None:
+            continue
+        results.append({
+            "path": rel_path,
+            "tags": json.loads(tags_json) if tags_json else [],
+            "date": date_str or "",
+            "content": content,
+        })
+    return results
+
+
+def _raw_filescan_search(
+    tags: list[str] | None,
+    any_tags: list[str] | None,
+    exclude_tags: list[str] | None,
+    since_d: date | None,
+    until_d: date | None,
+    sort_by: str,
+    limit: int,
+    offset: int,
+) -> list[dict]:
+    """Filesystem fallback — rglob + tag/date filtering, no index."""
     base = get_base_dir()
     candidates: list[dict] = []
 
@@ -642,6 +738,17 @@ def upsert_session(
 
     summary_path.write_text("\n".join(fm_lines + summary_body), encoding="utf-8")
 
+    # Update SQLite file index synchronously.
+    # Only index when session file lives under base_dir (not a separate sessions_base).
+    from .db import index_file as _index_file
+    try:
+        _rel = str(summary_path.relative_to(base))
+        _index_file(rel_path=_rel, abs_path=summary_path, base_dir=base)
+    except (ValueError, Exception):
+        # ValueError: sessions_base differs from base — file not under base_dir
+        # Other exceptions: next reindex will catch it
+        pass
+
     # Embed session content for semantic search.
     # Combine title + summary + compact for maximum semantic coverage.
     # Sessions live in the same "content" collection as facts, distinguished
@@ -771,6 +878,13 @@ def remember(
         f"---\ntags: {tags_str}\ndate: {today}\n---\n\n{content_text}\n"
     )
     target.write_text(file_content, encoding="utf-8")
+
+    # Update SQLite file index synchronously so subsequent reads see this file.
+    from .db import index_file as _index_file
+    try:
+        _index_file(rel_path=str(target.relative_to(base)), abs_path=target, base_dir=base)
+    except Exception:
+        pass  # next reindex will catch it
 
     # Embed any new tags so future resolve_tags calls can match against them.
     # Called after write so a file error doesn't block vector storage.
@@ -930,10 +1044,23 @@ def _all_session_dirs(sessions_base: Path) -> list[Path]:
 def explore_tags() -> dict:
     """Return a count of files per tag across the entire storage tree.
 
+    Uses SQLite index when populated, falls back to filesystem scan.
+
     Returns:
         Dict with key 'tags': list of {'name': str, 'count': int}
         sorted alphabetically by name.
     """
+    from .db import is_populated
+
+    if is_populated():
+        from .db import get_connection
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT tag, COUNT(*) AS cnt FROM file_tags GROUP BY tag ORDER BY tag"
+        ).fetchall()
+        return {"tags": [{"name": r[0], "count": r[1]} for r in rows]}
+
+    # Filesystem fallback
     base = get_base_dir()
     counts: dict[str, int] = {}
 
@@ -976,15 +1103,22 @@ def resolve_tags(query_tags: list[str]) -> list[str]:
         the originals if they want to preserve unmatched tags.
     """
     from .vector_store import tag_store
+    from .db import is_populated
 
-    base = get_base_dir()
     all_tags: set[str] = set()
-
-    for md_file in base.rglob("*.md"):
-        content = _read_content(md_file)
-        if content is None:
-            continue
-        all_tags.update(all_tags_for_file(md_file, base, content))
+    if is_populated():
+        from .db import get_connection
+        conn = get_connection()
+        rows = conn.execute("SELECT DISTINCT tag FROM file_tags").fetchall()
+        all_tags = {r[0] for r in rows}
+    else:
+        # Filesystem fallback
+        base = get_base_dir()
+        for md_file in base.rglob("*.md"):
+            content = _read_content(md_file)
+            if content is None:
+                continue
+            all_tags.update(all_tags_for_file(md_file, base, content))
 
     resolved: list[str] = []
     seen: set[str] = set()

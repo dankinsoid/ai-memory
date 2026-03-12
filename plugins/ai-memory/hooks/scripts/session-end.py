@@ -20,6 +20,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Allow importing from plugin lib/ package
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 
 def git_project_name(cwd: str) -> str | None:
     """Extract repo name from git remote URL.
@@ -71,12 +74,17 @@ def main() -> None:
 
     # Clean up loaded-rules dedup cache regardless of reason — keyed by session_id
     # so a new session always starts fresh, but we clean up promptly to avoid accumulation.
-    dedup_file = state_dir / f"{session_id}-loaded-rules.json"
-    if dedup_file.exists():
-        try:
-            dedup_file.unlink()
-        except Exception:
-            pass
+    try:
+        from lib.db import delete_state
+        delete_state(f"{session_id}-loaded-rules")
+    except Exception:
+        # Fallback: clean up legacy JSON file
+        dedup_file = state_dir / f"{session_id}-loaded-rules.json"
+        if dedup_file.exists():
+            try:
+                dedup_file.unlink()
+            except Exception:
+                pass
 
     # Matcher should filter, but double-check: prev-session cache only on /clear
     if hook_reason != "clear":
@@ -84,18 +92,23 @@ def main() -> None:
 
     project = derive_project(cwd)
     if project:
-        cache_file = state_dir / f"prev-session-{project}.json"
         payload = {
             "session_id": session_id,
             "project": project,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        cache_file.write_text(json.dumps(payload))
+        try:
+            from lib.db import set_state
+            set_state(f"prev-session-{project}", json.dumps(payload))
+        except Exception:
+            # Fallback: write legacy JSON file
+            cache_file = state_dir / f"prev-session-{project}.json"
+            cache_file.write_text(json.dumps(payload))
 
         with open(log_file, "a") as f:
             f.write(
                 f"{datetime.now(timezone.utc).isoformat()} | "
-                f"WROTE cache {cache_file} | {payload!r}\n"
+                f"WROTE prev-session-{project} | {payload!r}\n"
             )
 
 

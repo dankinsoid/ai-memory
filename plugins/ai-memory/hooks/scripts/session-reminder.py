@@ -20,6 +20,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Allow importing from plugin lib/ package
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 # ---- Config ----
 
 CHUNK_TOKEN_STEP = 20_000    # create a new chunk every N tokens of context growth
@@ -93,17 +96,23 @@ def main() -> None:
     if not session_id:
         sys.exit(0)
 
-    state_dir = Path.home() / ".claude" / "hooks" / "state"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    reminder_file = state_dir / f"{session_id}-reminder.json"
-
-    # Load or initialize state
+    # Load or initialize state from SQLite, with JSON file fallback
+    reminder_key = f"{session_id}-reminder"
     reminder_state: dict = {}
-    if reminder_file.exists():
-        try:
-            reminder_state = json.loads(reminder_file.read_text())
-        except Exception:
-            pass
+    try:
+        from lib.db import get_state
+        raw = get_state(reminder_key)
+        if raw:
+            reminder_state = json.loads(raw)
+    except Exception:
+        # Fallback: legacy JSON file
+        state_dir = Path.home() / ".claude" / "hooks" / "state"
+        reminder_file = state_dir / f"{session_id}-reminder.json"
+        if reminder_file.exists():
+            try:
+                reminder_state = json.loads(reminder_file.read_text())
+            except Exception:
+                pass
 
     prompt_count = reminder_state.get("prompt_count", 0) + 1
     first_prompt_len = reminder_state.get("first_prompt_len") or len(prompt)
@@ -131,7 +140,15 @@ def main() -> None:
     )
 
     # Persist state
-    reminder_file.write_text(json.dumps(new_state))
+    try:
+        from lib.db import set_state
+        set_state(reminder_key, json.dumps(new_state))
+    except Exception:
+        # Fallback: legacy JSON file
+        state_dir = Path.home() / ".claude" / "hooks" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        reminder_file = state_dir / f"{session_id}-reminder.json"
+        reminder_file.write_text(json.dumps(new_state))
 
     # Build output message
     parts: list[str] = []

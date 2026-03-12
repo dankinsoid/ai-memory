@@ -138,6 +138,23 @@ def main() -> None:
     if any(os.environ.get(v) for v in ("AI_MEMORY_DISABLED", "AI_MEMORY_NO_READ")):
         sys.exit(0)
 
+    # Reconcile filesystem → SQLite index in a detached background process.
+    # The hook proceeds immediately using whatever index state exists from
+    # the previous session.  The background reindex ensures fresh data for
+    # subsequent MCP tool calls within this session.
+    try:
+        subprocess.Popen(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, {str(_PLUGIN_ROOT)!r}); "
+             "from lib.db import reindex; from lib.storage import get_base_dir, get_sessions_base_dir; "
+             "reindex(get_base_dir(), get_sessions_base_dir())"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass  # index is a cache — proceed with filescan fallback if it fails
+
     project_name = derive_project(cwd)
     sections: list[str] = []
 

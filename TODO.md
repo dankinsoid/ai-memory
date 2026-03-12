@@ -206,7 +206,7 @@ Next: implement storage layer
 
 ---
 
-## Блок 9 — SQLite как локальный индекс
+## Блок 9 — SQLite как локальный индекс ✅
 
 **Цель:** единая SQLite БД как локальный кэш/индекс поверх файловой системы. Ноль внешних зависимостей (sqlite3 в stdlib). Файлы остаются source of truth.
 
@@ -222,43 +222,6 @@ Next: implement storage layer
 | `json_store.py` — полная загрузка JSON на каждый read/write | SQLite BLOB vectors, частичное чтение |
 | `~/.claude/hooks/state/*.json` — россыпь файлов | таблица `state` с атомарными записями (WAL) |
 
-### Схема
-
-```sql
--- Индекс файлов (source of truth = filesystem, это кэш)
-CREATE TABLE files (
-    rel_path  TEXT PRIMARY KEY,
-    mtime     REAL,           -- os.stat().st_mtime для freshness check
-    md5       TEXT,            -- content hash (для векторов)
-    tags_json TEXT,            -- cached "[tag1, tag2, ...]"
-    date      TEXT             -- front-matter date (для сортировки)
-);
-
--- Теги — денормализованная таблица для быстрого поиска
-CREATE TABLE file_tags (
-    rel_path TEXT,
-    tag      TEXT,
-    PRIMARY KEY (rel_path, tag)
-);
-CREATE INDEX idx_file_tags_tag ON file_tags(tag);
-
--- Векторы (замена json_store.py)
-CREATE TABLE vectors (
-    collection TEXT,
-    id         TEXT,
-    vector     BLOB,           -- struct.pack float32 array
-    payload    TEXT,            -- JSON
-    PRIMARY KEY (collection, id)
-);
-
--- Hook state (замена ~/.claude/hooks/state/*.json)
-CREATE TABLE state (
-    key        TEXT PRIMARY KEY,
-    value      TEXT,            -- JSON
-    updated_at TEXT
-);
-```
-
 ### Синхронизация (filesystem → SQLite)
 
 - **Write-path** (remember, upsert_session): обновить индекс синхронно сразу после записи файла
@@ -272,15 +235,15 @@ CREATE TABLE state (
 
 ### Задачи
 
-- [ ] `lib/db.py` — SQLite wrapper: init, migrate (user_version pragma), connection management
-- [ ] `lib/db.py` — reindex: filesystem ↔ SQLite reconciliation (mtime-based)
-- [ ] Заменить `explore_tags()` на SQL query с fallback
-- [ ] Заменить `_filescan_search()` на SQL query с fallback
-- [ ] Заменить `resolve_tags()` all_tags scan на SQL query
-- [ ] `lib/vector_store/sqlite_store.py` — VectorStore impl (BLOB vectors, brute-force cosine)
-- [ ] Перенести hook state из JSON файлов в таблицу `state`
-- [ ] Вызов reindex в session-start hook
-- [ ] Обновить remember/upsert_session — синхронное обновление индекса после записи файла
+- [x] `lib/db.py` — SQLite wrapper: init, migrate (user_version pragma), connection management
+- [x] `lib/db.py` — reindex: filesystem ↔ SQLite reconciliation (mtime-based)
+- [x] Заменить `explore_tags()` на SQL query с fallback
+- [x] Заменить `_filescan_search()` на SQL query с fallback
+- [x] Заменить `resolve_tags()` all_tags scan на SQL query
+- [x] `lib/vector_store/sqlite_store.py` — VectorStore impl (BLOB vectors, brute-force cosine)
+- [x] Перенести hook state из JSON файлов в таблицу `state`
+- [x] Вызов reindex в session-start hook
+- [x] Обновить remember/upsert_session — синхронное обновление индекса после записи файла
 
 ---
 
@@ -293,7 +256,7 @@ CREATE TABLE state (
 5. ~~**Блок 4**~~ ✅
 6. ~~**Блок 8**~~ ✅
 7. **Блок 5** — опциональный AI (векторы ✅, LLM-хуки остались)
-8. **Блок 9** — SQLite локальный индекс
+8. ~~**Блок 9**~~ ✅ — SQLite локальный индекс
 9. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
 
 ---

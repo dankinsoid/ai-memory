@@ -187,14 +187,13 @@ def _handle_tools_call(params: dict) -> dict:
             rules_text = ""
             if topic_tags:
                 # Load dedup state — tracks rule paths already returned this session.
-                # Stored alongside session-reminder.json in ~/.claude/hooks/state/.
-                state_dir = Path.home() / ".claude" / "hooks" / "state"
-                state_dir.mkdir(parents=True, exist_ok=True)
-                dedup_file = state_dir / f"{args['session_id']}-loaded-rules.json"
+                from lib.db import get_state, set_state
+                dedup_key = f"{args['session_id']}-loaded-rules"
                 already_loaded: set[str] = set()
-                if dedup_file.exists():
+                raw = get_state(dedup_key)
+                if raw:
                     try:
-                        already_loaded = set(json.loads(dedup_file.read_text()))
+                        already_loaded = set(json.loads(raw))
                     except Exception:
                         pass
 
@@ -219,10 +218,7 @@ def _handle_tools_call(params: dict) -> dict:
                     rules_text = "\n\nRelevant rules for current session topics:\n" + "\n".join(lines)
                     # Persist newly shown rule paths
                     newly_loaded = already_loaded | {r["path"] for r in rules if r.get("path")}
-                    try:
-                        dedup_file.write_text(json.dumps(list(newly_loaded)))
-                    except Exception:
-                        pass  # dedup is best-effort; don't fail the save
+                    set_state(dedup_key, json.dumps(list(newly_loaded)))
             return _text(f"Session saved → {path}{rules_text}")
 
         if name == "memory_remember":

@@ -183,9 +183,18 @@ def _read_prev_session_cache(project: str | None) -> str | None:
     """
     if not project:
         return None
+    import json
+    # Try SQLite state first
+    try:
+        from lib.db import get_state
+        raw = get_state(f"prev-session-{project}")
+        if raw:
+            return json.loads(raw).get("session_id")
+    except Exception:
+        pass
+    # Fallback: legacy JSON file
     cache_path = Path.home() / ".claude" / "hooks" / "state" / f"prev-session-{project}.json"
     try:
-        import json
         data = json.loads(cache_path.read_text(encoding="utf-8"))
         return data.get("session_id")
     except (OSError, ValueError, KeyError):

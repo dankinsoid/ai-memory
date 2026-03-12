@@ -8,6 +8,7 @@ Public API re-exported here so existing imports remain stable:
 from .base import SearchResult, VectorPoint, VectorStore, cosine
 from .factory import get_vector_store
 from .json_store import JsonVectorStore
+from .sqlite_store import SqliteVectorStore
 from .qdrant_store import QdrantVectorStore
 from .tag_store import TagVectorStore, tag_store
 from .content_store import ContentVectorStore, ContentHit, content_store
@@ -18,6 +19,7 @@ __all__ = [
     "VectorPoint",
     "cosine",
     "JsonVectorStore",
+    "SqliteVectorStore",
     "QdrantVectorStore",
     "TagVectorStore",
     "tag_store",
