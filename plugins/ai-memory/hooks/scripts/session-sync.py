@@ -10,13 +10,8 @@
 # Rewrites the full messages.md on each run — no delta tracking.
 # Adds/updates the messages: wiki-link in the summary front-matter.
 #
-# Env-var toggles (set any to disable):
-#   AI_MEMORY_DISABLED=1     — master switch (all hooks)
-#   AI_MEMORY_NO_WRITE=1     — disable all writes
-#   AI_MEMORY_NO_SESSIONS=1  — disable session-specific features
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -337,9 +332,6 @@ def _update_messages_link(summary_path: Path, messages_stem: str) -> None:
 
 
 def main() -> None:
-    if any(os.environ.get(v) for v in ("AI_MEMORY_DISABLED", "AI_MEMORY_NO_WRITE", "AI_MEMORY_NO_SESSIONS")):
-        sys.exit(0)
-
     data = json.loads(sys.stdin.read())
     session_id = data.get("session_id")
     cwd = data.get("cwd", "")

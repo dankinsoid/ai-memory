@@ -8,13 +8,8 @@
 # Cache file: ~/.claude/hooks/state/prev-session-{project}.json
 #   {"session_id": "...", "project": "...", "timestamp": "..."}
 #
-# Env-var toggles (set any to disable):
-#   AI_MEMORY_DISABLED=1     — master switch (all hooks)
-#   AI_MEMORY_NO_WRITE=1     — disable all writes
-#   AI_MEMORY_NO_SESSIONS=1  — disable session-specific features
 
 import json
-import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -50,9 +45,6 @@ def derive_project(cwd: str) -> str | None:
 
 
 def main() -> None:
-    if any(os.environ.get(v) for v in ("AI_MEMORY_DISABLED", "AI_MEMORY_NO_WRITE", "AI_MEMORY_NO_SESSIONS")):
-        sys.exit(0)
-
     data = json.loads(sys.stdin.read())
     session_id = data.get("session_id")
     hook_reason = data.get("reason")

@@ -17,8 +17,6 @@ Early development — no backwards compatibility concerns, no production DB yet.
 claude --plugin-dir ./plugins/ai-memory
 ```
 
-Requires `AI_MEMORY_TOKEN` env var for MCP server auth.
-
 Edit files in `plugins/ai-memory/` — changes take effect after plugin update.
 
 Legacy `claude_config_files/` and `scripts/deploy.bb` are deprecated.

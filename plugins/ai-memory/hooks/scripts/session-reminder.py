@@ -9,13 +9,8 @@
 # State file per session: ~/.claude/hooks/state/{session-id}-reminder.json
 #   {"prompt_count": N, "first_prompt_len": N, "last_chunk_tokens": N}
 #
-# Env-var toggles (set any to disable):
-#   AI_MEMORY_DISABLED=1     — master switch (all hooks)
-#   AI_MEMORY_NO_WRITE=1     — disable all writes/nudges
-#   AI_MEMORY_NO_SESSIONS=1  — disable session-specific features
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -83,9 +78,6 @@ def get_context_tokens(transcript_path: str | None) -> int | None:
 
 
 def main() -> None:
-    if any(os.environ.get(v) for v in ("AI_MEMORY_DISABLED", "AI_MEMORY_NO_WRITE", "AI_MEMORY_NO_SESSIONS")):
-        sys.exit(0)
-
     data = json.loads(sys.stdin.read())
     session_id = data.get("session_id")
     prompt = data.get("prompt", "") or ""

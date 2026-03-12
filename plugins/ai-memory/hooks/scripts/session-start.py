@@ -9,16 +9,10 @@
 # Loads facts sorted by tag priority per scope (universal, project):
 #   1. critical-rule  2. rule  3. remaining (sorted by date)
 #
-# Env-var toggles (set any to disable):
-#   AI_MEMORY_DISABLED=1     — master switch (all hooks)
-#   AI_MEMORY_NO_READ=1      — don't inject any context
-#   AI_MEMORY_NO_SESSIONS=1  — skip recent sessions section
-#   AI_MEMORY_NO_FACTS=1     — skip facts sections
 
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from datetime import datetime
@@ -33,8 +27,6 @@ from lib import storage  # noqa: E402
 
 # ---- Config ----
 
-NO_SESSIONS = bool(os.environ.get("AI_MEMORY_NO_SESSIONS"))
-NO_FACTS = bool(os.environ.get("AI_MEMORY_NO_FACTS"))
 
 UNIVERSAL_LIMIT = 5
 PROJECT_LIMIT = 10
@@ -135,9 +127,6 @@ def main() -> None:
     if data.get("source") == "resume":
         sys.exit(0)
 
-    if any(os.environ.get(v) for v in ("AI_MEMORY_DISABLED", "AI_MEMORY_NO_READ")):
-        sys.exit(0)
-
     # Reconcile filesystem → SQLite index in a detached background process.
     # The hook proceeds immediately using whatever index state exists from
     # the previous session.  The background reindex ensures fresh data for
@@ -159,23 +148,22 @@ def main() -> None:
     sections: list[str] = []
 
     # ---- Universal facts ----
-    if not NO_FACTS:
-        u_facts = storage.search_facts(
-            tags=["universal"],
-            exclude_tags=["session"],
-            sort_by="date",
-            limit=UNIVERSAL_LIMIT,
-        )
-        if u_facts:
-            rules = [f for f in u_facts if _is_rule(f)]
-            others = [f for f in u_facts if not _is_rule(f)]
-            parts: list[str] = []
-            if rules:
-                parts.append("### Rules\n" + "\n".join(format_fact(f) for f in rules))
-            if others:
-                parts.append("### Facts\n" + "\n".join(format_fact(f) for f in others))
-            if parts:
-                sections.append("## Universal\n" + "\n".join(parts))
+    u_facts = storage.search_facts(
+        tags=["universal"],
+        exclude_tags=["session"],
+        sort_by="date",
+        limit=UNIVERSAL_LIMIT,
+    )
+    if u_facts:
+        rules = [f for f in u_facts if _is_rule(f)]
+        others = [f for f in u_facts if not _is_rule(f)]
+        parts: list[str] = []
+        if rules:
+            parts.append("### Rules\n" + "\n".join(format_fact(f) for f in rules))
+        if others:
+            parts.append("### Facts\n" + "\n".join(format_fact(f) for f in others))
+        if parts:
+            sections.append("## Universal\n" + "\n".join(parts))
 
     # ---- Project scope ----
     if project_name:
@@ -183,32 +171,30 @@ def main() -> None:
         proj_parts: list[str] = []
 
         # Recent sessions
-        if not NO_SESSIONS:
-            sessions = storage.search_sessions(
-                project=project_name,
-                sort_by="date",
-                limit=SESSION_LIMIT,
+        sessions = storage.search_sessions(
+            project=project_name,
+            sort_by="date",
+            limit=SESSION_LIMIT,
+        )
+        if sessions:
+            proj_parts.append(
+                "### Sessions\n" + "\n".join(format_session_line(s) for s in sessions)
             )
-            if sessions:
-                proj_parts.append(
-                    "### Sessions\n" + "\n".join(format_session_line(s) for s in sessions)
-                )
 
         # Project facts
-        if not NO_FACTS:
-            p_facts = storage.search_facts(
-                tags=[ptag],
-                exclude_tags=["session"],
-                sort_by="date",
-                limit=PROJECT_LIMIT,
-            )
-            if p_facts:
-                rules = [f for f in p_facts if _is_rule(f)]
-                others = [f for f in p_facts if not _is_rule(f)]
-                if rules:
-                    proj_parts.append("### Rules\n" + "\n".join(format_fact(f) for f in rules))
-                if others:
-                    proj_parts.append("### Facts\n" + "\n".join(format_fact(f) for f in others))
+        p_facts = storage.search_facts(
+            tags=[ptag],
+            exclude_tags=["session"],
+            sort_by="date",
+            limit=PROJECT_LIMIT,
+        )
+        if p_facts:
+            rules = [f for f in p_facts if _is_rule(f)]
+            others = [f for f in p_facts if not _is_rule(f)]
+            if rules:
+                proj_parts.append("### Rules\n" + "\n".join(format_fact(f) for f in rules))
+            if others:
+                proj_parts.append("### Facts\n" + "\n".join(format_fact(f) for f in others))
 
         if proj_parts:
             sections.append(f"## Project: {project_name}\n" + "\n".join(proj_parts))
