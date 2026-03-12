@@ -79,13 +79,58 @@ def _get_title(summary_path: Path) -> str:
     return parse_front_matter(content).get("title", summary_path.stem)
 
 
-def _print_session_content(summary_path: Path) -> None:
-    """Print session content for /load recovery.
+def _extract_section(content: str, heading: str) -> str | None:
+    """Extract body text under a markdown heading, up to the next same-level heading.
 
-    Always prints the summary file first (contains metadata, Summary, and
-    optionally Compact from /save).  Then appends the tail of messages.md
-    for recent conversation context — budget depends on whether Compact
-    was present (it's already substantial, so less messages needed).
+    Args:
+        content: full markdown text
+        heading: heading line to find, e.g. '## Compact'
+
+    Returns:
+        Section body text (without the heading itself), or None if not found.
+    """
+    level = len(heading) - len(heading.lstrip("#"))
+    prefix = "#" * level + " "
+    lines = content.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip() == heading.strip():
+            start = i + 1
+        elif start is not None and line.startswith(prefix):
+            return "\n".join(lines[start:i]).strip() or None
+    if start is not None:
+        return "\n".join(lines[start:]).strip() or None
+    return None
+
+
+def _print_messages_tail(summary_path: Path, has_compact: bool) -> None:
+    """Print the tail of the paired messages.md file.
+
+    Budget depends on whether summary already contains Compact section —
+    Compact is dense context so less raw messages needed.
+
+    Args:
+        summary_path: path to the session summary .md file.
+        has_compact: whether the summary contains a ## Compact section.
+    """
+    messages = _read_messages(summary_path)
+    if not messages:
+        return
+    tail_budget = 500 if has_compact else 2000
+    tail = messages[-tail_budget:]
+    # Avoid cutting mid-line
+    newline = tail.find("\n")
+    if newline != -1 and newline < len(tail) - 1:
+        tail = tail[newline + 1:]
+    if tail.strip():
+        print()
+        print("## Recent messages")
+        print()
+        print(tail)
+
+
+def _print_session_content(summary_path: Path) -> None:
+    """Print full session content: summary + messages tail.
 
     Args:
         summary_path: path to the session summary .md file.
@@ -93,22 +138,7 @@ def _print_session_content(summary_path: Path) -> None:
     content = storage._read_content(summary_path) or ""
     has_compact = "## Compact" in content
     print(content)
-
-    messages = _read_messages(summary_path)
-    if messages:
-        # Compact already provides dense context — small tail suffices;
-        # without Compact, lean more on raw messages
-        tail_budget = 500 if has_compact else 2000
-        tail = messages[-tail_budget:]
-        # Avoid cutting mid-line
-        newline = tail.find("\n")
-        if newline != -1 and newline < len(tail) - 1:
-            tail = tail[newline + 1:]
-        if tail.strip():
-            print()
-            print("## Recent messages")
-            print()
-            print(tail)
+    _print_messages_tail(summary_path, has_compact)
 
 
 def _print_recovery(summary_path: Path) -> None:
@@ -180,11 +210,20 @@ def main() -> None:
         # Strip [[ ]] if the agent passes the full wikilink syntax
         stem = args[1].strip("[]")
         found = _find_by_stem(stem)
-        if found:
-            _print_recovery(found)
-        else:
+        if not found:
             print(f"Session not found for ref: [[{stem}]]")
             sys.exit(1)
+        # Agent already has front-matter + Summary from memory_search
+        # (truncated to first paragraph). Print Compact + messages tail.
+        content = storage._read_content(found) or ""
+        has_compact = "## Compact" in content
+        if has_compact:
+            compact = _extract_section(content, "## Compact")
+            if compact:
+                print("## Compact")
+                print()
+                print(compact)
+        _print_messages_tail(found, has_compact)
         return
 
     if args[0] == "--file":
