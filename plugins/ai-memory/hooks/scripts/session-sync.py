@@ -288,9 +288,10 @@ def derive_title(messages: list[dict]) -> str:
 
 
 def _update_messages_link(summary_path: Path, messages_stem: str) -> None:
-    """Add or update messages: wiki-link in the summary file front-matter.
+    """Add messages wikilink to the summary file body (not front-matter).
 
-    No-op if the link is already present. Rewrites the file in place.
+    Appends ``[[messages_stem]]`` at the end of the file if not already present.
+    No-op if the link is already in the file content.
 
     Args:
         summary_path: path to the session summary .md file
@@ -299,30 +300,11 @@ def _update_messages_link(summary_path: Path, messages_stem: str) -> None:
     content = summary_path.read_text(encoding="utf-8")
     link = f"[[{messages_stem}]]"
 
-    # Already has messages: link — check if it needs updating
-    if re.search(r"^messages:", content, re.MULTILINE):
-        if link in content:
-            return  # already correct
-        content = re.sub(r"^messages:.*$", f"messages: {link}", content, flags=re.MULTILINE)
-    else:
-        # Insert before closing --- of front-matter
-        content = re.sub(r"^---\s*$", f"messages: {link}\n---", content, count=1, flags=re.MULTILINE)
-        # The above replaces the FIRST --- (opening), so we need to be smarter:
-        # Find the second --- and insert before it.
-        # Revert and do it properly.
-        content = summary_path.read_text(encoding="utf-8")
-        lines = content.splitlines(keepends=True)
-        close_idx = None
-        for i, line in enumerate(lines):
-            if i == 0:
-                continue  # skip opening ---
-            if line.strip() == "---":
-                close_idx = i
-                break
-        if close_idx is not None:
-            lines.insert(close_idx, f"messages: {link}\n")
-            content = "".join(lines)
+    if link in content:
+        return  # already present
 
+    # Append wikilink at end of file body
+    content = content.rstrip() + "\n\n" + link + "\n"
     summary_path.write_text(content, encoding="utf-8")
 
 

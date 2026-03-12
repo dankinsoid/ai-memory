@@ -23,7 +23,15 @@
       "Bash(clj -M:edn -e '\\(require \\(quote ai-memory.web.handler\\) \\(quote ai-memory.web.api\\)\\)')",
       "Read(//private/tmp/**)",
       "Bash(unzip -t /tmp/test-export2.zip)",
-      "Bash(pipx run:*)"
+      "Bash(pipx run:*)",
+      "Read(//Users/danil/Downloads/ai-memory-snapshot-2026-03-12/blobs/projects/ai-memory/2026-02-23_session-29c65c79/**)",
+      "Bash(pip3 show:*)",
+      "Bash(python3.14 migrate.py --dry-run)",
+      "Bash(python3.14 migrate.py --target \"$HOME/Documents/Obsidian Vault/ai-memory\")",
+      "Bash(AI_MEMORY_DIR=\"$HOME/Documents/Obsidian Vault/ai-memory\" python3 /Users/danil/Code/ai-memory/plugins/ai-memory/cli.py reindex)"
+    ],
+    "additionalDirectories": [
+      "/Users/danil/Downloads/ai-memory-snapshot-2026-03-12"
     ]
   }
 }

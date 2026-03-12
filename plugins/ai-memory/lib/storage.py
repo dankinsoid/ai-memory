@@ -14,8 +14,9 @@ The summary file contains:
   ## Summary — 1-2 sentence arc
   ## Compact — detailed /save notes (if agent ran /save)
 
-The summary file may contain an Obsidian wiki-link to its messages file:
-  messages: [[2026-03-11 Block 2 skills update messages]]  (added by Stop hook)
+The summary file may contain an Obsidian wiki-link to its messages file
+in the body (not front-matter):
+  [[2026-03-11 Block 2 skills update messages]]  (added by Stop hook)
 
 No database or server required.
 
@@ -701,26 +702,20 @@ def upsert_session(
 
     messages_stem = f"{stem}.messages"
 
-    # Preserve existing messages: link — Stop hook manages it independently
-    existing_messages_link: str | None = None
-    if existing:
-        existing_messages_link = (parse_front_matter(_read_content(existing) or "")).get("messages") or None
-
     fm_lines = ["---", f"id: {session_id}", f"date: {today}"]
     if project:
         fm_lines.append(f"project: {project}")
     fm_lines += [f"title: {title}", f"tags: {tags_str}"]
-    if existing_messages_link:
-        fm_lines.append(f"messages: {existing_messages_link}")
-    elif (summary_path.parent / f"{messages_stem}.md").exists():
-        # messages.md was already written by Stop hook — keep the link
-        fm_lines.append(f"messages: [[{messages_stem}]]")
     fm_lines += ["---", ""]
 
     summary_body = ["## Summary", "", summary, ""]
     # Compact (detailed /save notes) lives in the summary file, not a separate messages file
     if compact:
         summary_body += ["## Compact", "", compact, ""]
+
+    # Wikilink to messages file — in body, not front-matter (Obsidian-compatible)
+    if (summary_path.parent / f"{messages_stem}.md").exists():
+        summary_body += [f"[[{messages_stem}]]", ""]
 
     summary_path.write_text("\n".join(fm_lines + summary_body), encoding="utf-8")
 
@@ -856,10 +851,8 @@ def remember(
 
     target = target_dir / stem
 
-    # Exclude path-derived tags from front-matter to avoid duplication
-    path_tags = set(derive_tags_from_path(target, base))
-    fm_tags = [t for t in tags if t not in path_tags]
-    tags_str = "[" + ", ".join(fm_tags) + "]" if fm_tags else "[]"
+    # Write all tags to front-matter (including path-derived ones)
+    tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
 
     today = date.today().isoformat()
     file_content = (
@@ -940,7 +933,7 @@ def reindex() -> dict:
 
     # --- Sessions ---
     for sessions_dir in _all_session_dirs(sessions_base):
-        for f in sessions_dir.glob("*.md"):
+        for f in sessions_dir.rglob("*.md"):
             if _is_messages_file(f.name):
                 continue
             rec = _read_session_file(f, sessions_base)
