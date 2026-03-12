@@ -1,7 +1,7 @@
 {
   "name": "ai-memory",
   "version": "0.3.2",
-  "description": "Long-term memory system for AI agents — facts, sessions, blobs via MCP",
+  "description": "Long-term memory system for AI agents — lazy facts, sessions, via MCP",
   "repository": "https://github.com/dankinsoid/ai-memory",
   "author": {
     "name": "Daniil Voidilov"
