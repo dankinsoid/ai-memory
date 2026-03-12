@@ -1,6 +1,6 @@
 # ai-memory
 
-Long-term memory system for AI agents (MCP server). Clojure + Datomic/Datalevin/EDN + Qdrant.
+Long-term memory system for AI agents (MCP server).
 
 Early development — no backwards compatibility concerns, no production DB yet.
 
@@ -23,28 +23,7 @@ Edit files in `plugins/ai-memory/` — changes take effect after plugin update.
 
 Legacy `claude_config_files/` and `scripts/deploy.bb` are deprecated.
 
-## Commands
-
-Requires a backend alias (`:datomic`, `:datalevin`, or `:edn`):
-
-```bash
-clj -M:datomic:dev          # REPL (nREPL + CIDER) with Datomic backend
-clj -M:datomic:run          # Run service (port 8080)
-clj -M:datomic:test         # Tests (kaocha)
-
-# EDN backend — lightweight local dev, no DB deps (default file: ~/.claude/ai-memory/db.edn)
-clj -M:edn:run
-# With Qdrant Cloud:
-QDRANT_URL=https://xyz.cloud.qdrant.io:6333 QDRANT_API_KEY=... clj -M:edn:run
-# With in-memory vectors (no Qdrant needed):
-VECTOR_BACKEND=memory EMBEDDING_BACKEND=random clj -M:edn:run
-```
-
-Local dev: run service directly, no Docker. Restart after code changes.
-
-Env var overrides: `VECTOR_BACKEND` (memory/qdrant), `EMBEDDING_BACKEND` (random/openai/auto), `QDRANT_API_KEY` (for Qdrant Cloud).
-
-## Server (DigitalOcean)
+## Server (DigitalOcean) - legacy
 
 IP: `46.101.153.18`, user: `root`, SSH key: `~/.ssh/digital_ocean`
 
@@ -75,10 +54,6 @@ ssh root@IP 'bash -s' < scripts/server-init.sh
 CI: push to `main` → GitHub Actions auto-deploys via SSH. Secrets: `DO_HOST`, `DO_USER`, `DO_SSH_KEY`.
 
 Blobs are located at `/var/lib/docker/volumes/ai-memory_blob-data/_data` on the host.
-
-## Key ADRs
-
-`doc/adr/` — read before architectural changes. Key: ADR-009 (tag retrieval), ADR-010 (blob storage).
 
 ## Commit Rules
 
