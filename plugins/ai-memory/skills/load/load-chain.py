@@ -11,8 +11,8 @@
 # Session linking relies on prev-session cache written by session-end.py hook
 # (stored in SQLite state table, keyed by project name).
 #
-# Content strategy: always prints summary (with Compact if present),
-# then appends tail of messages.md (~2000 chars, or ~500 if Compact exists).
+# Content strategy: prints summary + compact (if present), then tail of
+# the ## Transcript section (~2000 chars, or ~500 if Compact exists).
 
 import sys
 from pathlib import Path
@@ -67,12 +67,6 @@ def _find_session_by_id(session_id: str, project: str | None) -> Path | None:
     return None
 
 
-def _read_messages(summary_path: Path) -> str | None:
-    """Read the paired .messages.md file for a session summary, or None."""
-    messages_path = summary_path.parent / f"{summary_path.stem}.messages.md"
-    return storage._read_content(messages_path)
-
-
 def _get_title(summary_path: Path) -> str:
     """Extract title from summary.md front-matter, falling back to stem."""
     content = storage._read_content(summary_path) or ""
@@ -81,6 +75,9 @@ def _get_title(summary_path: Path) -> str:
 
 def _extract_section(content: str, heading: str) -> str | None:
     """Extract body text under a markdown heading, up to the next same-level heading.
+
+    Also stops at a ``---`` divider so that ## Summary / ## Compact content
+    doesn't bleed into the ## Transcript block (separated by ``---``).
 
     Args:
         content: full markdown text
@@ -96,49 +93,49 @@ def _extract_section(content: str, heading: str) -> str | None:
     for i, line in enumerate(lines):
         if line.strip() == heading.strip():
             start = i + 1
-        elif start is not None and line.startswith(prefix):
+        elif start is not None and (line.startswith(prefix) or line.strip() == "---"):
             return "\n".join(lines[start:i]).strip() or None
     if start is not None:
         return "\n".join(lines[start:]).strip() or None
     return None
 
 
-def _print_messages_tail(summary_path: Path, has_compact: bool) -> None:
-    """Print the tail of the paired messages.md file.
-
-    Budget depends on whether summary already contains Compact section —
-    Compact is dense context so less raw messages needed.
-
-    Args:
-        summary_path: path to the session summary .md file.
-        has_compact: whether the summary contains a ## Compact section.
-    """
-    messages = _read_messages(summary_path)
-    if not messages:
-        return
-    tail_budget = 500 if has_compact else 2000
-    tail = messages[-tail_budget:]
-    # Avoid cutting mid-line
-    newline = tail.find("\n")
-    if newline != -1 and newline < len(tail) - 1:
-        tail = tail[newline + 1:]
-    if tail.strip():
-        print()
-        print("## Recent messages")
-        print()
-        print(tail)
-
-
 def _print_session_content(summary_path: Path) -> None:
-    """Print full session content: summary + messages tail.
+    """Print session content: summary + compact + transcript tail.
+
+    Transcript is stored as ``## Transcript`` section in the same file
+    (below a ``---`` divider). Only the tail is printed to keep output
+    manageable — budget depends on whether Compact section exists.
 
     Args:
         summary_path: path to the session summary .md file.
     """
     content = storage._read_content(summary_path) or ""
     has_compact = "## Compact" in content
-    print(content)
-    _print_messages_tail(summary_path, has_compact)
+
+    # Print everything up to the --- divider before transcript
+    divider_marker = "\n---\n\n## Transcript\n"
+    divider_idx = content.find(divider_marker)
+    if divider_idx != -1:
+        print(content[:divider_idx].rstrip())
+    else:
+        print(content)
+        return  # no transcript section
+
+    # Print tail of transcript
+    transcript = _extract_section(content, "## Transcript")
+    if transcript:
+        tail_budget = 500 if has_compact else 2000
+        tail = transcript[-tail_budget:]
+        # Avoid cutting mid-line
+        newline = tail.find("\n")
+        if newline != -1 and newline < len(tail) - 1:
+            tail = tail[newline + 1:]
+        if tail.strip():
+            print()
+            print("## Recent messages")
+            print()
+            print(tail)
 
 
 def _print_recovery(summary_path: Path) -> None:
@@ -214,7 +211,7 @@ def main() -> None:
             print(f"Session not found for ref: [[{stem}]]")
             sys.exit(1)
         # Agent already has front-matter + Summary from memory_search
-        # (truncated to first paragraph). Print Compact + messages tail.
+        # (truncated to first paragraph). Print Compact + transcript tail.
         content = storage._read_content(found) or ""
         has_compact = "## Compact" in content
         if has_compact:
@@ -223,7 +220,18 @@ def main() -> None:
                 print("## Compact")
                 print()
                 print(compact)
-        _print_messages_tail(found, has_compact)
+        transcript = _extract_section(content, "## Transcript")
+        if transcript:
+            tail_budget = 500 if has_compact else 2000
+            tail = transcript[-tail_budget:]
+            newline = tail.find("\n")
+            if newline != -1 and newline < len(tail) - 1:
+                tail = tail[newline + 1:]
+            if tail.strip():
+                print()
+                print("## Recent messages")
+                print()
+                print(tail)
         return
 
     if args[0] == "--file":

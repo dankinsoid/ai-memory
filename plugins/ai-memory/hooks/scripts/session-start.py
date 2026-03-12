@@ -60,6 +60,61 @@ def derive_project(cwd: str) -> str | None:
     return git_project_name(cwd) or (cwd.rstrip("/").split("/")[-1] if cwd else None)
 
 
+# ---- Git context persistence ----
+
+def _git_head_and_branch(cwd: str) -> tuple[str | None, str | None]:
+    """Return (short_commit, branch_name) for the repo at cwd.
+
+    Args:
+        cwd: working directory inside a git repo
+
+    Returns:
+        Tuple of (commit_short_sha, branch_name). Either may be None.
+    """
+    commit = branch = None
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            commit = r.stdout.strip()
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd, "branch", "--show-current"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            branch = r.stdout.strip() or None  # empty on detached HEAD
+    except Exception:
+        pass
+    return commit, branch
+
+
+def _save_git_context(cwd: str, session_id: str) -> None:
+    """Persist branch + start commit to state DB for session-sync to read later.
+
+    Args:
+        cwd: working directory
+        session_id: current session UUID
+    """
+    commit, branch = _git_head_and_branch(cwd)
+    if not commit and not branch:
+        return
+    payload = {}
+    if branch:
+        payload["branch"] = branch
+    if commit:
+        payload["commit_start"] = commit
+    try:
+        from lib.db import set_state
+        set_state(f"git-context-{session_id}", json.dumps(payload))
+    except Exception:
+        pass  # non-critical — session works without git context
+
+
 # ---- Formatting ----
 
 def _is_rule(fact: dict) -> bool:
@@ -199,6 +254,10 @@ def main() -> None:
 
         if proj_parts:
             sections.append(f"## Project: {project_name}\n" + "\n".join(proj_parts))
+
+    # Save git context (branch + start commit) for session-sync to pick up later
+    if cwd and session_id:
+        _save_git_context(cwd, session_id)
 
     timestamp = format_timestamp()
     meta = f"session_id: {session_id}" if session_id else ""

@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 # @ai-generated(solo)
-# Stop hook: saves full conversation transcript to messages.md.
+# Stop hook: appends conversation transcript to the session summary file.
 #
-# On every Stop, reads the JSONL transcript and writes a formatted markdown
-# conversation to {date} {title} messages.md alongside the session summary file.
-# If no summary file exists yet (agent never called memory_session), creates
-# a minimal one with title derived from the first user message.
+# On every Stop, reads the JSONL transcript and appends a ## Transcript
+# section to the session summary .md file. If no summary file exists yet
+# (agent never called memory_session), creates a minimal one.
 #
-# Rewrites the full messages.md on each run — no delta tracking.
-# Adds/updates the messages: wiki-link in the summary front-matter.
+# Rewrites the transcript section on each run — no delta tracking.
 #
 
 import json
@@ -64,6 +62,48 @@ def derive_project(cwd: str) -> str | None:
         Project name string, or None.
     """
     return git_project_name(cwd) or (cwd.rstrip("/").split("/")[-1] if cwd else None)
+
+
+def _git_head_short(cwd: str) -> str | None:
+    """Return short SHA of HEAD, or None if not a git repo.
+
+    Args:
+        cwd: working directory inside a git repo
+
+    Returns:
+        Short commit SHA string, or None.
+    """
+    if not cwd:
+        return None
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _load_git_context(session_id: str) -> dict:
+    """Load git context (branch, commit_start) saved by session-start hook.
+
+    Args:
+        session_id: current session UUID
+
+    Returns:
+        Dict with optional 'branch' and 'commit_start' keys.
+    """
+    try:
+        from lib.db import get_state
+        raw = get_state(f"git-context-{session_id}")
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        pass
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +169,10 @@ def _extract_text(content) -> str:
 
 _AI_MEMORY_TOOL_PREFIX = "mcp__plugin_ai-memory_ai-memory__"
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+# Matches markdown links [text](target) where target is NOT an http(s) URL.
+# These are typically code file references that pollute Obsidian's graph
+# by creating phantom nodes. Convert to `text` to neutralize.
+_MD_FILE_LINK_RE = re.compile(r"\[([^\]]+)\]\((?!https?://)([^)]+)\)")
 
 
 def _extract_refs_from_tool_result(block: dict) -> list[str]:
@@ -236,6 +280,21 @@ def extract_message_stream(entries: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+def _neutralize_file_links(text: str) -> str:
+    """Replace markdown file-path links with backtick-quoted text.
+
+    Converts ``[name](path)`` → `` `name` `` for non-URL targets so Obsidian
+    doesn't create phantom graph nodes. HTTP(S) links are left intact.
+
+    Args:
+        text: raw markdown text
+
+    Returns:
+        Text with file-path links neutralized.
+    """
+    return _MD_FILE_LINK_RE.sub(r"`\1`", text)
+
+
 def format_messages_md(stream: list[dict]) -> str:
     """Format a message stream as readable markdown with inline memory references.
 
@@ -259,7 +318,7 @@ def format_messages_md(stream: list[dict]) -> str:
             role = "Human" if item["role"] == "user" else "Assistant"
             lines.append(f"## {role}")
             lines.append("")
-            lines.append(item["text"])
+            lines.append(_neutralize_file_links(item["text"]))
             lines.append("")
     return "\n".join(lines).strip()
 
@@ -283,29 +342,123 @@ def derive_title(messages: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Summary front-matter update
+# Transcript merging
 # ---------------------------------------------------------------------------
 
 
-def _update_messages_link(summary_path: Path, messages_stem: str) -> None:
-    """Add messages wikilink to the summary file body (not front-matter).
+_GIT_FM_FIELDS = ("branch", "commit_start", "commit_end")
 
-    Appends ``[[messages_stem]]`` at the end of the file if not already present.
-    No-op if the link is already in the file content.
+
+def _update_git_fields(
+    summary_path: Path, git_ctx: dict, commit_end: str | None
+) -> None:
+    """Add or update git fields in session frontmatter.
+
+    Only writes fields that are missing in the existing frontmatter.
+    commit_end is always updated to reflect the latest state.
 
     Args:
         summary_path: path to the session summary .md file
-        messages_stem: stem for the messages file (without .md)
+        git_ctx: dict with optional 'branch' and 'commit_start' keys
+        commit_end: short SHA of current HEAD (may be None)
     """
     content = summary_path.read_text(encoding="utf-8")
-    link = f"[[{messages_stem}]]"
+    fm = parse_front_matter(content)
 
-    if link in content:
-        return  # already present
+    updates: dict[str, str] = {}
+    if git_ctx.get("branch") and not fm.get("branch"):
+        updates["branch"] = git_ctx["branch"]
+    if git_ctx.get("commit_start") and not fm.get("commit_start"):
+        updates["commit_start"] = git_ctx["commit_start"]
+    if commit_end:
+        updates["commit_end"] = commit_end
 
-    # Append wikilink at end of file body
-    content = content.rstrip() + "\n\n" + link + "\n"
-    summary_path.write_text(content, encoding="utf-8")
+    if not updates:
+        return
+
+    # Insert git fields before closing ---
+    lines = content.split("\n")
+    # Find the closing --- of frontmatter (second occurrence)
+    fm_end = None
+    found_first = False
+    for i, line in enumerate(lines):
+        if line.strip() == "---":
+            if found_first:
+                fm_end = i
+                break
+            found_first = True
+
+    if fm_end is None:
+        return  # malformed frontmatter, skip
+
+    # Remove existing git lines to avoid duplicates, then re-insert
+    new_lines = []
+    for i, line in enumerate(lines):
+        if i > 0 and i < fm_end:
+            key = line.split(":")[0].strip() if ":" in line else ""
+            if key in _GIT_FM_FIELDS:
+                continue
+        new_lines.append(line)
+
+    # Recalculate fm_end after removals
+    fm_end_new = None
+    found_first = False
+    for i, line in enumerate(new_lines):
+        if line.strip() == "---":
+            if found_first:
+                fm_end_new = i
+                break
+            found_first = True
+
+    if fm_end_new is None:
+        return
+
+    # Insert all git fields before closing ---
+    insert_lines = [f"{k}: {v}" for k, v in updates.items()]
+    # Also re-add existing git fields that weren't updated
+    for field in _GIT_FM_FIELDS:
+        if field not in updates and fm.get(field):
+            insert_lines.append(f"{field}: {fm[field]}")
+
+    # Sort: branch, commit_start, commit_end
+    field_order = {f: i for i, f in enumerate(_GIT_FM_FIELDS)}
+    insert_lines.sort(key=lambda l: field_order.get(l.split(":")[0], 99))
+
+    for j, il in enumerate(insert_lines):
+        new_lines.insert(fm_end_new + j, il)
+
+    summary_path.write_text("\n".join(new_lines), encoding="utf-8")
+
+
+_TRANSCRIPT_HEADER = "## Transcript"
+
+
+def _replace_transcript_section(summary_path: Path, transcript_md: str) -> None:
+    """Replace (or append) the ## Transcript section in a session summary file.
+
+    Everything from ``## Transcript`` to end-of-file is replaced with the new
+    transcript content. A ``---`` divider separates the transcript from the
+    summary/compact sections above. If no transcript section exists yet, it is
+    appended.
+
+    Args:
+        summary_path: path to the session summary .md file
+        transcript_md: formatted transcript markdown (without the header)
+    """
+    content = summary_path.read_text(encoding="utf-8")
+    marker = f"\n{_TRANSCRIPT_HEADER}\n"
+    idx = content.find(marker)
+    if idx != -1:
+        # Strip preceding divider too (it's part of the transcript block)
+        base = content[:idx].rstrip().removesuffix("---").rstrip()
+    else:
+        base = content.rstrip()
+
+    # Strip any leftover [[...messages]] wikilinks from old format
+    base = re.sub(r"\n*\[\[[^\]]+\.messages\]\]\s*$", "", base).rstrip()
+
+    new_content = base + f"\n\n---\n\n{_TRANSCRIPT_HEADER}\n\n{transcript_md}\n"
+    summary_path.write_text(new_content, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +493,10 @@ def main() -> None:
         else sessions_base / "sessions"
     )
 
+    # Resolve git context: start info from state DB, current commit from git
+    git_ctx = _load_git_context(session_id) if session_id else {}
+    commit_end = _git_head_short(cwd)
+
     # Find or create session summary file
     existing = storage._find_session_file(sessions_parent, session_id)
 
@@ -352,20 +509,21 @@ def main() -> None:
             title=title,
             summary="(auto-saved)",
             tags=[],
+            branch=git_ctx.get("branch"),
+            commit_start=git_ctx.get("commit_start"),
+            commit_end=commit_end,
         )
         existing = storage._find_session_file(sessions_parent, session_id)
+    else:
+        # Update git fields in existing session frontmatter
+        _update_git_fields(existing, git_ctx, commit_end)
 
     if existing is None:
         # Should not happen — upsert_session always creates the file
         sys.exit(1)
 
-    # Write full conversation transcript to messages.md
-    messages_stem = f"{existing.stem}.messages"
-    messages_path = existing.parent / f"{messages_stem}.md"
-    messages_path.write_text(format_messages_md(stream), encoding="utf-8")
-
-    # Ensure summary front-matter has the messages: wiki-link
-    _update_messages_link(existing, messages_stem)
+    # Append transcript section to the session summary file
+    _replace_transcript_section(existing, format_messages_md(stream))
 
 
 if __name__ == "__main__":

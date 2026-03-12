@@ -649,16 +649,17 @@ def upsert_session(
     summary: str,
     tags: list[str],
     compact: str | None = None,
+    branch: str | None = None,
+    commit_start: str | None = None,
+    commit_end: str | None = None,
 ) -> str:
     """Create or update a session summary .md file.
 
     File naming:
-      {date} {title}.md          — summary file: front-matter + ## Summary [+ ## Compact]
-      {date} {title} messages.md — full conversation transcript (written by Stop hook)
+      {date} {title}.md — summary file: front-matter + ## Summary [+ ## Compact]
 
     Matches existing session by id field in summary front-matter; reuses
-    the existing filename if found (preserves original date in name), and
-    preserves the existing ``messages:`` value on updates.
+    the existing filename if found (preserves original date in name).
 
     Sessions are written under AI_MEMORY_SESSIONS_DIR (or AI_MEMORY_DIR as
     fallback) so users can point them at an Obsidian vault independently of
@@ -671,6 +672,9 @@ def upsert_session(
         summary: 1-2 sentence summary for quick reading
         tags: topic tags (path-derived tags are added automatically)
         compact: optional detailed notes from /save (written as ## Compact section)
+        branch: git branch name at session start
+        commit_start: short SHA of HEAD at session start
+        commit_end: short SHA of HEAD at save time
 
     Returns:
         Path to the session summary file, relative to AI_MEMORY_DIR base.
@@ -691,6 +695,12 @@ def upsert_session(
         # Reuse existing filename (keeps original creation date in name)
         summary_path = existing
         stem = existing.stem
+        # Preserve git context from previous writes if not overridden
+        prev_fm = parse_front_matter(existing.read_text(encoding="utf-8"))
+        if not branch:
+            branch = prev_fm.get("branch")
+        if not commit_start:
+            commit_start = prev_fm.get("commit_start")
     else:
         safe = _safe_title(title)
         stem = f"{today} {safe}.{session_id[:8]}"
@@ -701,22 +711,34 @@ def upsert_session(
 
     tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
 
-    messages_stem = f"{stem}.messages"
-
     fm_lines = ["---", f"id: {session_id}", f"date: {today}"]
     if project:
         fm_lines.append(f"project: {project}")
     fm_lines += [f"title: {title}", f"tags: {tags_str}"]
+    if branch:
+        fm_lines.append(f"branch: {branch}")
+    if commit_start:
+        fm_lines.append(f"commit_start: {commit_start}")
+    if commit_end:
+        fm_lines.append(f"commit_end: {commit_end}")
     fm_lines += ["---", ""]
 
     summary_body = ["## Summary", "", summary, ""]
-    # Compact (detailed /save notes) lives in the summary file, not a separate messages file
     if compact:
         summary_body += ["## Compact", "", compact, ""]
 
-    # Wikilink to messages file — in body, not front-matter (Obsidian-compatible)
-    if (summary_path.parent / f"{messages_stem}.md").exists():
-        summary_body += [f"[[{messages_stem}]]", ""]
+    # Preserve existing transcript section if present (appended by session-sync hook).
+    # The transcript block starts with "---\n\n## Transcript" divider.
+    if summary_path.exists():
+        existing_content = summary_path.read_text(encoding="utf-8")
+        transcript_marker = "\n## Transcript\n"
+        idx = existing_content.find(transcript_marker)
+        if idx != -1:
+            # Find the --- divider preceding the transcript
+            divider_idx = existing_content.rfind("\n---\n", 0, idx)
+            start = divider_idx + 1 if divider_idx != -1 else idx + 1
+            summary_body.append(existing_content[start:].rstrip())
+            summary_body.append("")
 
     summary_path.write_text("\n".join(fm_lines + summary_body), encoding="utf-8")
 
