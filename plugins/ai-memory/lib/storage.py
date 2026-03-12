@@ -295,6 +295,7 @@ def _query_search(
             continue
 
         candidates.append({
+            "ref": f"[[{Path(h.id).stem}]]",
             "path": h.id,
             "tags": file_tags,
             "date": fm.get("date", ""),
@@ -392,6 +393,7 @@ def _sql_search(
         if content is None:
             continue
         results.append({
+            "ref": f"[[{Path(rel_path).stem}]]",
             "path": rel_path,
             "tags": json.loads(tags_json) if tags_json else [],
             "date": date_str or "",
@@ -426,8 +428,10 @@ def _raw_filescan_search(
         if not _matches_filters(file_tags, file_date, tags, any_tags, exclude_tags, since_d, until_d):
             continue
 
+        rel = str(md_file.relative_to(base))
         candidates.append({
-            "path": str(md_file.relative_to(base)),
+            "ref": f"[[{Path(rel).stem}]]",
+            "path": rel,
             "tags": file_tags,
             "date": fm.get("date", ""),
             "content": content,

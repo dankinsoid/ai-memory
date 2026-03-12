@@ -214,12 +214,13 @@ def _handle_tools_call(params: dict) -> dict:
                     for r in rules:
                         tag_str = ", ".join(r.get("tags", []))
                         content_line = _first_content_line(r.get("content") or "")
-                        lines.append(f"- [{tag_str}] {content_line}")
+                        ref = f"[[{Path(r.get('path', '')).stem}]]" if r.get("path") else ""
+                        lines.append(f"- {ref} [{tag_str}] {content_line}")
                     rules_text = "\n\nRelevant rules for current session topics:\n" + "\n".join(lines)
                     # Persist newly shown rule paths
                     newly_loaded = already_loaded | {r["path"] for r in rules if r.get("path")}
                     set_state(dedup_key, json.dumps(list(newly_loaded)))
-            return _text(f"Session saved → {path}{rules_text}")
+            return _text(f"ok{rules_text}")
 
         if name == "memory_remember":
             raw_tags: list[str] = args.get("tags") or []
@@ -233,12 +234,13 @@ def _handle_tools_call(params: dict) -> dict:
                 tags = resolved + [t for t in raw_tags if t not in known]
             else:
                 tags = raw_tags
-            storage.remember(
+            rel_path = storage.remember(
                 content_text=args["content"],
                 tags=tags,
                 title=args.get("title"),
             )
-            return _text("ok")
+            stem = Path(rel_path).stem
+            return _text(f"Saved → [[{stem}]]")
 
         if name == "memory_search":
             results = storage.search_facts(
@@ -252,7 +254,19 @@ def _handle_tools_call(params: dict) -> dict:
                 limit=args.get("limit", 20),
                 offset=args.get("offset", 0),
             )
-            return _text(json.dumps({"results": results}, indent=2, ensure_ascii=False))
+            # Strip internal fields — agent sees ref (wikilink) as identifier
+            clean = []
+            for r in results:
+                entry = {
+                    "ref": r.get("ref", ""),
+                    "tags": r.get("tags", []),
+                    "date": r.get("date", ""),
+                    "content": r.get("content", ""),
+                }
+                if "score" in r:
+                    entry["score"] = r["score"]
+                clean.append(entry)
+            return _text(json.dumps({"results": clean}, indent=2, ensure_ascii=False))
 
         if name == "memory_explore_tags":
             resolve_input = args.get("tags")

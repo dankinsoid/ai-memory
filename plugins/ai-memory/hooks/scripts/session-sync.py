@@ -164,16 +164,91 @@ def extract_messages(entries: list[dict]) -> list[dict]:
     return result
 
 
+_AI_MEMORY_TOOL_PREFIX = "mcp__plugin_ai-memory_ai-memory__"
+_WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+
+
+def extract_memory_refs(entries: list[dict]) -> list[str]:
+    """Extract wikilink references from ai-memory MCP tool results.
+
+    Scans the transcript for tool_use blocks from ai-memory, then finds
+    matching tool_result blocks and extracts [[wikilink]] patterns from them.
+    Preserves first-seen order, deduplicates.
+
+    Args:
+        entries: parsed JSONL entries
+
+    Returns:
+        Ordered list of unique wikilink stems (without [[ ]]).
+    """
+    # Pass 1: collect tool_use IDs from ai-memory tools
+    ai_memory_tool_ids: set[str] = set()
+    for e in entries:
+        msg = e.get("message") or {}
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if (
+                block.get("type") == "tool_use"
+                and block.get("name", "").startswith(_AI_MEMORY_TOOL_PREFIX)
+            ):
+                tool_id = block.get("id")
+                if tool_id:
+                    ai_memory_tool_ids.add(tool_id)
+
+    if not ai_memory_tool_ids:
+        return []
+
+    # Pass 2: extract [[refs]] from matching tool_result blocks
+    seen: set[str] = set()
+    refs: list[str] = []
+    for e in entries:
+        msg = e.get("message") or {}
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if (
+                block.get("type") == "tool_result"
+                and block.get("tool_use_id") in ai_memory_tool_ids
+            ):
+                text = ""
+                # tool_result content can be string or list of content blocks
+                result_content = block.get("content", "")
+                if isinstance(result_content, str):
+                    text = result_content
+                elif isinstance(result_content, list):
+                    text = " ".join(
+                        b.get("text", "") for b in result_content
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    )
+                for match in _WIKILINK_RE.findall(text):
+                    if match not in seen:
+                        seen.add(match)
+                        refs.append(match)
+
+    return refs
+
+
 # ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
 
 
-def format_messages_md(messages: list[dict]) -> str:
+def format_messages_md(messages: list[dict], refs: list[str] | None = None) -> str:
     """Format messages as readable markdown with Human/Assistant sections.
+
+    Appends a ## References section with wikilinks extracted from ai-memory
+    tool results, if any are present.
 
     Args:
         messages: list of dicts from extract_messages
+        refs: optional list of wikilink stems from extract_memory_refs
 
     Returns:
         Markdown string.
@@ -184,6 +259,12 @@ def format_messages_md(messages: list[dict]) -> str:
         lines.append(f"## {role}")
         lines.append("")
         lines.append(msg["text"])
+        lines.append("")
+    if refs:
+        lines.append("## References")
+        lines.append("")
+        for r in refs:
+            lines.append(f"- [[{r}]]")
         lines.append("")
     return "\n".join(lines).strip()
 
@@ -273,6 +354,7 @@ def main() -> None:
 
     entries = parse_jsonl(transcript)
     messages = extract_messages(entries)
+    memory_refs = extract_memory_refs(entries)
     if not messages:
         sys.exit(0)
 
@@ -306,7 +388,7 @@ def main() -> None:
     # Write full conversation transcript to messages.md
     messages_stem = f"{existing.stem}.messages"
     messages_path = existing.parent / f"{messages_stem}.md"
-    messages_path.write_text(format_messages_md(messages), encoding="utf-8")
+    messages_path.write_text(format_messages_md(messages, memory_refs), encoding="utf-8")
 
     # Ensure summary front-matter has the messages: wiki-link
     _update_messages_link(existing, messages_stem)
