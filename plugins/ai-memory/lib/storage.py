@@ -877,11 +877,12 @@ def remember(
     from .vector_store import tag_store, content_store
     tag_store.upsert(tags)
 
-    # Embed fact content for semantic search.
+    # Embed fact content for semantic search (first paragraph only —
+    # shorter text matches query length better and concentrates the vector).
     rel_path = str(target.relative_to(base))
     content_store.upsert(
         id=rel_path,
-        text=content_text,
+        text=first_paragraph(content_text),
         payload={"path": rel_path, "tags": tags},
     )
 
@@ -933,7 +934,7 @@ def reindex() -> dict:
         if not body.strip():
             continue
         rel_path = str(md_file.relative_to(base))
-        items.append((rel_path, body, {"path": rel_path, "tags": file_tags}))
+        items.append((rel_path, first_paragraph(body), {"path": rel_path, "tags": file_tags}))
 
     # --- Sessions ---
     for sessions_dir in _all_session_dirs(sessions_base):
@@ -986,6 +987,67 @@ def _body_text(content: str) -> str:
         if line.strip() == "---":
             return "\n".join(lines[i + 1:])
     return content
+
+
+def first_paragraph(body: str) -> str:
+    """Return the first meaningful paragraph of *body* text.
+
+    *body* must not contain front-matter (strip it before calling).
+
+    Scans paragraphs (blocks separated by blank lines) and returns the
+    first one that looks like human-readable text.  If a ``## `` heading
+    immediately precedes it, the heading is included for context.
+
+    Non-text noise (rules, separators, metadata leftovers) is skipped.
+    """
+    text = body.strip()
+    if not text:
+        return text
+    paragraphs = re.split(r"\n\n+", text)
+
+    # Walk paragraphs looking for the first meaningful one.
+    pending_heading: str | None = None
+    for p in paragraphs:
+        stripped = p.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            # Remember heading — include it if the next paragraph is meaningful.
+            pending_heading = stripped
+            continue
+        if _is_meaningful(p):
+            if pending_heading:
+                return f"{pending_heading}\n\n{stripped}"
+            return stripped
+        # Not meaningful — reset pending heading (it led to noise, not content).
+        pending_heading = None
+
+    # No meaningful paragraph found — fall back to full body.
+    return text
+
+
+def _is_meaningful(paragraph: str) -> bool:
+    """Return True if *paragraph* looks like human-readable text.
+
+    Detects meaningful content by checking for a minimum density of Unicode
+    letters and spaces — markers of natural language in any script.
+    Headings, fenced code blocks, and HTML comments are skipped.
+    """
+    stripped = paragraph.strip()
+    if not stripped:
+        return False
+    # Headings — caller handles them separately.
+    if stripped.startswith("#"):
+        return False
+    # Fenced code blocks.
+    if stripped.startswith("```"):
+        return False
+    # HTML / markdown comments.
+    if stripped.startswith("<!--"):
+        return False
+    # Count characters that indicate natural language.
+    text_chars = sum(1 for c in stripped if c.isalpha() or c == " ")
+    return text_chars >= 4 and text_chars / len(stripped) > 0.3
 
 
 def _extract_compact_text(content: str) -> str | None:

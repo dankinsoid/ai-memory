@@ -19,7 +19,6 @@ Usage (stdio MCP):
 """
 
 import json
-import re
 import sys
 import traceback
 from pathlib import Path
@@ -154,12 +153,14 @@ def _handle_tools_list(_params: dict) -> dict:
     return {"tools": TOOLS}
 
 
+_MAX_DISPLAY_CHARS = 500
+
+
 def _truncate_to_first_paragraph(content: str) -> tuple[str, bool]:
     """Keep front matter + first paragraph of the body, drop the rest.
 
-    A paragraph is a block of text separated by blank lines.
-    If the first paragraph is a ``## `` heading, the next paragraph
-    (its content) is included too.
+    Delegates paragraph extraction to ``storage.first_paragraph`` and
+    additionally caps the body at ``_MAX_DISPLAY_CHARS`` characters.
 
     Returns (truncated_content, was_truncated).
     """
@@ -174,17 +175,20 @@ def _truncate_to_first_paragraph(content: str) -> tuple[str, bool]:
     if not body:
         return content, False
 
-    paragraphs = re.split(r"\n\n+", body)
+    kept = storage.first_paragraph(body)
+    truncated = kept != body
 
-    # If first paragraph is just a heading, include the next one too
-    take = 1
-    if paragraphs[0].startswith("## "):
-        take = 2
+    if len(kept) > _MAX_DISPLAY_CHARS:
+        # Cut at last word boundary within limit.
+        cut = kept[:_MAX_DISPLAY_CHARS].rfind(" ")
+        if cut <= 0:
+            cut = _MAX_DISPLAY_CHARS
+        kept = kept[:cut] + "…"
+        truncated = True
 
-    if len(paragraphs) <= take:
+    if not truncated:
         return content, False
 
-    kept = "\n\n".join(paragraphs[:take])
     return content[:body_start] + "\n" + kept + "\n", True
 
 
