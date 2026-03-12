@@ -132,56 +132,49 @@ def _extract_text(content) -> str:
     return ""
 
 
-def extract_messages(entries: list[dict]) -> list[dict]:
-    """Extract human-readable user/assistant turns from transcript entries.
-
-    Skips meta messages and entries with no plain text (tool-only turns).
-
-    Args:
-        entries: parsed JSONL entries
-
-    Returns:
-        List of dicts with keys: role (str), text (str), timestamp (str).
-    """
-    result = []
-    for e in entries:
-        if e.get("type") not in ("user", "assistant"):
-            continue
-        if e.get("isMeta"):
-            continue
-        msg = e.get("message") or {}
-        role = msg.get("role")
-        if not role:
-            continue
-        text = _extract_text(msg.get("content", "")).strip()
-        if not text:
-            continue
-        result.append({
-            "role": role,
-            "text": text,
-            "timestamp": e.get("timestamp", ""),
-        })
-    return result
-
-
 _AI_MEMORY_TOOL_PREFIX = "mcp__plugin_ai-memory_ai-memory__"
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 
 
-def extract_memory_refs(entries: list[dict]) -> list[str]:
-    """Extract wikilink references from ai-memory MCP tool results.
+def _extract_refs_from_tool_result(block: dict) -> list[str]:
+    """Extract wikilink stems from a tool_result content block.
 
-    Scans the transcript for tool_use blocks from ai-memory, then finds
-    matching tool_result blocks and extracts [[wikilink]] patterns from them.
-    Preserves first-seen order, deduplicates.
+    Args:
+        block: a tool_result content block
+
+    Returns:
+        List of wikilink stems found in the block.
+    """
+    result_content = block.get("content", "")
+    if isinstance(result_content, str):
+        text = result_content
+    elif isinstance(result_content, list):
+        text = " ".join(
+            b.get("text", "") for b in result_content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    else:
+        return []
+    return _WIKILINK_RE.findall(text)
+
+
+def extract_message_stream(entries: list[dict]) -> list[dict]:
+    """Extract an ordered stream of text messages and inline memory references.
+
+    Produces items in transcript order. Each item is either:
+    - {"kind": "message", "role": str, "text": str, "timestamp": str}
+    - {"kind": "refs", "refs": list[str]}  (deduplicated wikilinks)
+
+    Memory refs appear at the position in the stream where the tool_result
+    was returned, so they can be rendered inline between messages.
 
     Args:
         entries: parsed JSONL entries
 
     Returns:
-        Ordered list of unique wikilink stems (without [[ ]]).
+        Ordered list of stream items.
     """
-    # Pass 1: collect tool_use IDs from ai-memory tools
+    # Pre-scan: collect ai-memory tool_use IDs
     ai_memory_tool_ids: set[str] = set()
     for e in entries:
         msg = e.get("message") or {}
@@ -199,40 +192,48 @@ def extract_memory_refs(entries: list[dict]) -> list[str]:
                 if tool_id:
                     ai_memory_tool_ids.add(tool_id)
 
-    if not ai_memory_tool_ids:
-        return []
-
-    # Pass 2: extract [[refs]] from matching tool_result blocks
-    seen: set[str] = set()
-    refs: list[str] = []
+    # Single pass: emit messages and inline refs in order
+    seen_refs: set[str] = set()
+    stream: list[dict] = []
     for e in entries:
-        msg = e.get("message") or {}
-        content = msg.get("content")
-        if not isinstance(content, list):
+        if e.get("type") not in ("user", "assistant"):
             continue
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            if (
-                block.get("type") == "tool_result"
-                and block.get("tool_use_id") in ai_memory_tool_ids
-            ):
-                text = ""
-                # tool_result content can be string or list of content blocks
-                result_content = block.get("content", "")
-                if isinstance(result_content, str):
-                    text = result_content
-                elif isinstance(result_content, list):
-                    text = " ".join(
-                        b.get("text", "") for b in result_content
-                        if isinstance(b, dict) and b.get("type") == "text"
-                    )
-                for match in _WIKILINK_RE.findall(text):
-                    if match not in seen:
-                        seen.add(match)
-                        refs.append(match)
+        if e.get("isMeta"):
+            continue
+        msg = e.get("message") or {}
+        role = msg.get("role")
+        if not role:
+            continue
+        content = msg.get("content", "")
 
-    return refs
+        # Check for memory tool_result refs (in user entries carrying tool_result)
+        if ai_memory_tool_ids and isinstance(content, list):
+            new_refs: list[str] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if (
+                    block.get("type") == "tool_result"
+                    and block.get("tool_use_id") in ai_memory_tool_ids
+                ):
+                    for ref in _extract_refs_from_tool_result(block):
+                        if ref not in seen_refs:
+                            seen_refs.add(ref)
+                            new_refs.append(ref)
+            if new_refs:
+                stream.append({"kind": "refs", "refs": new_refs})
+
+        # Emit text message if present
+        text = _extract_text(content).strip()
+        if text:
+            stream.append({
+                "kind": "message",
+                "role": role,
+                "text": text,
+                "timestamp": e.get("timestamp", ""),
+            })
+
+    return stream
 
 
 # ---------------------------------------------------------------------------
@@ -240,32 +241,31 @@ def extract_memory_refs(entries: list[dict]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def format_messages_md(messages: list[dict], refs: list[str] | None = None) -> str:
-    """Format messages as readable markdown with Human/Assistant sections.
+def format_messages_md(stream: list[dict]) -> str:
+    """Format a message stream as readable markdown with inline memory references.
 
-    Appends a ## References section with wikilinks extracted from ai-memory
-    tool results, if any are present.
+    Renders text messages as ## Human / ## Assistant sections. Memory references
+    are inserted inline as blockquote lines at the position they appeared in the
+    conversation (i.e. right after the tool returned results).
 
     Args:
-        messages: list of dicts from extract_messages
-        refs: optional list of wikilink stems from extract_memory_refs
+        stream: ordered list of items from extract_message_stream
 
     Returns:
         Markdown string.
     """
-    lines = []
-    for msg in messages:
-        role = "Human" if msg["role"] == "user" else "Assistant"
-        lines.append(f"## {role}")
-        lines.append("")
-        lines.append(msg["text"])
-        lines.append("")
-    if refs:
-        lines.append("## References")
-        lines.append("")
-        for r in refs:
-            lines.append(f"- [[{r}]]")
-        lines.append("")
+    lines: list[str] = []
+    for item in stream:
+        if item["kind"] == "refs":
+            refs_str = ", ".join(f"[[{r}]]" for r in item["refs"])
+            lines.append(f"> Referenced: {refs_str}")
+            lines.append("")
+        elif item["kind"] == "message":
+            role = "Human" if item["role"] == "user" else "Assistant"
+            lines.append(f"## {role}")
+            lines.append("")
+            lines.append(item["text"])
+            lines.append("")
     return "\n".join(lines).strip()
 
 
@@ -353,8 +353,8 @@ def main() -> None:
         sys.exit(0)
 
     entries = parse_jsonl(transcript)
-    messages = extract_messages(entries)
-    memory_refs = extract_memory_refs(entries)
+    stream = extract_message_stream(entries)
+    messages = [item for item in stream if item["kind"] == "message"]
     if not messages:
         sys.exit(0)
 
@@ -388,7 +388,7 @@ def main() -> None:
     # Write full conversation transcript to messages.md
     messages_stem = f"{existing.stem}.messages"
     messages_path = existing.parent / f"{messages_stem}.md"
-    messages_path.write_text(format_messages_md(messages, memory_refs), encoding="utf-8")
+    messages_path.write_text(format_messages_md(stream), encoding="utf-8")
 
     # Ensure summary front-matter has the messages: wiki-link
     _update_messages_link(existing, messages_stem)
