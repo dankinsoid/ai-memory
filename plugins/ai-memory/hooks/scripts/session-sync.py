@@ -146,10 +146,29 @@ def parse_jsonl(path: Path) -> list[dict]:
     return entries
 
 
+def _strip_system_tags(text: str) -> str:
+    """Remove system-injected XML tags (ide_opened_file, system-reminder, etc.).
+
+    These tags are VSCode/Claude Code noise that shouldn't appear in session
+    transcripts.
+
+    Args:
+        text: raw text possibly containing system XML tags
+
+    Returns:
+        Text with system tags removed and excess blank lines collapsed.
+    """
+    cleaned = _SYSTEM_TAG_RE.sub("", text)
+    # Collapse runs of 3+ newlines left after removal
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned
+
+
 def _extract_text(content) -> str:
     """Extract plain text from message content (str or list of content blocks).
 
     Skips tool_use, tool_result, and image blocks — only text blocks are included.
+    Strips system-injected XML tags (ide_opened_file, system-reminder, etc.).
 
     Args:
         content: str or list of Anthropic content blocks
@@ -158,18 +177,25 @@ def _extract_text(content) -> str:
         Concatenated plain text string.
     """
     if isinstance(content, str):
-        return content
+        return _strip_system_tags(content)
     if isinstance(content, list):
         parts = []
         for block in content:
             if isinstance(block, dict) and block.get("type") == "text":
                 parts.append(block.get("text", ""))
-        return "\n".join(parts)
+        return _strip_system_tags("\n".join(parts))
     return ""
 
 
 _AI_MEMORY_TOOL_PREFIX = "mcp__plugin_ai-memory_ai-memory__"
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+# System-injected XML tags that are noise in session transcripts.
+# Uses re.DOTALL so the pattern spans multiple lines within a single tag.
+_SYSTEM_TAG_RE = re.compile(
+    r"<(?:ide_opened_file|ide_selection|system-reminder|available-deferred-tools)"
+    r"[^>]*>.*?</(?:ide_opened_file|ide_selection|system-reminder|available-deferred-tools)>",
+    re.DOTALL,
+)
 # Matches markdown links [text](target) where target is NOT an http(s) URL.
 # These are typically code file references that pollute Obsidian's graph
 # by creating phantom nodes. Convert to `text` to neutralize.
