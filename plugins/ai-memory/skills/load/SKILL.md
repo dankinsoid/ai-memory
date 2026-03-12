@@ -17,9 +17,15 @@ Parse ARGUMENTS to determine which session to load:
    The current session ID is in SessionStart context. Determine the project name from the git repo name.
    The script finds the previous session via the prev-session cache (written by session-end hook on /clear).
 
-2. **Free text** → translate the user's request to English and pass as the first positional arg... no: instead call `memory_search` with `tags: ["session", "project/<project>"]` and `text: "<english query>"`, pick the best match, then load via `--file`:
+2. **Free text** → parse the user's request into `memory_search` filters:
+   - Always include `tags: ["session", "project/<project>"]`
+   - Temporal hints ("last", "yesterday", "last week") → `since`/`until` (resolve relative to today)
+   - Topic keywords → `query` (translate to English)
+   - "latest" / "last" without topic → omit `query`, use `limit: 1`
+
+   Call `memory_search` with the constructed filters, pick the best match, load via `--ref`:
    ```bash
-   python3 <this-skill-dir>/load-chain.py --file <path from result>
+   python3 <this-skill-dir>/load-chain.py --ref <ref field from result, e.g. [[some-session-stem]]>
    ```
 
 3. **File path** (matches `sessions/...`) → use directly:

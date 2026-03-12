@@ -10,7 +10,8 @@ to stdout.  Logs to stderr only.
 Tools exposed:
   memory_session      — upsert session .md file
   memory_remember     — save a rule/preference .md file
-  memory_search       — search all memory files by tags/text/date
+  memory_search       — search all memory files by tags/text/date (truncated)
+  memory_read         — read full content of a memory file by [[ref]]
   memory_explore_tags — list all tags (or fuzzy-resolve approximate tag names)
 
 Usage (stdio MCP):
@@ -18,6 +19,7 @@ Usage (stdio MCP):
 """
 
 import json
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -46,7 +48,7 @@ TOOLS = [
                 "title": {"type": "string", "description": "3-8 words, English"},
                 "summary": {
                     "type": "string",
-                    "description": "1-5 sentences: full arc (replaces previous). No file/function names.",
+                    "description": "1-3 sentences: full arc (replaces previous). No file/function names.",
                 },
                 "tags": {
                     "type": "array",
@@ -62,11 +64,18 @@ TOOLS = [
     },
     {
         "name": "memory_remember",
-        "description": "Save a rule, preference, or fact to long-term memory",
+        "description": "Save a rule or fact to long-term memory",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "content": {"type": "string", "description": "The rule or fact text"},
+                "content": {
+                        "type": "string",
+                        "description": (
+                            "Free-form markdown. Short entries: 1-4 sentences. "
+                            "Longer entries: lead with a brief summary paragraph, "
+                            "then add detail below."
+                        ),
+                    },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -103,6 +112,15 @@ TOOLS = [
         },
     },
     {
+        "name": "memory_read",
+        "description": "Read full content of a memory file by its [[ref]] wikilink.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"ref": {"type": "string"}},
+            "required": ["ref"],
+        },
+    },
+    {
         "name": "memory_explore_tags",
         "description": "List all tags with file counts. If 'tags' given, fuzzy-resolve approximate names to existing tags.",
         "inputSchema": {
@@ -134,6 +152,41 @@ def _handle_initialize(_params: dict) -> dict:
 
 def _handle_tools_list(_params: dict) -> dict:
     return {"tools": TOOLS}
+
+
+def _truncate_to_first_paragraph(content: str) -> tuple[str, bool]:
+    """Keep front matter + first paragraph of the body, drop the rest.
+
+    A paragraph is a block of text separated by blank lines.
+    If the first paragraph is a ``## `` heading, the next paragraph
+    (its content) is included too.
+
+    Returns (truncated_content, was_truncated).
+    """
+    # Find end of front matter
+    body_start = 0
+    if content.startswith("---"):
+        end_fm = content.find("\n---", 1)
+        if end_fm != -1:
+            body_start = end_fm + 4  # skip past closing ---\n
+
+    body = content[body_start:].strip()
+    if not body:
+        return content, False
+
+    paragraphs = re.split(r"\n\n+", body)
+
+    # If first paragraph is just a heading, include the next one too
+    take = 1
+    if paragraphs[0].startswith("## "):
+        take = 2
+
+    if len(paragraphs) <= take:
+        return content, False
+
+    kept = "\n\n".join(paragraphs[:take])
+    return content[:body_start] + "\n" + kept + "\n", True
+
 
 
 def _first_content_line(content: str) -> str:
@@ -254,19 +307,30 @@ def _handle_tools_call(params: dict) -> dict:
                 limit=args.get("limit", 20),
                 offset=args.get("offset", 0),
             )
-            # Strip internal fields — agent sees ref (wikilink) as identifier
-            clean = []
+            # Return raw markdown with truncation — only first section shown,
+            # use memory_read for full content.
+            parts = []
             for r in results:
-                entry = {
-                    "ref": r.get("ref", ""),
-                    "tags": r.get("tags", []),
-                    "date": r.get("date", ""),
-                    "content": r.get("content", ""),
-                }
+                ref = r.get("ref", "")
+                content = r.get("content", "")
+                truncated_content, was_truncated = _truncate_to_first_paragraph(content)
+                header = f"## {ref}"
                 if "score" in r:
-                    entry["score"] = r["score"]
-                clean.append(entry)
-            return _text(json.dumps({"results": clean}, indent=2, ensure_ascii=False))
+                    header += f" (score: {r['score']})"
+                if was_truncated:
+                    header += " (truncated)"
+                parts.append(f"{header}\n{truncated_content}")
+            if not parts:
+                return _text("No results found.")
+            return _text("\n\n".join(parts))
+
+        if name == "memory_read":
+            stem = args["ref"].strip("[]")
+            found = storage.find_file_by_stem(stem)
+            if not found:
+                return _error(f"Not found: [[{stem}]]")
+            content = found.read_text(encoding="utf-8")
+            return _text(f"## [[{stem}]]\n{content}")
 
         if name == "memory_explore_tags":
             resolve_input = args.get("tags")

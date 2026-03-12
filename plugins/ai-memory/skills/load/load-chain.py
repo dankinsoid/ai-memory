@@ -4,14 +4,15 @@
 #
 # Usage:
 #   python3 load-chain.py <session-id> [project]  # find prev session via cache
+#   python3 load-chain.py --ref <stem>             # load session by wikilink stem
 #   python3 load-chain.py --file <rel-path>        # load specific session by path
 #   python3 load-chain.py --blob <blob-dir>        # load session by blob dir name
 #
 # Session linking relies on prev-session cache written by session-end.py hook
 # (stored in SQLite state table, keyed by project name).
 #
-# Content strategy: shows Compact section (from /save) if available,
-# then messages.md (from Stop hook), then summary as fallback.
+# Content strategy: always prints summary (with Compact if present),
+# then appends tail of messages.md (~2000 chars, or ~500 if Compact exists).
 
 import sys
 from pathlib import Path
@@ -27,6 +28,11 @@ from lib.tags import parse_front_matter  # noqa: E402
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _find_by_stem(stem: str) -> Path | None:
+    """Find a .md file by its wikilink stem. Delegates to storage.find_file_by_stem."""
+    return storage.find_file_by_stem(stem)
 
 
 def _find_session_by_id(session_id: str, project: str | None) -> Path | None:
@@ -76,20 +82,33 @@ def _get_title(summary_path: Path) -> str:
 def _print_session_content(summary_path: Path) -> None:
     """Print session content for /load recovery.
 
-    Priority:
-    1. Summary file with ## Compact section (agent ran /save — most useful)
-    2. Full conversation transcript from messages.md (auto-saved by Stop hook)
-    3. Summary file alone (short summary, last resort)
+    Always prints the summary file first (contains metadata, Summary, and
+    optionally Compact from /save).  Then appends the tail of messages.md
+    for recent conversation context — budget depends on whether Compact
+    was present (it's already substantial, so less messages needed).
+
+    Args:
+        summary_path: path to the session summary .md file.
     """
     content = storage._read_content(summary_path) or ""
-    if "## Compact" in content:
-        print(content)
-    else:
-        messages = _read_messages(summary_path)
-        if messages:
-            print(messages)
-        else:
-            print(content)
+    has_compact = "## Compact" in content
+    print(content)
+
+    messages = _read_messages(summary_path)
+    if messages:
+        # Compact already provides dense context — small tail suffices;
+        # without Compact, lean more on raw messages
+        tail_budget = 500 if has_compact else 2000
+        tail = messages[-tail_budget:]
+        # Avoid cutting mid-line
+        newline = tail.find("\n")
+        if newline != -1 and newline < len(tail) - 1:
+            tail = tail[newline + 1:]
+        if tail.strip():
+            print()
+            print("## Recent messages")
+            print()
+            print(tail)
 
 
 def _print_recovery(summary_path: Path) -> None:
@@ -149,9 +168,24 @@ def main() -> None:
 
     if not args:
         print("Usage: python3 load-chain.py <session-id> [project]")
+        print("       python3 load-chain.py --ref <stem>")
         print("       python3 load-chain.py --file <rel-path>")
         print("       python3 load-chain.py --blob <blob-dir>")
         sys.exit(1)
+
+    if args[0] == "--ref":
+        if len(args) < 2:
+            print("Usage: python3 load-chain.py --ref <stem>")
+            sys.exit(1)
+        # Strip [[ ]] if the agent passes the full wikilink syntax
+        stem = args[1].strip("[]")
+        found = _find_by_stem(stem)
+        if found:
+            _print_recovery(found)
+        else:
+            print(f"Session not found for ref: [[{stem}]]")
+            sys.exit(1)
+        return
 
     if args[0] == "--file":
         if len(args) < 2:

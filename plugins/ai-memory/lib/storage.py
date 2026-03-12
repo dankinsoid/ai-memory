@@ -26,6 +26,7 @@ Public API:
   upsert_session(session_id, project, title, summary, tags, compact) -> str
   remember(content_text, tags, title, language) -> str
   reindex() -> dict
+  find_file_by_stem(stem) -> Path | None
   explore_tags() -> dict
   resolve_tags(query_tags) -> list[str]
 """
@@ -463,6 +464,22 @@ def _raw_filescan_search(
 def _is_messages_file(filename: str) -> bool:
     """True if this is a session messages file (ends with '.messages.md')."""
     return filename.endswith(".messages.md")
+
+
+def find_file_by_stem(stem: str) -> Path | None:
+    """Resolve a wikilink stem to an absolute file path.
+
+    Searches both base_dir (facts/rules) and sessions_base (sessions).
+    Skips .messages.md files. Returns None if no match found.
+
+    Args:
+        stem: filename without extension, e.g. 'always-run-regression-test'
+    """
+    for root in (get_base_dir(), get_sessions_base_dir()):
+        for md_file in root.rglob("*.md"):
+            if md_file.stem == stem and not _is_messages_file(md_file.name):
+                return md_file
+    return None
 
 
 def _read_session_file(summary_path: Path, base: Path) -> dict | None:
