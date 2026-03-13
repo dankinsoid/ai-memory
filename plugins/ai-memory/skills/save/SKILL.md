@@ -11,6 +11,8 @@ The full transcript is saved automatically — compact captures the **substance*
 
 Two parts: a **structured header** for quick orientation, then a **compression-gradient narrative** where detail increases toward the end (recent work matters most for resumption, early work only needs enough context to understand the arc).
 
+**Skip compact for short sessions** — if the compact would be comparable in size to the sum of all messages, don't generate it. Just call `memory_session` without the `compact` field; the transcript is saved automatically and is sufficient for recovery.
+
 ```markdown
 Status: in-progress | completed | blocked
 Next: <immediate next action, one line>
