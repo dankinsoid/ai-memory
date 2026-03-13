@@ -1,126 +1,97 @@
 /* @ai-generated(solo) */
+/* Chat bubble styling for [!human] and [!assistant] callouts.
+   Uses Obsidian's native callout system — no JS re-parenting needed. */
 
-/* All styles scoped to .markdown-preview-view so they only apply in
-   Reading mode and don't affect Live Preview (edit mode). */
+/* ── Shared bubble base ───────────────────────────────────────── */
 
-/* ── Chat container ─────────────────────────────────────────────── */
-
-.markdown-preview-view .chat-msg {
-	position: relative;
-	margin: 0.75em 0;
-	padding: 0.75em 1em;
-	border-radius: 12px;
-	max-width: 85%;
-	line-height: 1.5;
+.callout[data-callout="human"],
+.callout[data-callout="assistant"] {
+	border: none;
+	border-radius: 16px;
+	padding: 4px 8px;
+	margin: 8px 0;
+	max-width: 92%;
 }
 
-/* ── Role-specific styles ───────────────────────────────────────── */
+/* ── Callout title: role label + timestamp ─────────────────────── */
+/* Obsidian renders `> [!human] 14:30` as:
+   .callout-title > .callout-icon + .callout-title-inner("Human · 14:30") + .callout-fold
+   We hide the icon SVG, keep the text label. */
 
-.markdown-preview-view .chat-msg[data-role="human"] {
-	margin-left: auto;
-	background-color: var(--interactive-accent);
-	color: var(--text-on-accent);
-	border-bottom-right-radius: 4px;
-}
-
-/* Links inside human bubbles need contrast */
-.markdown-preview-view .chat-msg[data-role="human"] a {
-	color: var(--text-on-accent);
-	text-decoration: underline;
-}
-
-.markdown-preview-view .chat-msg[data-role="assistant"] {
-	margin-right: auto;
-	background-color: var(--background-secondary);
-	color: var(--text-normal);
-	border-bottom-left-radius: 4px;
-}
-
-/* ── Role label (bold "Human:" / "Assistant:") ──────────────────── */
-
-.markdown-preview-view .chat-msg .chat-role-label {
-	display: block;
-	font-size: 0.75em;
-	font-weight: 600;
-	opacity: 0.7;
-	margin-bottom: 0.25em;
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
-}
-
-/* ── Hide the raw bold label when plugin is active ──────────────── */
-
-.markdown-preview-view .chat-msg .chat-original-label {
+.callout[data-callout="human"] .callout-icon,
+.callout[data-callout="assistant"] .callout-icon {
 	display: none;
 }
 
-/* ── Memory references ──────────────────────────────────────────── */
-
-.markdown-preview-view .chat-refs {
-	margin: 0.25em 0;
-	padding: 0.4em 0.75em;
-	font-size: 0.8em;
-	opacity: 0.7;
-	text-align: center;
-}
-
-.markdown-preview-view .chat-refs blockquote {
-	margin: 0;
-	padding: 0;
-	border: none;
-	font-style: italic;
-}
-
-/* ── Timestamp tooltip ──────────────────────────────────────────── */
-
-.markdown-preview-view .chat-msg::after {
-	content: attr(data-ts-display);
-	position: absolute;
-	bottom: -1.4em;
-	font-size: 0.65em;
-	opacity: 0;
-	transition: opacity 0.15s;
+.callout[data-callout="human"] .callout-title,
+.callout[data-callout="assistant"] .callout-title {
+	padding: 2px 8px 0;
+	font-size: 0.75em;
+	opacity: 0.6;
+	font-weight: 600;
 	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
 }
 
-.markdown-preview-view .chat-msg[data-role="human"]::after {
-	right: 0.5em;
+/* ── Remove default callout content padding ───────────────────── */
+
+.callout[data-callout="human"] .callout-content,
+.callout[data-callout="assistant"] .callout-content {
+	padding: 4px 8px;
 }
 
-.markdown-preview-view .chat-msg[data-role="assistant"]::after {
-	left: 0.5em;
+/* ── Human: right-aligned, accent-tinted bubble ───────────────── */
+/* Use color-mix to get accent at 15% opacity — works with any
+   color format (hex, hsl, rgb) unlike rgba+var which needs triplet */
+
+.callout[data-callout="human"] {
+	background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+	margin-left: auto;
+	margin-right: 0;
+	border-bottom-right-radius: 4px;
 }
 
-.markdown-preview-view .chat-msg:hover::after {
-	opacity: 1;
+/* Human title: left-aligned inside the right-aligned bubble */
+.callout[data-callout="human"] .callout-title {
+	justify-content: flex-start;
 }
 
-/* ── Code blocks inside bubbles ─────────────────────────────────── */
+/* ── Assistant: left-aligned, neutral bubble ──────────────────── */
 
-.markdown-preview-view .chat-msg pre {
-	border-radius: 8px;
+.callout[data-callout="assistant"] {
+	background: var(--background-secondary);
+	margin-left: 0;
+	margin-right: auto;
+	border-bottom-left-radius: 4px;
 }
 
-.markdown-preview-view .chat-msg[data-role="human"] pre,
-.markdown-preview-view .chat-msg[data-role="human"] code {
-	background-color: rgba(0, 0, 0, 0.15);
-	color: var(--text-on-accent);
+/* ── Hide fold indicator (chat messages shouldn't be foldable) ── */
+
+.callout[data-callout="human"] .callout-fold,
+.callout[data-callout="assistant"] .callout-fold {
+	display: none;
 }
 
-/* ── Headings inside assistant bubbles — tone them down ─────────── */
+/* ── Code blocks inside human bubbles ─────────────────────────── */
 
-.markdown-preview-view .chat-msg h1,
-.markdown-preview-view .chat-msg h2,
-.markdown-preview-view .chat-msg h3,
-.markdown-preview-view .chat-msg h4,
-.markdown-preview-view .chat-msg h5,
-.markdown-preview-view .chat-msg h6 {
+.callout[data-callout="human"] pre,
+.callout[data-callout="human"] code {
+	background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* ── Headings inside bubbles — tone them down ─────────────────── */
+
+.callout[data-callout="human"] :is(h1, h2, h3, h4, h5, h6),
+.callout[data-callout="assistant"] :is(h1, h2, h3, h4, h5, h6) {
 	margin-top: 0.5em;
 	margin-bottom: 0.25em;
 	font-size: 1em;
 	border: none;
 }
 
-.markdown-preview-view .chat-msg h1,
-.markdown-preview-view .chat-msg h2 { font-size: 1.15em; }
-.markdown-preview-view .chat-msg h3 { font-size: 1.05em; }
+.callout[data-callout="human"] :is(h1, h2),
+.callout[data-callout="assistant"] :is(h1, h2) { font-size: 1.15em; }
+
+.callout[data-callout="human"] h3,
+.callout[data-callout="assistant"] h3 { font-size: 1.05em; }

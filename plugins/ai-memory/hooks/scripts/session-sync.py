@@ -322,20 +322,35 @@ def _neutralize_file_links(text: str) -> str:
     return _MD_FILE_LINK_RE.sub(r"`\1`", text)
 
 
+def _blockquote(text: str) -> str:
+    """Prefix every line with ``> `` for markdown blockquote/callout body.
+
+    Empty lines become ``>`` (bare prefix) to preserve paragraph breaks
+    inside the callout.
+
+    Args:
+        text: plain or markdown text
+
+    Returns:
+        Blockquoted text.
+    """
+    return "\n".join(
+        f"> {line}" if line else ">" for line in text.splitlines()
+    )
+
+
 def format_messages_md(stream: list[dict]) -> str:
-    """Format a message stream as chat-style markdown with div wrappers.
+    """Format a message stream as Obsidian callout-based chat transcript.
 
-    Each message is wrapped in ``<div class="chat-msg" data-role="..." data-ts="...">``
-    so that:
-    - Plain markdown viewers: divs are invisible, bold role labels provide structure.
-    - Obsidian with chat plugin: post-processor finds ``.chat-msg`` divs and renders
-      styled chat bubbles.
+    Each message becomes a ``> [!human]`` or ``> [!assistant]`` callout.
+    Obsidian renders callouts as single container divs, so no JS re-parenting
+    is needed — pure CSS snippet handles bubble styling.
 
-    Markdown inside divs renders in Obsidian thanks to the blank line after the
-    opening tag.  Code-fenced ``</div>`` won't close the wrapper.
+    Memory references are appended to the preceding assistant message
+    as a ``---`` + *Refs:* line inside the same callout.
 
-    Memory references appear as ``<div class="chat-refs">`` blocks at the position
-    the tool returned results.
+    In non-Obsidian markdown viewers, callouts degrade to blockquotes —
+    readable, just not styled as bubbles.
 
     Args:
         stream: ordered list of items from extract_message_stream
@@ -344,27 +359,44 @@ def format_messages_md(stream: list[dict]) -> str:
         Markdown string.
     """
     lines: list[str] = []
+    # Track pending refs to attach to the preceding assistant callout
+    pending_refs: list[str] = []
+
     for item in stream:
         if item["kind"] == "refs":
-            refs_str = ", ".join(f"[[{r}]]" for r in item["refs"])
-            lines.append('<div class="chat-refs">')
-            lines.append("")
-            lines.append(f"> {refs_str}")
-            lines.append("")
-            lines.append("</div>")
-            lines.append("")
+            pending_refs.extend(item["refs"])
         elif item["kind"] == "message":
             role = "human" if item["role"] == "user" else "assistant"
-            label = "Human" if role == "human" else "Assistant"
+            text = _neutralize_file_links(item["text"])
+
+            # Attach pending refs to the previous assistant message
+            # (refs always follow the assistant turn that triggered them)
+            if pending_refs and lines:
+                refs_str = ", ".join(f"[[{r}]]" for r in pending_refs)
+                lines.append(f"> ---")
+                lines.append(f"> *Refs:* {refs_str}")
+                pending_refs.clear()
+
+            if lines:
+                lines.append("")  # blank line between callouts
+
+            # Format timestamp as HH:MM for callout title
+            ts_label = ""
             ts = item.get("timestamp", "")
-            lines.append(f'<div class="chat-msg" data-role="{role}" data-ts="{ts}">')
-            lines.append("")
-            lines.append(f"**{label}:**")
-            lines.append("")
-            lines.append(_neutralize_file_links(item["text"]))
-            lines.append("")
-            lines.append("</div>")
-            lines.append("")
+            if ts:
+                ts_match = re.search(r"T(\d{2}:\d{2})", ts)
+                if ts_match:
+                    ts_label = f" {ts_match.group(1)}"
+
+            lines.append(f"> [!{role}]{ts_label}")
+            lines.append(_blockquote(text))
+
+    # Flush any remaining refs
+    if pending_refs and lines:
+        refs_str = ", ".join(f"[[{r}]]" for r in pending_refs)
+        lines.append(f"> ---")
+        lines.append(f"> *Refs:* {refs_str}")
+
     return "\n".join(lines).strip()
 
 
