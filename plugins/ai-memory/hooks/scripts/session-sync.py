@@ -389,6 +389,7 @@ def format_messages_md(stream: list[dict]) -> str:
                     ts_label = f" {ts_match.group(1)}"
 
             lines.append(f"> [!{role}]{ts_label}")
+            lines.append(">")
             lines.append(_blockquote(text))
 
     # Flush any remaining refs
