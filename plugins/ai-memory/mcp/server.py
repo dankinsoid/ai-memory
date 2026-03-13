@@ -111,7 +111,11 @@ def _build_tools() -> list[dict]:
                             "'project/<name>' (specific to one project only), "
                             "or 'lang/<name>' (language-specific); "
                             "add 'rule' for rules/preferences/conventions; "
-                            "(2) aspect tags; "
+                            "(2) aspect — reuse from: testing, architecture, "
+                            "debugging, deployment, performance, security, "
+                            "tooling, workflow, documentation, error-handling, "
+                            "logging, monitoring, refactoring, api-design, "
+                            "data-modeling, concurrency, configuration, ci-cd; "
                             "(3) specific topic/technology tags"
                         ),
                     },
@@ -142,16 +146,10 @@ def _build_tools() -> list[dict]:
         },
         {
             "name": "memory_explore_tags",
-            "description": "List all tags with file counts. If 'tags' given, fuzzy-resolve approximate names to existing tags.",
+            "description": "List all tags with file counts.",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "tags": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Approximate tag names to resolve (optional)",
-                    },
-                },
+                "properties": {},
             },
         },
     ]
@@ -324,10 +322,22 @@ def _handle_tools_call(params: dict) -> dict:
             return _text(f"Saved → [[{stem}]]")
 
         if name == "memory_search":
+            # Fuzzy-resolve tag filters when vectorization is available
+            from lib.vector_store import tag_store
+            search_tags: list[str] | None = args.get("tags")
+            search_any: list[str] | None = args.get("any_tags")
+            search_exclude: list[str] | None = args.get("exclude_tags")
+            if tag_store.enabled:
+                if search_tags:
+                    search_tags = storage.resolve_tags(search_tags) or search_tags
+                if search_any:
+                    search_any = storage.resolve_tags(search_any) or search_any
+                if search_exclude:
+                    search_exclude = storage.resolve_tags(search_exclude) or search_exclude
             results = storage.search_facts(
-                tags=args.get("tags"),
-                any_tags=args.get("any_tags"),
-                exclude_tags=args.get("exclude_tags"),
+                tags=search_tags,
+                any_tags=search_any,
+                exclude_tags=search_exclude,
                 query=args.get("query"),
                 since=args.get("since"),
                 until=args.get("until"),
@@ -361,18 +371,6 @@ def _handle_tools_call(params: dict) -> dict:
             return _text(f"## [[{stem}]]\n{content}")
 
         if name == "memory_explore_tags":
-            resolve_input = args.get("tags")
-            if resolve_input:
-                # Fuzzy-resolve mode: normalize approximate tag names
-                from lib.vector_store import tag_store
-                if not tag_store.enabled:
-                    return _text(json.dumps(
-                        {"resolved": [], "note": "vectorization disabled"},
-                        ensure_ascii=False,
-                    ))
-                resolved = storage.resolve_tags(resolve_input)
-                return _text(json.dumps({"resolved": resolved}, ensure_ascii=False))
-            # Default: list all tags with counts — compact "tag count" format
             tag_data = storage.explore_tags()
             lines = [f"{t['name']} {t['count']}" for t in tag_data.get("tags", [])]
             return _text("\n".join(lines) if lines else "No tags found.")

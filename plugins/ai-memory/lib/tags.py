@@ -16,6 +16,34 @@ Public API:
 import re
 from pathlib import Path
 
+# Predefined aspect tags — a fixed vocabulary shown to agents at session start
+# so they pick from known categories rather than inventing synonyms.
+# Structural tags (universal, project/*, lang/*, session, rule) are excluded
+# because they are already visible in the StartSession output structure.
+ASPECT_TAGS: list[str] = [
+    "testing",
+    "architecture",
+    "debugging",
+    "deployment",
+    "performance",
+    "security",
+    "tooling",
+    "workflow",
+    "documentation",
+    "error-handling",
+    "logging",
+    "monitoring",
+    "refactoring",
+    "api-design",
+    "data-modeling",
+    "concurrency",
+    "configuration",
+    "ci-cd",
+]
+
+# Structural tags derived from directory paths — not useful for agent discovery
+STRUCTURAL_TAGS: set[str] = {"universal", "session", "rule", "critical-rule"}
+
 # Matches YAML front-matter block: ---\n...\n---\n
 _FRONT_MATTER_RE = re.compile(r"^---[ \t]*\n(.*?)\n---[ \t]*\n", re.DOTALL)
 
