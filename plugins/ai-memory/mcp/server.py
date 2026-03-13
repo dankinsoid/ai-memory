@@ -60,12 +60,7 @@ def _build_tools() -> list[dict]:
             "query": {"type": "string", "description": "Semantic search (natural language)"},
             **search_props,
         }
-        search_desc = "Search memory by semantic query and/or tag/date filters. Covers facts, rules, sessions."
-    else:
-        search_desc = (
-            "Search memory by tag and date filters. Covers facts, rules, sessions. "
-            "Always specify tags or any_tags for effective results."
-        )
+    search_desc = "Search memory. Use 'rule' tag is for rules, 'session' for sessions; exclude_tags to skip."
 
     return [
         {
