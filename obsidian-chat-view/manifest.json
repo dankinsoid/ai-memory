@@ -1,7 +1,7 @@
 {
 	"id": "chat-view",
 	"name": "Chat View",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"minAppVersion": "1.0.0",
 	"description": "Renders ai-memory session transcripts as styled chat bubbles.",
 	"author": "ai-memory",

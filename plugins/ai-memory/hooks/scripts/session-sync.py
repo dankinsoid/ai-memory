@@ -65,6 +65,42 @@ def derive_project(cwd: str) -> str | None:
     return git_project_name(cwd) or (cwd.rstrip("/").split("/")[-1] if cwd else None)
 
 
+def _git_user_name(cwd: str) -> str | None:
+    """Return git user.name, or None if not configured.
+
+    Args:
+        cwd: working directory inside a git repo
+
+    Returns:
+        User name string, or None.
+    """
+    if not cwd:
+        return None
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd, "config", "user.name"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            return r.stdout.strip() or None
+    except Exception:
+        pass
+    return None
+
+
+def _system_user_name() -> str | None:
+    """Return OS username as fallback.
+
+    Returns:
+        Username string, or None.
+    """
+    import getpass
+    try:
+        return getpass.getuser() or None
+    except Exception:
+        return None
+
+
 def _git_head_short(cwd: str) -> str | None:
     """Return short SHA of HEAD, or None if not a git repo.
 
@@ -188,6 +224,33 @@ def _extract_text(content) -> str:
 
 
 _AI_MEMORY_TOOL_PREFIX = "mcp__plugin_ai-memory_ai-memory__"
+
+# ---------------------------------------------------------------------------
+# Agent identity registry
+# ---------------------------------------------------------------------------
+
+# Agent name → (callout_type, display_name).
+_AGENT_REGISTRY: dict[str, tuple[str, str]] = {
+    "claude":  ("claude",  "Claude"),
+    "codex":   ("codex",   "Codex"),
+    "chatgpt": ("chatgpt", "ChatGPT"),
+    "gemini":  ("gemini",  "Gemini"),
+}
+_DEFAULT_AGENT = ("assistant", "Bot")
+
+
+def _resolve_agent(agent: str | None) -> tuple[str, str]:
+    """Resolve agent name to (callout_type, display_name).
+
+    Args:
+        agent: agent identifier like 'claude', 'codex', etc.
+
+    Returns:
+        Tuple of (callout_type, display_name) for rendering.
+    """
+    if not agent:
+        return _DEFAULT_AGENT
+    return _AGENT_REGISTRY.get(agent.lower(), _DEFAULT_AGENT)
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 # System-injected XML tags that are noise in session transcripts.
 # Uses re.DOTALL so the pattern spans multiple lines within a single tag.
@@ -339,10 +402,17 @@ def _blockquote(text: str) -> str:
     )
 
 
-def format_messages_md(stream: list[dict]) -> str:
+def format_messages_md(
+    stream: list[dict],
+    agent: str | None = None,
+    user_name: str | None = None,
+) -> str:
     """Format a message stream as Obsidian callout-based chat transcript.
 
-    Each message becomes a ``> [!human]`` or ``> [!assistant]`` callout.
+    Each message becomes a ``> [!human]`` or ``> [!claude]`` (etc.) callout.
+    The assistant callout type and emoji are determined by the ``agent``
+    parameter via ``_resolve_agent``.
+
     Obsidian renders callouts as single container divs, so no JS re-parenting
     is needed — pure CSS snippet handles bubble styling.
 
@@ -354,10 +424,13 @@ def format_messages_md(stream: list[dict]) -> str:
 
     Args:
         stream: ordered list of items from extract_message_stream
+        agent: agent identifier (e.g. 'claude', 'codex'); defaults to 'claude'
 
     Returns:
         Markdown string.
     """
+    agent_callout, agent_label = _resolve_agent(agent or "claude")
+    human_label = user_name or "You"
     lines: list[str] = []
     # Track pending refs to attach to the preceding assistant callout
     pending_refs: list[str] = []
@@ -366,7 +439,9 @@ def format_messages_md(stream: list[dict]) -> str:
         if item["kind"] == "refs":
             pending_refs.extend(item["refs"])
         elif item["kind"] == "message":
-            role = "human" if item["role"] == "user" else "assistant"
+            is_human = item["role"] == "user"
+            callout_type = "human" if is_human else agent_callout
+            label = human_label if is_human else agent_label
             text = _neutralize_file_links(item["text"])
 
             # Attach pending refs to the previous assistant message
@@ -388,8 +463,7 @@ def format_messages_md(stream: list[dict]) -> str:
                 if ts_match:
                     ts_label = f" {ts_match.group(1)}"
 
-            emoji = "🤖" if role == "assistant" else "👤"
-            lines.append(f"> [!{role}] {emoji} {ts_label}")
+            lines.append(f"> [!{callout_type}] **{label}**{ts_label}")
             lines.append(">")
             lines.append(_blockquote(text))
 
@@ -549,6 +623,7 @@ def main() -> None:
     data = json.loads(sys.stdin.read())
     session_id = data.get("session_id")
     cwd = data.get("cwd", "")
+    agent = data.get("agent", "claude")
 
     if not session_id:
         sys.exit(0)
@@ -575,6 +650,7 @@ def main() -> None:
     # Resolve git context: start info from state DB, current commit from git
     git_ctx = _load_git_context(session_id) if session_id else {}
     commit_end = _git_head_short(cwd)
+    user_name = _git_user_name(cwd) or _system_user_name()
 
     # Find or create session summary file
     existing = storage._find_session_file(sessions_parent, session_id)
@@ -602,7 +678,9 @@ def main() -> None:
         sys.exit(1)
 
     # Append transcript section to the session summary file
-    _replace_transcript_section(existing, format_messages_md(stream))
+    _replace_transcript_section(
+        existing, format_messages_md(stream, agent=agent, user_name=user_name)
+    )
 
 
 if __name__ == "__main__":
