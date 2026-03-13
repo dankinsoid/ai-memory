@@ -1,0 +1,51 @@
+# @ai-generated(solo)
+# Creates a GitHub release with Obsidian plugin assets whenever
+# obsidian-chat-view/ files change on main.
+#
+# BRAT installs plugins from GitHub releases — it expects main.js,
+# manifest.json, and styles.css as release assets.
+
+name: Obsidian Plugin Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "obsidian-chat-view/**"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read plugin version
+        id: version
+        run: |
+          VERSION=$(jq -r .version obsidian-chat-view/manifest.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=obsidian-chat-view-v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: check_tag
+        run: |
+          if git rev-parse "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Chat View v${{ steps.version.outputs.version }}"
+          body: "Obsidian chat-view plugin v${{ steps.version.outputs.version }}"
+          files: |
+            obsidian-chat-view/main.js
+            obsidian-chat-view/manifest.json
+            obsidian-chat-view/styles.css

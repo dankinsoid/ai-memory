@@ -1,0 +1,126 @@
+/* @ai-generated(solo) */
+
+/* All styles scoped to .markdown-preview-view so they only apply in
+   Reading mode and don't affect Live Preview (edit mode). */
+
+/* ── Chat container ─────────────────────────────────────────────── */
+
+.markdown-preview-view .chat-msg {
+	position: relative;
+	margin: 0.75em 0;
+	padding: 0.75em 1em;
+	border-radius: 12px;
+	max-width: 85%;
+	line-height: 1.5;
+}
+
+/* ── Role-specific styles ───────────────────────────────────────── */
+
+.markdown-preview-view .chat-msg[data-role="human"] {
+	margin-left: auto;
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-bottom-right-radius: 4px;
+}
+
+/* Links inside human bubbles need contrast */
+.markdown-preview-view .chat-msg[data-role="human"] a {
+	color: var(--text-on-accent);
+	text-decoration: underline;
+}
+
+.markdown-preview-view .chat-msg[data-role="assistant"] {
+	margin-right: auto;
+	background-color: var(--background-secondary);
+	color: var(--text-normal);
+	border-bottom-left-radius: 4px;
+}
+
+/* ── Role label (bold "Human:" / "Assistant:") ──────────────────── */
+
+.markdown-preview-view .chat-msg .chat-role-label {
+	display: block;
+	font-size: 0.75em;
+	font-weight: 600;
+	opacity: 0.7;
+	margin-bottom: 0.25em;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+/* ── Hide the raw bold label when plugin is active ──────────────── */
+
+.markdown-preview-view .chat-msg .chat-original-label {
+	display: none;
+}
+
+/* ── Memory references ──────────────────────────────────────────── */
+
+.markdown-preview-view .chat-refs {
+	margin: 0.25em 0;
+	padding: 0.4em 0.75em;
+	font-size: 0.8em;
+	opacity: 0.7;
+	text-align: center;
+}
+
+.markdown-preview-view .chat-refs blockquote {
+	margin: 0;
+	padding: 0;
+	border: none;
+	font-style: italic;
+}
+
+/* ── Timestamp tooltip ──────────────────────────────────────────── */
+
+.markdown-preview-view .chat-msg::after {
+	content: attr(data-ts-display);
+	position: absolute;
+	bottom: -1.4em;
+	font-size: 0.65em;
+	opacity: 0;
+	transition: opacity 0.15s;
+	color: var(--text-muted);
+}
+
+.markdown-preview-view .chat-msg[data-role="human"]::after {
+	right: 0.5em;
+}
+
+.markdown-preview-view .chat-msg[data-role="assistant"]::after {
+	left: 0.5em;
+}
+
+.markdown-preview-view .chat-msg:hover::after {
+	opacity: 1;
+}
+
+/* ── Code blocks inside bubbles ─────────────────────────────────── */
+
+.markdown-preview-view .chat-msg pre {
+	border-radius: 8px;
+}
+
+.markdown-preview-view .chat-msg[data-role="human"] pre,
+.markdown-preview-view .chat-msg[data-role="human"] code {
+	background-color: rgba(0, 0, 0, 0.15);
+	color: var(--text-on-accent);
+}
+
+/* ── Headings inside assistant bubbles — tone them down ─────────── */
+
+.markdown-preview-view .chat-msg h1,
+.markdown-preview-view .chat-msg h2,
+.markdown-preview-view .chat-msg h3,
+.markdown-preview-view .chat-msg h4,
+.markdown-preview-view .chat-msg h5,
+.markdown-preview-view .chat-msg h6 {
+	margin-top: 0.5em;
+	margin-bottom: 0.25em;
+	font-size: 1em;
+	border: none;
+}
+
+.markdown-preview-view .chat-msg h1,
+.markdown-preview-view .chat-msg h2 { font-size: 1.15em; }
+.markdown-preview-view .chat-msg h3 { font-size: 1.05em; }

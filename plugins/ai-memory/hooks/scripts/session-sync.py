@@ -323,11 +323,19 @@ def _neutralize_file_links(text: str) -> str:
 
 
 def format_messages_md(stream: list[dict]) -> str:
-    """Format a message stream as readable markdown with inline memory references.
+    """Format a message stream as chat-style markdown with div wrappers.
 
-    Renders text messages as ## Human / ## Assistant sections. Memory references
-    are inserted inline as blockquote lines at the position they appeared in the
-    conversation (i.e. right after the tool returned results).
+    Each message is wrapped in ``<div class="chat-msg" data-role="..." data-ts="...">``
+    so that:
+    - Plain markdown viewers: divs are invisible, bold role labels provide structure.
+    - Obsidian with chat plugin: post-processor finds ``.chat-msg`` divs and renders
+      styled chat bubbles.
+
+    Markdown inside divs renders in Obsidian thanks to the blank line after the
+    opening tag.  Code-fenced ``</div>`` won't close the wrapper.
+
+    Memory references appear as ``<div class="chat-refs">`` blocks at the position
+    the tool returned results.
 
     Args:
         stream: ordered list of items from extract_message_stream
@@ -339,13 +347,23 @@ def format_messages_md(stream: list[dict]) -> str:
     for item in stream:
         if item["kind"] == "refs":
             refs_str = ", ".join(f"[[{r}]]" for r in item["refs"])
-            lines.append(f"> Referenced: {refs_str}")
+            lines.append('<div class="chat-refs">')
+            lines.append("")
+            lines.append(f"> {refs_str}")
+            lines.append("")
+            lines.append("</div>")
             lines.append("")
         elif item["kind"] == "message":
-            role = "Human" if item["role"] == "user" else "Assistant"
-            lines.append(f"## {role}")
+            role = "human" if item["role"] == "user" else "assistant"
+            label = "Human" if role == "human" else "Assistant"
+            ts = item.get("timestamp", "")
+            lines.append(f'<div class="chat-msg" data-role="{role}" data-ts="{ts}">')
+            lines.append("")
+            lines.append(f"**{label}:**")
             lines.append("")
             lines.append(_neutralize_file_links(item["text"]))
+            lines.append("")
+            lines.append("</div>")
             lines.append("")
     return "\n".join(lines).strip()
 
