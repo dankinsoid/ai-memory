@@ -107,9 +107,10 @@ def _build_tools() -> list[dict]:
                         "items": {"type": "string"},
                         "description": (
                             "Three tiers: "
-                            "(1) context — 'universal' (applies everywhere), "
-                            "'project/<name>' (specific to one project only), "
+                            "(1) context — 'universal' (loaded every session as baseline context), "
+                            "'project/<name>' (scoped to one project), "
                             "or 'lang/<name>' (language-specific); "
+                            "omit context tag if the memory is general and doesn't need auto-loading; "
                             "add 'rule' for rules/preferences/conventions; "
                             "(2) aspect — reuse from: testing, architecture, "
                             "debugging, deployment, performance, security, "
