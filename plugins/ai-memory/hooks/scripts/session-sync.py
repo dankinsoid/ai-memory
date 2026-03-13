@@ -388,7 +388,8 @@ def format_messages_md(stream: list[dict]) -> str:
                 if ts_match:
                     ts_label = f" {ts_match.group(1)}"
 
-            lines.append(f"> [!{role}]{ts_label}")
+            emoji = "🤖" if role == "assistant" else "👤"
+            lines.append(f"> [!{role}] {emoji} {ts_label}")
             lines.append(">")
             lines.append(_blockquote(text))
 
