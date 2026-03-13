@@ -1,134 +1,77 @@
 /* @ai-generated(solo) */
-/* Chat bubble styling for [!human] and agent callouts ([!claude], [!codex], etc.).
-   Uses Obsidian's native callout system — no JS re-parenting needed.
-   To add a new agent: add its data-callout to _AGENTS, add a color rule below. */
+/* Per-agent callout colors for chat transcripts.
+   Overrides --callout-color and all accent-derived variables so every
+   UI element inside agent callouts uses the agent color.
+   To add a new agent: add a .callout[data-callout="<name>"] rule below. */
 
-/* ── Agent list (single place to extend) ──────────────────────── */
-/* Keep _AGENTS in sync with _AGENT_REGISTRY in session-sync.py   */
-
-:root {
-	--agent-claude:  #e87b35;  /* warm orange */
-	--agent-codex:   #10a37f;  /* OpenAI green */
-	--agent-chatgpt: #10a37f;
-	--agent-gemini:  #4285f4;  /* Google blue */
-	--agent-default: #888888;  /* neutral grey */
-}
-
-/* ── Shared bubble base ───────────────────────────────────────── */
-
-.callout[data-callout="human"],
-.callout:is([data-callout="claude"], [data-callout="codex"], [data-callout="chatgpt"], [data-callout="gemini"], [data-callout="assistant"]) {
-	border: none;
-	border-radius: 16px;
-	padding: 4px 8px;
-	margin: 8px 0;
-	max-width: 92%;
-}
-
-/* ── Callout title: role label + timestamp ─────────────────────── */
-
-.callout[data-callout="human"] .callout-icon,
-.callout:is([data-callout="claude"], [data-callout="codex"], [data-callout="chatgpt"], [data-callout="gemini"], [data-callout="assistant"]) .callout-icon {
-	display: none;
-}
-
-.callout[data-callout="human"] .callout-title,
-.callout:is([data-callout="claude"], [data-callout="codex"], [data-callout="chatgpt"], [data-callout="gemini"], [data-callout="assistant"]) .callout-title {
-	padding: 2px 8px 0;
-	font-size: 0.75em;
-	opacity: 0.6;
-	font-weight: 600;
-	color: var(--text-muted);
-	text-transform: uppercase;
-	letter-spacing: 0.03em;
-}
-
-/* ── Remove default callout content padding ───────────────────── */
-
-.callout[data-callout="human"] .callout-content,
-.callout:is([data-callout="claude"], [data-callout="codex"], [data-callout="chatgpt"], [data-callout="gemini"], [data-callout="assistant"]) .callout-content {
-	padding: 4px 8px;
-}
-
-/* ── Human: right-aligned, accent-tinted bubble ───────────────── */
-
-.callout[data-callout="human"] {
-	--callout-color: var(--interactive-accent-rgb);
-	background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
-	margin-left: auto;
-	margin-right: 0;
-	border-bottom-right-radius: 4px;
-}
-
-.callout[data-callout="human"] .callout-title {
-	justify-content: flex-start;
-}
-
-/* ── Agent shared: left-aligned bubble ────────────────────────── */
-
-.callout:is([data-callout="claude"], [data-callout="codex"], [data-callout="chatgpt"], [data-callout="gemini"], [data-callout="assistant"]) {
-	margin-left: 0;
-	margin-right: auto;
-	border-bottom-left-radius: 4px;
-}
-
-/* ── Per-agent colors ─────────────────────────────────────────── */
-/* --callout-color is Obsidian's internal accent variable for callouts:
-   it controls the left border strip, icon tint, title color, and any
-   other accent inside the callout (tables, hr, etc.). We override it
-   per agent alongside the background tint. */
+/* human: no override — uses Obsidian's default callout styling */
 
 .callout[data-callout="claude"] {
-	--callout-color: 232, 123, 53;  /* rgb triplet for var(--agent-claude) */
-	background: color-mix(in srgb, var(--agent-claude) 15%, transparent);
+	--callout-color: 232, 123, 53;  /* warm orange */
+	--color-accent: rgb(var(--callout-color));
+	--interactive-accent: rgb(var(--callout-color));
+	--blockquote-border-color: rgb(var(--callout-color));
+	--text-accent: rgb(var(--callout-color));
+	--checkbox-color: rgb(var(--callout-color));
+	--divider-color-hover: rgb(var(--callout-color));
+	--embed-border-start: rgb(var(--callout-color));
+	--table-selection-border-color: rgb(var(--callout-color));
+	--table-drag-handle-background-active: rgb(var(--callout-color));
+	--bases-table-cell-shadow-focus: rgb(var(--callout-color));
 }
 
 .callout[data-callout="codex"] {
-	--callout-color: 16, 163, 127;
-	background: color-mix(in srgb, var(--agent-codex) 15%, transparent);
+	--callout-color: 16, 163, 127;  /* OpenAI green */
+	--color-accent: rgb(var(--callout-color));
+	--interactive-accent: rgb(var(--callout-color));
+	--blockquote-border-color: rgb(var(--callout-color));
+	--text-accent: rgb(var(--callout-color));
+	--checkbox-color: rgb(var(--callout-color));
+	--divider-color-hover: rgb(var(--callout-color));
+	--embed-border-start: rgb(var(--callout-color));
+	--table-selection-border-color: rgb(var(--callout-color));
+	--table-drag-handle-background-active: rgb(var(--callout-color));
+	--bases-table-cell-shadow-focus: rgb(var(--callout-color));
 }
 
 .callout[data-callout="chatgpt"] {
 	--callout-color: 16, 163, 127;
-	background: color-mix(in srgb, var(--agent-chatgpt) 15%, transparent);
+	--color-accent: rgb(var(--callout-color));
+	--interactive-accent: rgb(var(--callout-color));
+	--blockquote-border-color: rgb(var(--callout-color));
+	--text-accent: rgb(var(--callout-color));
+	--checkbox-color: rgb(var(--callout-color));
+	--divider-color-hover: rgb(var(--callout-color));
+	--embed-border-start: rgb(var(--callout-color));
+	--table-selection-border-color: rgb(var(--callout-color));
+	--table-drag-handle-background-active: rgb(var(--callout-color));
+	--bases-table-cell-shadow-focus: rgb(var(--callout-color));
 }
 
 .callout[data-callout="gemini"] {
-	--callout-color: 66, 133, 244;
-	background: color-mix(in srgb, var(--agent-gemini) 15%, transparent);
+	--callout-color: 66, 133, 244;  /* Google blue */
+	--color-accent: rgb(var(--callout-color));
+	--interactive-accent: rgb(var(--callout-color));
+	--blockquote-border-color: rgb(var(--callout-color));
+	--text-accent: rgb(var(--callout-color));
+	--checkbox-color: rgb(var(--callout-color));
+	--divider-color-hover: rgb(var(--callout-color));
+	--embed-border-start: rgb(var(--callout-color));
+	--table-selection-border-color: rgb(var(--callout-color));
+	--table-drag-handle-background-active: rgb(var(--callout-color));
+	--bases-table-cell-shadow-focus: rgb(var(--callout-color));
 }
 
 .callout[data-callout="assistant"] {
-	--callout-color: 136, 136, 136;
-	background: color-mix(in srgb, var(--agent-default) 15%, transparent);
+	--callout-color: 136, 136, 136;  /* neutral grey */
+	--color-accent: rgb(var(--callout-color));
+	--interactive-accent: rgb(var(--callout-color));
+	--blockquote-border-color: rgb(var(--callout-color));
+	--text-accent: rgb(var(--callout-color));
+	--checkbox-color: rgb(var(--callout-color));
+	--divider-color-hover: rgb(var(--callout-color));
+	--embed-border-start: rgb(var(--callout-color));
+	--table-selection-border-color: rgb(var(--callout-color));
+	--table-drag-handle-background-active: rgb(var(--callout-color));
+	--bases-table-cell-shadow-focus: rgb(var(--callout-color));
 }
-
-/* ── Hide fold indicator ──────────────────────────────────────── */
-
-.callout[data-callout="human"] .callout-fold,
-.callout:is([data-callout="claude"], [data-callout="codex"], [data-callout="chatgpt"], [data-callout="gemini"], [data-callout="assistant"]) .callout-fold {
-	display: none;
-}
-
-/* ── Code blocks inside human bubbles ─────────────────────────── */
-
-.callout[data-callout="human"] pre,
-.callout[data-callout="human"] code {
-	background-color: rgba(0, 0, 0, 0.1);
-}
-
-/* ── Headings inside bubbles — tone them down ─────────────────── */
-
-.callout[data-callout="human"] :is(h1, h2, h3, h4, h5, h6),
-.callout:is([data-callout="claude"], [data-callout="codex"], [data-callout="chatgpt"], [data-callout="gemini"], [data-callout="assistant"]) :is(h1, h2, h3, h4, h5, h6) {
-	margin-top: 0.5em;
-	margin-bottom: 0.25em;
-	font-size: 1em;
-	border: none;
-}
-
-.callout[data-callout="human"] :is(h1, h2),
-.callout:is([data-callout="claude"], [data-callout="codex"], [data-callout="chatgpt"], [data-callout="gemini"], [data-callout="assistant"]) :is(h1, h2) { font-size: 1.15em; }
-
-.callout[data-callout="human"] h3,
-.callout:is([data-callout="claude"], [data-callout="codex"], [data-callout="chatgpt"], [data-callout="gemini"], [data-callout="assistant"]) h3 { font-size: 1.05em; }
