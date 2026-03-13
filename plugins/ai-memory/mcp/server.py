@@ -27,6 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lib import storage  # noqa: E402 — must come after sys.path patch
+from lib import embedding  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -35,107 +36,133 @@ from lib import storage  # noqa: E402 — must come after sys.path patch
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_INFO = {"name": "ai-memory", "version": "1.0.0"}
 
-TOOLS = [
-    {
-        "name": "memory_session",
-        "description": "Upsert a session summary",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "session_id": {"type": "string"},
-                "project": {"type": "string"},
-                "title": {"type": "string", "description": "3-8 words"},
-                "summary": {
-                    "type": "string",
-                    "description": "1-3 sentences: full arc (replaces previous). No file/function names.",
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"}
-                },
-                "compact": {
-                    "type": "string",
-                    "description": "Detailed compact notes for /load recovery",
-                },
-            },
-            "required": ["session_id", "title", "summary"],
-        },
-    },
-    {
-        "name": "memory_remember",
-        "description": "Save a rule or fact to long-term memory",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "content": {
+
+def _build_tools() -> list[dict]:
+    """Build MCP tool list, adapting memory_search schema to embedding availability.
+
+    When OPENAI_API_KEY is not set, the `query` parameter is omitted from
+    memory_search so the agent naturally relies on tag-based filtering instead
+    of attempting semantic search that would return nothing useful.
+    """
+    # -- memory_search: dynamic schema based on embedding availability --
+    search_props: dict = {
+        "tags": {"type": "array", "items": {"type": "string"}, "description": "All must match"},
+        "any_tags": {"type": "array", "items": {"type": "string"}, "description": "At least one must match"},
+        "exclude_tags": {"type": "array", "items": {"type": "string"}},
+        "since": {"type": "string", "description": "YYYY-MM-DD"},
+        "until": {"type": "string", "description": "YYYY-MM-DD"},
+        "limit": {"type": "integer", "description": "Default 20"},
+    }
+
+    if embedding.is_enabled():
+        # Semantic search available — add query as first property
+        search_props = {
+            "query": {"type": "string", "description": "Semantic search (natural language)"},
+            **search_props,
+        }
+        search_desc = "Search memory by semantic query and/or tag/date filters. Covers facts, rules, sessions."
+    else:
+        search_desc = (
+            "Search memory by tag and date filters. Covers facts, rules, sessions. "
+            "Always specify tags or any_tags for effective results."
+        )
+
+    return [
+        {
+            "name": "memory_session",
+            "description": "Upsert a session summary",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "project": {"type": "string"},
+                    "title": {"type": "string", "description": "3-8 words"},
+                    "summary": {
                         "type": "string",
+                        "description": "1-3 sentences: full arc (replaces previous). No file/function names.",
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    },
+                    "compact": {
+                        "type": "string",
+                        "description": "Detailed compact notes for /load recovery",
+                    },
+                },
+                "required": ["session_id", "title", "summary"],
+            },
+        },
+        {
+            "name": "memory_remember",
+            "description": "Save a rule or fact to long-term memory",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                            "type": "string",
+                            "description": (
+                                "Free-form markdown. Short entries: 1-4 sentences. "
+                                "Longer entries: lead with a brief summary paragraph, "
+                                "then add detail below."
+                            ),
+                        },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
                         "description": (
-                            "Free-form markdown. Short entries: 1-4 sentences. "
-                            "Longer entries: lead with a brief summary paragraph, "
-                            "then add detail below."
+                            "Three tiers: "
+                            "(1) context — 'universal' (applies everywhere), "
+                            "'project/<name>' (specific to one project only), "
+                            "or 'lang/<name>' (language-specific); "
+                            "add 'rule' for rules/preferences/conventions; "
+                            "(2) aspect tags; "
+                            "(3) specific topic/technology tags"
                         ),
                     },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Three tiers: "
-                        "(1) context — 'universal' (applies everywhere), "
-                        "'project/<name>' (specific to one project only), "
-                        "or 'lang/<name>' (language-specific); "
-                        "add 'rule' for rules/preferences/conventions; "
-                        "(2) aspect tags; "
-                        "(3) specific topic/technology tags"
-                    ),
+                    "title": {
+                        "type": "string",
+                        "description": "Kebab-case filename stem, e.g. 'always-run-regression-test-before-fixing-bug'",
+                    },
                 },
-                "title": {
-                    "type": "string",
-                    "description": "Kebab-case filename stem, e.g. 'always-run-regression-test-before-fixing-bug'",
-                },
-            },
-            "required": ["content", "tags", "title"],
-        },
-    },
-    {
-        "name": "memory_search",
-        "description": "Search memory by semantic query and/or tag/date filters. Covers facts, rules, sessions.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Semantic search (natural language)"},
-                "tags": {"type": "array", "items": {"type": "string"}, "description": "All must match"},
-                "any_tags": {"type": "array", "items": {"type": "string"}, "description": "At least one must match"},
-                "exclude_tags": {"type": "array", "items": {"type": "string"}},
-                "since": {"type": "string", "description": "YYYY-MM-DD"},
-                "until": {"type": "string", "description": "YYYY-MM-DD"},
-                "limit": {"type": "integer", "description": "Default 20"},
+                "required": ["content", "tags", "title"],
             },
         },
-    },
-    {
-        "name": "memory_read",
-        "description": "Read full content of a memory file by its [[ref]] wikilink.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"ref": {"type": "string"}},
-            "required": ["ref"],
+        {
+            "name": "memory_search",
+            "description": search_desc,
+            "inputSchema": {
+                "type": "object",
+                "properties": search_props,
+            },
         },
-    },
-    {
-        "name": "memory_explore_tags",
-        "description": "List all tags with file counts. If 'tags' given, fuzzy-resolve approximate names to existing tags.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Approximate tag names to resolve (optional)",
+        {
+            "name": "memory_read",
+            "description": "Read full content of a memory file by its [[ref]] wikilink.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"],
+            },
+        },
+        {
+            "name": "memory_explore_tags",
+            "description": "List all tags with file counts. If 'tags' given, fuzzy-resolve approximate names to existing tags.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Approximate tag names to resolve (optional)",
+                    },
                 },
             },
         },
-    },
-]
+    ]
+
+
+TOOLS = _build_tools()
 
 
 # ---------------------------------------------------------------------------
