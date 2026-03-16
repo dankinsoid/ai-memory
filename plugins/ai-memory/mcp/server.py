@@ -146,6 +146,20 @@ def _build_tools() -> list[dict]:
             },
         },
         {
+            "name": "memory_load_session",
+            "description": "Load session for deep recovery.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "[[ref]] wikilink stem",
+                    },
+                },
+                "required": ["ref"],
+            },
+        },
+        {
             "name": "memory_explore_tags",
             "description": "List all tags with file counts.",
             "inputSchema": {
@@ -370,6 +384,13 @@ def _handle_tools_call(params: dict) -> dict:
                 return _error(f"Not found: [[{stem}]]")
             content = found.read_text(encoding="utf-8")
             return _text(f"## [[{stem}]]\n{content}")
+
+        if name == "memory_load_session":
+            from lib.session_loader import load_session_by_ref, format_for_load
+            sc = load_session_by_ref(args["ref"])
+            if not sc:
+                return _error(f"Session not found: {args['ref']}")
+            return _text(format_for_load(sc))
 
         if name == "memory_explore_tags":
             tag_data = storage.explore_tags()

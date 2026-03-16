@@ -255,6 +255,15 @@ def main() -> None:
         if proj_parts:
             sections.append(f"## Project: {project_name}\n" + "\n".join(proj_parts))
 
+    # ---- Clear chaining: auto-load previous session compact ----
+    if data.get("source") == "clear" and project_name:
+        from lib.session_loader import load_prev_session, format_for_context
+        prev = load_prev_session(project_name, session_id)
+        if prev:
+            sections.append(
+                "## Previous Session (auto-loaded)\n" + format_for_context(prev)
+            )
+
     # Save git context (branch + start commit) for session-sync to pick up later
     if cwd and session_id:
         _save_git_context(cwd, session_id)

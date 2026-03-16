@@ -9,54 +9,36 @@ description: Deep recovery from a previous session — read session content and 
 
 Parse ARGUMENTS to determine which session to load:
 
-1. **No args** → find previous session via prev-session cache:
-   ```bash
-   python3 <this-skill-dir>/load-chain.py <current-session-id> <project-name>
-   ```
-   `<this-skill-dir>` = the directory containing this SKILL.md (derive from the path you loaded it from).
-   The current session ID is in SessionStart context. Determine the project name from the git repo name.
-   The script finds the previous session via the prev-session cache (written by session-end hook on /clear).
+1. **No args / "last" / "latest"** → search for the most recent session:
+   Call `memory_search` with `tags: ["session", "project/<project>"]`, `limit: 1`
+   This is an exact filter — load the result directly without asking.
 
 2. **Free text** → parse the user's request into `memory_search` filters:
    - Always include `tags: ["session", "project/<project>"]`
-   - Temporal hints ("last", "yesterday", "last week") → `since`/`until` (resolve relative to today)
+   - Temporal hints ("yesterday", "last week") → `since`/`until` (resolve relative to today)
    - Topic keywords → `query` (translate to English)
-   - "latest" / "last" without topic → omit `query`, use `limit: 1`
 
-   Call `memory_search` with the constructed filters, pick the best match, load via `--ref`:
-   ```bash
-   python3 <this-skill-dir>/load-chain.py --ref <ref field from result, e.g. [[some-session-stem]]>
-   ```
+   Call `memory_search` with the constructed filters.
 
-3. **File path** (matches `sessions/...`) → use directly:
-   ```bash
-   python3 <this-skill-dir>/load-chain.py --file <rel-path>
-   ```
+## Choosing from results
+
+If the search used `query` or topic-based tags (i.e. the filter is fuzzy/ambiguous),
+**always let the user pick** using `AskUserQuestion` with up to 4 candidates as options
+(label = title, description = summary). The user can pick "Other" to refine.
+
+If the search was exact (e.g. `limit: 1` with no query), load the result directly.
 
 ## Load content
 
-Run the script — it outputs session content with priority: Compact section (from /save),
-then messages.md (from Stop hook), then summary as fallback.
-
-## Handling CHOOSE_SESSION
-
-If the script output starts with `# CHOOSE_SESSION`, no session was found for the current ID.
-The output contains a numbered list of recent session candidates.
-
-**You MUST ask the user which session to load** using a question with the candidate list.
-Present the candidates clearly (number, title, summary). Let the user pick by number or description.
-
-Once the user picks, load that session's file via:
-```bash
-python3 <this-skill-dir>/load-chain.py --file <file-path from [file: ...] marker>
-```
+Once a session is identified, call `memory_load_session` with its `ref`.
+This returns compact notes + transcript tail — optimized for recovery.
 
 ## After loading
 
 **Do NOT announce what you loaded.** Do not say "here's what I recovered" or "what should we do next?".
 
 Instead:
-- Read the output silently
+- Read the content silently
 - Understand where the previous conversation left off
 - Continue naturally — as if picking up mid-conversation
 - If the previous session ended with a pending task or question, address it directly
