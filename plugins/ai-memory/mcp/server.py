@@ -271,6 +271,12 @@ def _handle_tools_call(params: dict) -> dict:
                 tags=session_tags,
                 compact=args.get("compact"),
             )
+            # Clear the "needs init" flag so PreToolUse stops reminding.
+            try:
+                from lib.db import delete_state
+                delete_state(f"session-needs-init-{args['session_id']}")
+            except Exception:
+                pass
             # Signal session-reminder that compact was just saved, so it can
             # reset the staleness counter. Flag is consumed on next UserPromptSubmit.
             if args.get("compact"):
