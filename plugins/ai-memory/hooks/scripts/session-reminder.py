@@ -164,6 +164,18 @@ def main() -> None:
         prompt_count <= SUMMARY_REMIND_TURNS and first_prompt_len < SHORT_PROMPT_LEN
     )
 
+    # Set PreToolUse fallback flag on first prompt so the pretool hook can
+    # remind the agent if it starts working without calling memory_session.
+    if prompt_count == 1:
+        try:
+            from lib.db import set_state
+            set_state(
+                f"session-needs-init-{session_id}",
+                json.dumps({"project": project_name or ""}),
+            )
+        except Exception:
+            pass
+
     # Persist state
     try:
         from lib.db import set_state
