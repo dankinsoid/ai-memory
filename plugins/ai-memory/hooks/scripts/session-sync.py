@@ -255,8 +255,8 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 # System-injected XML tags that are noise in session transcripts.
 # Uses re.DOTALL so the pattern spans multiple lines within a single tag.
 _SYSTEM_TAG_RE = re.compile(
-    r"<(?:ide_opened_file|ide_selection|system-reminder|available-deferred-tools)"
-    r"[^>]*>.*?</(?:ide_opened_file|ide_selection|system-reminder|available-deferred-tools)>",
+    r"<(?:ide_opened_file|ide_selection|system-reminder|available-deferred-tools|system_instruction|local-command-stdout)"
+    r"[^>]*>.*?</(?:ide_opened_file|ide_selection|system-reminder|available-deferred-tools|system_instruction|local-command-stdout)>",
     re.DOTALL,
 )
 # Matches markdown links [text](target) where target is NOT an http(s) URL.
