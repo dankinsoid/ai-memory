@@ -271,6 +271,14 @@ def _handle_tools_call(params: dict) -> dict:
                 tags=session_tags,
                 compact=args.get("compact"),
             )
+            # Signal session-reminder that compact was just saved, so it can
+            # reset the staleness counter. Flag is consumed on next UserPromptSubmit.
+            if args.get("compact"):
+                try:
+                    from lib.db import set_state
+                    set_state(f"compact-saved-{args['session_id']}", "1")
+                except Exception:
+                    pass
             # Lazy-load rules relevant to the session's topic tags.
             # Scope/meta tags are already in context from SessionStart — skip them.
             _SCOPE_TAGS = {"universal", "session", "rule"}

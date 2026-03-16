@@ -3,12 +3,17 @@ from __future__ import annotations
 # @ai-generated(solo)
 # UserPromptSubmit hook: reminds agent about session metadata updates.
 #
-# Two types of reminders:
-# 1. Summary — on early turns, prompt agent to call memory_session with summary
-# 2. Chunk naming — when context token usage crosses a fixed boundary (e.g. every 20K tokens)
+# Reminder types (mutually exclusive, checked in priority order):
+# 1. Compact urgent — context >= 100K tokens and compact overdue: MUST run /save before responding
+# 2. Chunk naming  — context crossed a 20K boundary: call memory_session with chunk_title
+# 3. Compact stale — 40K+ tokens since last /save: gentle reminder to run /save
+# 4. Summary       — early turns: call memory_session with title/summary
 #
-# State file per session: ~/.claude/hooks/state/{session-id}-reminder.json
-#   {"prompt_count": N, "first_prompt_len": N, "last_chunk_tokens": N}
+# State per session (SQLite, JSON file fallback):
+#   prompt_count, first_prompt_len, last_chunk_tokens, last_compact_tokens, context_tokens
+#
+# Compact tracking: mcp/server.py writes compact-saved-{session_id} flag on memory_session
+# with compact; this hook reads and deletes the flag to reset last_compact_tokens.
 #
 
 import json
@@ -24,6 +29,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 CHUNK_TOKEN_STEP = 20_000    # create a new chunk every N tokens of context growth
 SHORT_PROMPT_LEN = 50        # prompts shorter than this are likely greetings
 SUMMARY_REMIND_TURNS = 3     # remind about summary for this many early turns
+COMPACT_STALE_TOKENS = 40_000   # tokens since last compact before gentle /save reminder
+COMPACT_URGENT_TOKENS = 100_000 # total context tokens before urgent /save reminder
 
 
 def git_project_name(cwd: str) -> str | None:
@@ -110,20 +117,45 @@ def main() -> None:
     prompt_count = reminder_state.get("prompt_count", 0) + 1
     first_prompt_len = reminder_state.get("first_prompt_len") or len(prompt)
     last_chunk_tokens = reminder_state.get("last_chunk_tokens", 0)
+    last_compact_tokens = reminder_state.get("last_compact_tokens", 0)
 
     context_tokens = get_context_tokens(transcript) or 0
 
     # Reset after /clear or /compact (tokens dropped below last boundary)
     if context_tokens < last_chunk_tokens:
         last_chunk_tokens = (context_tokens // CHUNK_TOKEN_STEP) * CHUNK_TOKEN_STEP
+    if context_tokens < last_compact_tokens:
+        last_compact_tokens = 0
 
     current_bucket = (context_tokens // CHUNK_TOKEN_STEP) * CHUNK_TOKEN_STEP
     need_chunk = (current_bucket > last_chunk_tokens) and (prompt_count > 1)
+
+    # Check if compact was saved since last turn (flag written by MCP memory_session)
+    try:
+        from lib.db import get_state, delete_state
+        if get_state(f"compact-saved-{session_id}"):
+            last_compact_tokens = context_tokens
+            delete_state(f"compact-saved-{session_id}")
+    except Exception:
+        pass
+
+    tokens_since_compact = context_tokens - last_compact_tokens
+    need_compact_urgent = (
+        context_tokens >= COMPACT_URGENT_TOKENS
+        and tokens_since_compact >= COMPACT_STALE_TOKENS
+        and prompt_count > 1
+    )
+    need_compact_stale = (
+        not need_compact_urgent
+        and tokens_since_compact >= COMPACT_STALE_TOKENS
+        and prompt_count > 3
+    )
 
     new_state = {
         "prompt_count": prompt_count,
         "first_prompt_len": first_prompt_len,
         "last_chunk_tokens": current_bucket if need_chunk else last_chunk_tokens,
+        "last_compact_tokens": last_compact_tokens,
         "context_tokens": context_tokens,
     }
 
@@ -146,12 +178,23 @@ def main() -> None:
     # Build output message
     parts: list[str] = []
 
-    if need_chunk:
+    if need_compact_urgent:
+        k = context_tokens // 1000
+        parts.append(
+            f'IMPORTANT: Context is large (~{k}K tokens) and compact is overdue. '
+            f'You MUST run /save BEFORE responding to this message to avoid losing context on auto-compact.'
+        )
+    elif need_chunk:
         k = context_tokens // 1000
         session_part = f', project: "{project_name}"' if project_name else ""
         parts.append(
             f'Chunk ~{k}K tokens. Call memory_session with session_id: "{session_id}"'
             f'{session_part}, chunk_title, title, and summary.'
+        )
+    elif need_compact_stale:
+        stale_k = tokens_since_compact // 1000
+        parts.append(
+            f'~{stale_k}K tokens without /save. Consider running /save to preserve compact notes.'
         )
     elif need_summary:
         session_part = f', project: "{project_name}"' if project_name else ""
