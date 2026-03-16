@@ -203,6 +203,15 @@ def main() -> None:
     project_name = derive_project(cwd)
     sections: list[str] = []
 
+    # ---- Clear chaining: load previous session early (needed for dedup below) ----
+    prev_session = None
+    loaded_session_id = None
+    if data.get("source") == "clear" and project_name:
+        from lib.session_loader import load_prev_session, format_for_load
+        prev_session = load_prev_session(project_name, session_id)
+        if prev_session:
+            loaded_session_id = prev_session.session_id
+
     # ---- Universal facts ----
     u_facts = storage.search_facts(
         tags=["universal"],
@@ -226,12 +235,14 @@ def main() -> None:
         ptag = f"project/{project_name}"
         proj_parts: list[str] = []
 
-        # Recent sessions
+        # Recent sessions (loaded_session_id excluded to avoid duplication)
         sessions = storage.search_sessions(
             project=project_name,
             sort_by="date",
             limit=SESSION_LIMIT,
         )
+        if loaded_session_id:
+            sessions = [s for s in sessions if s.get("id") != loaded_session_id]
         if sessions:
             proj_parts.append(
                 "### Sessions\n" + "\n".join(format_session_line(s) for s in sessions)
@@ -255,14 +266,11 @@ def main() -> None:
         if proj_parts:
             sections.append(f"## Project: {project_name}\n" + "\n".join(proj_parts))
 
-    # ---- Clear chaining: auto-load previous session compact ----
-    if data.get("source") == "clear" and project_name:
-        from lib.session_loader import load_prev_session, format_for_context
-        prev = load_prev_session(project_name, session_id)
-        if prev:
-            sections.append(
-                "## Previous Session (auto-loaded)\n" + format_for_context(prev)
-            )
+    # ---- Clear chaining: append formatted previous session ----
+    if prev_session:
+        sections.append(
+            "## Previous Session (auto-loaded)\n" + format_for_load(prev_session)
+        )
 
     # Save git context (branch + start commit) for session-sync to pick up later
     if cwd and session_id:

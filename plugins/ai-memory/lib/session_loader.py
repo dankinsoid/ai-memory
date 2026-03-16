@@ -4,10 +4,10 @@
 
 Provides two main entry points:
   load_prev_session(project, current_session_id) — chaining: find previous session
-      via prev-session cache, return its compact/summary content.
+      via prev-session cache, return its content.
   load_session_by_id(session_id, project) — load session content by known ID.
 
-Both return a SessionContent dataclass with title, compact, and summary fields.
+Both return a SessionContent dataclass. Use format_for_load() to render for display.
 """
 
 from __future__ import annotations
@@ -110,21 +110,6 @@ def load_session_by_ref(ref: str) -> SessionContent | None:
         session_id=fm.get("id", ""),
         transcript_tail=_extract_transcript_tail(content),
     )
-
-
-def format_for_context(sc: SessionContent) -> str:
-    """Format SessionContent for injection into agent context (SessionStart output).
-
-    Prefers compact notes; falls back to summary.
-
-    Args:
-        sc: loaded session content
-
-    Returns:
-        Formatted markdown string.
-    """
-    body = sc.compact or sc.summary or ""
-    return f"*{sc.title}*\n\n{body}" if body else f"*{sc.title}*"
 
 
 def format_for_load(sc: SessionContent) -> str:
