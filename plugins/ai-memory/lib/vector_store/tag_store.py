@@ -54,14 +54,18 @@ class TagVectorStore:
         if not self.enabled:
             return
         store = self._backend()
-        existing = store.get_vectors(keys)
-        new_keys = [k for k in keys if k not in existing]
+        existing = store.get_payloads(keys)
+        new_keys = [
+            k for k in keys
+            if k not in existing
+            or existing[k].get("_model", "text-embedding-3-small") != embedding.MODEL
+        ]
         if not new_keys:
             return
         vectors = embedding.embed_batch(new_keys)
         for key, vec in zip(new_keys, vectors):
             if vec is not None:
-                store.upsert(id=key, vector=vec, payload={"key": key})
+                store.upsert(id=key, vector=vec, payload={"key": key, "_model": embedding.MODEL})
 
     def find_similar(
         self,

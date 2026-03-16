@@ -989,10 +989,9 @@ def reindex() -> dict:
             }))
 
     total = len(items)
-    # upsert_batch handles MD5 dedup internally
-    content_store.upsert_batch(items)
+    embedded = content_store.upsert_batch(items)
 
-    return {"total": total, "embedded": total, "skipped": 0}
+    return {"total": total, "embedded": embedded, "skipped": total - embedded}
 
 
 def _body_text(content: str) -> str:

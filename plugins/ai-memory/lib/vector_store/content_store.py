@@ -86,39 +86,49 @@ class ContentVectorStore:
         digest = _md5(text)
         store = self._backend()
         existing = store.get_payloads([id])
-        if id in existing and existing[id].get("_md5") == digest:
-            return  # content unchanged — skip embedding
+        if (id in existing
+                and existing[id].get("_md5") == digest
+                and existing[id].get("_model", "text-embedding-3-small") == embedding.MODEL):
+            return  # content and model unchanged — skip embedding
         vecs = embedding.embed_batch([text])
         vec = vecs[0] if vecs else None
         if vec is not None:
-            store.upsert(id=id, vector=vec, payload={**payload, "_md5": digest})
+            store.upsert(id=id, vector=vec, payload={**payload, "_md5": digest, "_model": embedding.MODEL})
 
-    def upsert_batch(self, items: list[tuple[str, str, dict[str, Any]]]) -> None:
+    def upsert_batch(self, items: list[tuple[str, str, dict[str, Any]]]) -> int:
         """Embed and store multiple items in a single embedding API call.
 
-        Items whose MD5 matches the stored hash are skipped.
+        Items whose MD5 and model both match the stored payload are skipped.
 
         Args:
             items: list of (id, text, payload) tuples
+
+        Returns:
+            Number of items actually embedded (excludes skipped items).
         """
         if not self.enabled or not items:
-            return
+            return 0
         store = self._backend()
         ids = [item_id for item_id, _, _ in items]
         existing = store.get_payloads(ids)
         to_embed: list[tuple[str, str, dict[str, Any], str]] = []
         for item_id, text, payload in items:
             digest = _md5(text)
-            if item_id in existing and existing[item_id].get("_md5") == digest:
+            if (item_id in existing
+                    and existing[item_id].get("_md5") == digest
+                    and existing[item_id].get("_model", "text-embedding-3-small") == embedding.MODEL):
                 continue
             to_embed.append((item_id, text, payload, digest))
         if not to_embed:
-            return
+            return 0
         texts = [text for _, text, _, _ in to_embed]
         vecs = embedding.embed_batch(texts)
+        embedded = 0
         for (item_id, _, payload, digest), vec in zip(to_embed, vecs):
             if vec is not None:
-                store.upsert(id=item_id, vector=vec, payload={**payload, "_md5": digest})
+                store.upsert(id=item_id, vector=vec, payload={**payload, "_md5": digest, "_model": embedding.MODEL})
+                embedded += 1
+        return embedded
 
     def search(
         self,
@@ -154,7 +164,7 @@ class ContentVectorStore:
                 id=h.id,
                 score=h.score,
                 # Strip internal _md5 from caller-visible payload
-                payload={k: v for k, v in h.payload.items() if k != "_md5"},
+                payload={k: v for k, v in h.payload.items() if k not in ("_md5", "_model")},
             )
             for h in hits
         ]

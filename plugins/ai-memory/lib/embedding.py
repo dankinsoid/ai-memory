@@ -2,7 +2,8 @@
 from __future__ import annotations
 """OpenAI embedding backend.
 
-Provides batch text embedding via OpenAI text-embedding-3-small.
+Provides batch text embedding via OpenAI embedding models (default: text-embedding-3-small).
+Model is selected via OPENAI_EMBEDDING_MODEL env var; EMBEDDING_DIM is derived automatically.
 No external dependencies — uses stdlib urllib.
 
 Public API:
@@ -14,9 +15,15 @@ import json
 import os
 import urllib.request
 
-_MODEL = "text-embedding-3-small"
 _URL = "https://api.openai.com/v1/embeddings"
-EMBEDDING_DIM = 1536
+
+# Model can be overridden via env var; dimensions are derived automatically.
+# Absent _model in stored payloads is treated as "text-embedding-3-small" for
+# backwards compatibility — existing vectors are not invalidated on deploy.
+MODEL: str = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+_MODEL = MODEL  # kept for any external references
+_DIM_MAP = {"text-embedding-3-large": 3072}
+EMBEDDING_DIM: int = _DIM_MAP.get(MODEL, 1536)
 
 
 def is_enabled() -> bool:
@@ -31,7 +38,7 @@ def embed_batch(texts: list[str]) -> list[list[float] | None]:
         texts: non-empty list of strings to embed
 
     Returns:
-        List of 1536-dim float vectors in the same order as input.
+        List of EMBEDDING_DIM-dim float vectors in the same order as input.
         Individual items are None when the API call fails for any reason
         (missing key, network error, etc.) — callers should treat None
         as "embedding unavailable for this item" and skip gracefully.
