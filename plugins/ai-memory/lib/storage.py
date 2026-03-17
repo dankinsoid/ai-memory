@@ -29,6 +29,7 @@ Public API:
   reindex() -> dict
   find_file_by_stem(stem) -> Path | None
   explore_tags() -> dict
+  get_stats() -> dict
   resolve_tags(query_tags) -> list[str]
 """
 
@@ -1141,6 +1142,105 @@ def explore_tags() -> dict:
     return {
         "tags": [{"name": k, "count": v} for k, v in sorted(counts.items())]
     }
+
+
+# ---------------------------------------------------------------------------
+# Aggregate statistics
+# ---------------------------------------------------------------------------
+
+
+def get_stats() -> dict:
+    """Return aggregate statistics about stored memory files.
+
+    Uses SQLite index when populated for O(1) counts; falls back to tag
+    exploration via filesystem scan.
+
+    Returns:
+        Dict with keys:
+          data_dir (str), sessions_dir (str), data_dir_size_mb (float),
+          total_facts (int), total_sessions (int), total_tags (int),
+          projects (list[{name, facts, sessions}] sorted by total desc),
+          top_tags (list[{name, count}] — up to 20, sorted by count desc).
+    """
+    base = get_base_dir()
+    sessions_base = get_sessions_base_dir()
+
+    def _dir_size_mb(p: Path) -> float:
+        try:
+            return sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) / (1024 * 1024)
+        except OSError:
+            return 0.0
+
+    stats: dict = {
+        "data_dir": str(base),
+        "sessions_dir": str(sessions_base),
+        "data_dir_size_mb": round(_dir_size_mb(base), 2),
+        "total_facts": 0,
+        "total_sessions": 0,
+        "total_tags": 0,
+        "projects": [],
+        "top_tags": [],
+    }
+
+    from .db import is_populated
+
+    if is_populated():
+        from .db import get_connection
+        conn = get_connection()
+
+        # Session count and non-session (fact) count via index
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM file_tags WHERE tag = 'session'"
+            ).fetchone()
+            stats["total_sessions"] = row[0] if row else 0
+
+            row = conn.execute(
+                "SELECT COUNT(*) FROM files f WHERE NOT EXISTS "
+                "(SELECT 1 FROM file_tags WHERE rel_path = f.rel_path AND tag = 'session')"
+            ).fetchone()
+            stats["total_facts"] = row[0] if row else 0
+        except Exception:
+            pass
+
+        # Per-project breakdown
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT tag FROM file_tags WHERE tag LIKE 'project/%' ORDER BY tag"
+            ).fetchall()
+            for (tag,) in rows:
+                project_name = tag[len("project/"):]
+                fr = conn.execute(
+                    "SELECT COUNT(*) FROM file_tags f1 WHERE f1.tag = ? "
+                    "AND NOT EXISTS (SELECT 1 FROM file_tags f2 "
+                    "WHERE f2.rel_path = f1.rel_path AND f2.tag = 'session')",
+                    (tag,),
+                ).fetchone()
+                sr = conn.execute(
+                    "SELECT COUNT(*) FROM file_tags f1 WHERE f1.tag = ? "
+                    "AND EXISTS (SELECT 1 FROM file_tags f2 "
+                    "WHERE f2.rel_path = f1.rel_path AND f2.tag = 'session')",
+                    (tag,),
+                ).fetchone()
+                stats["projects"].append({
+                    "name": project_name,
+                    "facts": fr[0] if fr else 0,
+                    "sessions": sr[0] if sr else 0,
+                })
+            stats["projects"].sort(
+                key=lambda p: p["facts"] + p["sessions"], reverse=True
+            )
+        except Exception:
+            pass
+
+    # Tags (works from SQL index or filesystem fallback via explore_tags)
+    tag_data = explore_tags()
+    all_tags = tag_data.get("tags", [])
+    all_tags_sorted = sorted(all_tags, key=lambda t: t["count"], reverse=True)
+    stats["total_tags"] = len(all_tags)
+    stats["top_tags"] = all_tags_sorted[:20]
+
+    return stats
 
 
 # ---------------------------------------------------------------------------

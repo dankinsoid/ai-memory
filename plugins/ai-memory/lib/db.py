@@ -24,6 +24,7 @@ Public API:
   get_state(key) -> str | None
   set_state(key, value) -> None
   delete_state(key) -> None
+  health_check(base_dir, sessions_base) -> dict
 """
 
 from __future__ import annotations
@@ -388,3 +389,107 @@ def delete_state(key: str) -> None:
         conn.commit()
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
+
+def health_check(base_dir: Path, sessions_base: Path | None = None) -> dict:
+    """Run integrity checks on the SQLite index and compare with filesystem.
+
+    Checks DB integrity via PRAGMA, counts indexed vs on-disk files, detects
+    orphan index entries (in DB but file deleted from disk), and reports
+    vector collection sizes.
+
+    Args:
+        base_dir:      AI_MEMORY_DIR root (facts/rules tree)
+        sessions_base: AI_MEMORY_SESSIONS_DIR override (may equal base_dir)
+
+    Returns:
+        Dict with keys:
+          db_path (str), db_exists (bool), db_integrity (str | None),
+          db_size_mb (float), indexed_count (int), fs_count (int),
+          orphan_count (int), orphan_paths (list[str] — capped at 20),
+          state_count (int), vector_collections (dict[str, int]).
+    """
+    db = _db_path()
+    result: dict = {
+        "db_path": str(db),
+        "db_exists": db.exists(),
+        "db_integrity": None,
+        "db_size_mb": 0.0,
+        "indexed_count": 0,
+        "fs_count": 0,
+        "orphan_count": 0,
+        "orphan_paths": [],
+        "state_count": 0,
+        "vector_collections": {},
+    }
+
+    if not db.exists():
+        return result
+
+    result["db_size_mb"] = round(db.stat().st_size / (1024 * 1024), 3)
+
+    try:
+        conn = get_connection()
+
+        # Integrity check (ok / error description)
+        row = conn.execute("PRAGMA integrity_check").fetchone()
+        result["db_integrity"] = row[0] if row else "unknown"
+
+        # Indexed file count
+        try:
+            row = conn.execute("SELECT COUNT(*) FROM files").fetchone()
+            result["indexed_count"] = row[0] if row else 0
+        except sqlite3.OperationalError:
+            pass
+
+        # State entry count
+        try:
+            row = conn.execute("SELECT COUNT(*) FROM state").fetchone()
+            result["state_count"] = row[0] if row else 0
+        except sqlite3.OperationalError:
+            pass
+
+        # Vector collection sizes
+        try:
+            rows = conn.execute(
+                "SELECT collection, COUNT(*) FROM vectors GROUP BY collection"
+            ).fetchall()
+            result["vector_collections"] = {r[0]: r[1] for r in rows}
+        except sqlite3.OperationalError:
+            pass
+
+        # Orphan detection: entries in files table whose paths don't exist on disk
+        try:
+            rows = conn.execute("SELECT rel_path FROM files").fetchall()
+            orphans: list[str] = []
+            for (rel_path,) in rows:
+                abs_path = base_dir / rel_path
+                if abs_path.exists():
+                    continue
+                if sessions_base and sessions_base != base_dir:
+                    if (sessions_base / rel_path).exists():
+                        continue
+                orphans.append(rel_path)
+            result["orphan_count"] = len(orphans)
+            result["orphan_paths"] = orphans[:20]
+        except sqlite3.OperationalError:
+            pass
+
+    except Exception:
+        pass
+
+    # Filesystem file count (done outside the DB try-block — independent check)
+    try:
+        count = sum(1 for _ in base_dir.rglob("*.md"))
+        if sessions_base and sessions_base != base_dir:
+            count += sum(1 for _ in sessions_base.rglob("*.md"))
+        result["fs_count"] = count
+    except OSError:
+        pass
+
+    return result
