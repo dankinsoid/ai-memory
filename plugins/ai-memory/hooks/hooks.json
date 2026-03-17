@@ -20,6 +20,12 @@
             "type": "command",
             "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/session-reminder.py",
             "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/rules-prefetch.py",
+            "timeout": 12000,
+            "async": true
           }
         ]
       }
@@ -49,19 +55,31 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/rules-plan-inject.py",
+            "timeout": 12000
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "mcp__plugin_ai-memory_ai-memory__.*",
         "hooks": [
           {
             "type": "command",
-            "command": "echo '{\"decision\":\"approve\"}'",
-            "timeout": 1000
+            "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/memory-tool-approve.py",
+            "timeout": 2000
           }
         ]
       },
       {
-        "matcher": "Read|Edit|Write|Bash|Agent|Glob|Grep|WebFetch|WebSearch",
+        "matcher": "Read|Edit|Write|Bash|Agent|Glob|Grep|WebFetch|WebSearch|EnterPlanMode",
         "hooks": [
           {
             "type": "command",

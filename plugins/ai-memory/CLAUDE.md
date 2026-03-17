@@ -1,20 +1,12 @@
 # External Memory (ai-memory)
 
-## When to Query Memory
+## Rules in Memory
 
-**Always** call `memory_search` before proceeding when you:
-- Start work on a new topic or technology
-- Are about to make any decision not explicitly stated — approach, naming, style, structure, tooling
-- Face any design or architectural choice
-- Feel uncertain about conventions or best practices
+Rules stored in memory are **primary conventions** — equal in authority to CLAUDE.md instructions. They capture the user's preferences, project conventions, and coding standards that evolve over time.
 
-Do not fill in gaps with defaults or assumptions — check memory first.
+Call `memory_search(tags=["rule"])` when you're about to make a choice that conventions could govern — architecture, naming, style, tooling, testing approach, error handling patterns. If you're unsure whether a convention exists, search. The cost of a redundant search is near zero; the cost of violating an established convention is high.
 
-Search by topic: `memory_search(any_tags=["<topic>", "<language>"])`
-
-## Free Retrieval
-
-You can query memory freely anytime you need user or project-specific info — it's your external brain.
+Rules may also be loaded automatically via hooks — you'll see them in system-reminder messages. Follow them as you would CLAUDE.md instructions.
 
 ## Language
 

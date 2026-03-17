@@ -65,11 +65,17 @@ def main() -> None:
     if not session_id:
         sys.exit(0)
 
-    # Clean up loaded-rules dedup cache regardless of reason — keyed by session_id
-    # so a new session always starts fresh, but we clean up promptly to avoid accumulation.
+    # Clean up session-scoped state keys to avoid accumulation
     try:
         from lib.db import delete_state
-        delete_state(f"{session_id}-loaded-rules")
+        for key in [
+            f"{session_id}-loaded-rules",
+            f"rules-searched-{session_id}",
+            f"rules-prefetch-{session_id}",
+            f"rules-shown-{session_id}",
+            f"tags-cache-{session_id}",
+        ]:
+            delete_state(key)
     except Exception:
         # Fallback: clean up legacy JSON file
         dedup_file = state_dir / f"{session_id}-loaded-rules.json"

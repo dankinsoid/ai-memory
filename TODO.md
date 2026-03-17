@@ -154,6 +154,7 @@ Next: implement storage layer
 - [x] `session-end.py` очищает dedup-кэш при завершении сессии (`hooks.json` matcher → `""`)
 - [x] `CLAUDE.md` плагина: конкретные триггеры когда агент должен вызывать `memory_search`
 - [ ] Block 5: 4o-mini автосохранение + LLM-классификация топика
+- [ ] **Dynamic rules loading** — [план](plans/dynamic-rules-loading.md): промпт + напоминания + автоподгрузка через gpt-4o-mini
 
 ---
 
@@ -173,7 +174,7 @@ Next: implement storage layer
 - [x] Content vectorization: MD5 freshness check, batch embedding, единая "content" коллекция
 - [x] Конфиг: `OPENAI_API_KEY` (embedding backend auto-detects)
 - [ ] `Stop` hook + 4o-mini: автосохранение compact без участия основного агента
-- [ ] `UserPromptSubmit` hook + 4o-mini: классификация топика → загрузка правил
+- [ ] `UserPromptSubmit` hook + 4o-mini: классификация топика → загрузка правил — см. [dynamic-rules-loading](plans/dynamic-rules-loading.md)
 
 ---
 
