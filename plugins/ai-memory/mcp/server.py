@@ -97,7 +97,8 @@ def _build_tools() -> list[dict]:
                     "content": {
                             "type": "string",
                             "description": (
-                                "Free-form markdown. Short entries: 1-4 sentences. "
+                                "Free-form markdown. Must be in English. "
+                                "Short entries: 1-4 sentences. "
                                 "Longer entries: lead with a brief summary paragraph, "
                                 "then add detail below."
                             ),

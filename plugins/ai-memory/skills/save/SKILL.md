@@ -46,7 +46,3 @@ Include code snippets, exact error messages, specific function names.>
 
 Pass `session_id`: `${CLAUDE_SESSION_ID}`
 Pass `project`: from the SessionStart context
-
-## 3. Confirm to user
-
-Show the file path returned by memory_session. Tell user: "You can now /clear. To resume later: /load"

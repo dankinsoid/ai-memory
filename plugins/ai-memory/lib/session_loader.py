@@ -118,6 +118,10 @@ def format_for_load(sc: SessionContent) -> str:
     Shows compact + transcript tail (500 chars if compact exists, 2000 otherwise).
     Falls back to summary if no compact.
 
+    Appends a note indicating whether the content is the full transcript or a
+    compact+tail subset, so the consuming agent knows whether more detail is
+    available.
+
     Args:
         sc: loaded session content
 
@@ -131,9 +135,11 @@ def format_for_load(sc: SessionContent) -> str:
     elif sc.summary:
         parts.append(f"## Summary\n\n{sc.summary}")
 
+    truncated = False
     if sc.transcript_tail:
         # Shorter tail when compact exists (agent already has structured context)
         budget = 500 if sc.compact else 2000
+        truncated = len(sc.transcript_tail) > budget
         tail = sc.transcript_tail[-budget:]
         # Avoid cutting mid-line
         newline = tail.find("\n")
@@ -141,6 +147,15 @@ def format_for_load(sc: SessionContent) -> str:
             tail = tail[newline + 1:]
         if tail.strip():
             parts.append(f"## Recent messages\n\n{tail}")
+
+    # Trailing note so the agent knows whether this is the full picture
+    if not truncated and not sc.compact:
+        parts.append("_This is the full session transcript._")
+    else:
+        parts.append(
+            "_Compact notes + recent messages shown — this should be sufficient for recovery. "
+            "Only call `memory_load_session` if specific detail is missing._"
+        )
 
     return "\n\n".join(parts)
 

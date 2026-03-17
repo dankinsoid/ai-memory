@@ -1,6 +1,6 @@
 ---
 name: load
-description: Deep recovery from a previous session — read session content and resume work. SessionStart hook provides lightweight context; this skill loads the full picture.
+description: Deep recovery from a previous session — read session content and resume work.
 ---
 
 # Load Session
