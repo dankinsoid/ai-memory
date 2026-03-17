@@ -271,6 +271,17 @@ def main() -> None:
         sections.append(
             "## Previous Session (auto-loaded)\n" + format_for_load(prev_session)
         )
+        # Record which session this one continues, so memory_session can
+        # auto-set the "continues" field in front-matter without agent input.
+        if prev_session.file_stem and session_id:
+            try:
+                from lib.db import set_state
+                set_state(
+                    f"continues-{session_id}",
+                    prev_session.file_stem,
+                )
+            except Exception:
+                pass  # non-critical
 
     # Save git context (branch + start commit) for session-sync to pick up later
     if cwd and session_id:

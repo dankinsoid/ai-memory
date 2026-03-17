@@ -154,7 +154,11 @@ def _build_tools() -> list[dict]:
                 "properties": {
                     "ref": {
                         "type": "string",
-                        "description": "[[ref]] wikilink stem",
+                        "description": "[[ref]] wikilink stem of the session to load",
+                    },
+                    "current_session_id": {
+                        "type": "string",
+                        "description": "Caller's own session_id (for continuation linking)",
                     },
                 },
                 "required": ["ref"],
@@ -264,6 +268,14 @@ def _handle_tools_call(params: dict) -> dict:
             session_tags: list[str] = list(dict.fromkeys(
                 auto_tags + (args.get("tags") or [])
             ))
+            # Auto-resolve continuation link from state set by SessionStart
+            # or /load skill — no agent input needed.
+            continues = None
+            try:
+                from lib.db import get_state
+                continues = get_state(f"continues-{args['session_id']}")
+            except Exception:
+                pass
             path = storage.upsert_session(
                 session_id=args["session_id"],
                 project=args.get("project"),
@@ -271,6 +283,7 @@ def _handle_tools_call(params: dict) -> dict:
                 summary=args["summary"],
                 tags=session_tags,
                 compact=args.get("compact"),
+                continues=continues,
             )
             # Clear the "needs init" flag so PreToolUse stops reminding.
             try:
@@ -405,6 +418,22 @@ def _handle_tools_call(params: dict) -> dict:
             sc = load_session_by_ref(args["ref"])
             if not sc:
                 return _error(f"Session not found: {args['ref']}")
+            # If the dialog just started (≤3 prompts) and no "continues" link
+            # exists yet, treat the loaded session as the continuation target.
+            caller_session_id = args.get("current_session_id")
+            if caller_session_id and sc.file_stem:
+                try:
+                    from lib.db import get_state, set_state
+                    continues_key = f"continues-{caller_session_id}"
+                    if not get_state(continues_key):
+                        reminder_raw = get_state(f"{caller_session_id}-reminder")
+                        prompt_count = 0
+                        if reminder_raw:
+                            prompt_count = json.loads(reminder_raw).get("prompt_count", 0)
+                        if prompt_count <= 3:
+                            set_state(continues_key, sc.file_stem)
+                except Exception:
+                    pass
             return _text(format_for_load(sc))
 
         if name == "memory_explore_tags":

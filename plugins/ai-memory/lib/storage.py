@@ -653,6 +653,7 @@ def upsert_session(
     branch: str | None = None,
     commit_start: str | None = None,
     commit_end: str | None = None,
+    continues: str | None = None,
 ) -> str:
     """Create or update a session summary .md file.
 
@@ -676,6 +677,7 @@ def upsert_session(
         branch: git branch name at session start
         commit_start: short SHA of HEAD at session start
         commit_end: short SHA of HEAD at save time
+        continues: file stem of the parent session this one continues
 
     Returns:
         Path to the session summary file, relative to AI_MEMORY_DIR base.
@@ -702,6 +704,8 @@ def upsert_session(
             branch = prev_fm.get("branch")
         if not commit_start:
             commit_start = prev_fm.get("commit_start")
+        if not continues:
+            continues = prev_fm.get("continues")
     else:
         safe = _safe_title(title)
         stem = f"{today} {safe}.{session_id[:8]}"
@@ -722,6 +726,8 @@ def upsert_session(
         fm_lines.append(f"commit_start: {commit_start}")
     if commit_end:
         fm_lines.append(f"commit_end: {commit_end}")
+    if continues:
+        fm_lines.append(f"continues: {continues}")
     fm_lines += ["---", ""]
 
     summary_body = ["## Summary", "", summary, ""]

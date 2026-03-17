@@ -30,6 +30,8 @@ class SessionContent:
         summary: session summary from front-matter, or None
         session_id: the loaded session's UUID
         transcript_tail: tail of ## Transcript section, or None
+        continues: file stem of parent session, or None
+        file_stem: file stem for [[wikilink]] refs, or None
     """
 
     title: str
@@ -37,6 +39,8 @@ class SessionContent:
     summary: str | None
     session_id: str
     transcript_tail: str | None = None
+    continues: str | None = None
+    file_stem: str | None = None
 
 
 def load_prev_session(project: str, current_session_id: str) -> SessionContent | None:
@@ -83,6 +87,8 @@ def load_session_by_id(session_id: str, project: str | None = None) -> SessionCo
         summary=fm.get("summary"),
         session_id=session_id,
         transcript_tail=_extract_transcript_tail(content),
+        continues=fm.get("continues"),
+        file_stem=summary_path.stem,
     )
 
 
@@ -109,14 +115,17 @@ def load_session_by_ref(ref: str) -> SessionContent | None:
         summary=fm.get("summary"),
         session_id=fm.get("id", ""),
         transcript_tail=_extract_transcript_tail(content),
+        continues=fm.get("continues"),
+        file_stem=found.stem,
     )
 
 
-def format_for_load(sc: SessionContent) -> str:
+def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
     """Format SessionContent for /load skill — full recovery with smart truncation.
 
     Shows compact + transcript tail (500 chars if compact exists, 2000 otherwise).
-    Falls back to summary if no compact.
+    Falls back to summary if no compact.  Includes [[wikilink]] ref so the loaded
+    session is trackable in the transcript via session-sync ref extraction.
 
     Appends a note indicating whether the content is the full transcript or a
     compact+tail subset, so the consuming agent knows whether more detail is
@@ -124,11 +133,18 @@ def format_for_load(sc: SessionContent) -> str:
 
     Args:
         sc: loaded session content
+        stem: file stem for [[wikilink]] ref (e.g. '2026-03-16 Title.abc12345')
 
     Returns:
         Formatted markdown string for deep recovery.
     """
-    parts = [f"# Session Recovery\n\n*{sc.title}*"]
+    stem = stem or sc.file_stem
+    header = f"# Session Recovery\n\n*{sc.title}*"
+    if stem:
+        header += f"  [[{stem}]]"
+    if sc.continues:
+        header += f"\n\nContinues: [[{sc.continues}]]"
+    parts = [header]
 
     if sc.compact:
         parts.append(f"## Compact\n\n{sc.compact}")
