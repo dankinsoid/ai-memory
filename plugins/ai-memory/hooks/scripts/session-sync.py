@@ -640,11 +640,11 @@ def main() -> None:
         sys.exit(0)
 
     project = derive_project(cwd)
-    sessions_base = storage.get_sessions_base_dir()
+    base = storage.get_base_dir()
     sessions_parent = (
-        sessions_base / "projects" / project / "sessions"
+        base / "projects" / project / "sessions"
         if project
-        else sessions_base / "sessions"
+        else base / "sessions"
     )
 
     # Resolve git context: start info from state DB, current commit from git

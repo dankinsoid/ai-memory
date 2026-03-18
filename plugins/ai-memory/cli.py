@@ -54,7 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # ---------------------------------------------------------------------------
 
 def _load_env_from_claude_settings() -> None:
-    """Populate AI_MEMORY_DIR / AI_MEMORY_SESSIONS_DIR from Claude settings.
+    """Populate AI_MEMORY_DIR from Claude settings.
 
     Claude Code stores plugin env vars in ~/.claude/settings.json under an
     'env' key.  When the CLI is run directly from the terminal (not via a
@@ -74,7 +74,7 @@ def _load_env_from_claude_settings() -> None:
     try:
         data = json.loads(settings_path.read_text(encoding="utf-8"))
         env = data.get("env", {})
-        for key in ("AI_MEMORY_DIR", "AI_MEMORY_SESSIONS_DIR"):
+        for key in ("AI_MEMORY_DIR",):
             if key in env and key not in os.environ:
                 # Expand ~ in paths
                 os.environ[key] = str(Path(env[key]).expanduser())
@@ -290,20 +290,19 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 def cmd_health(args: argparse.Namespace) -> None:
     """Run integrity checks on the DB and compare with filesystem."""
-    from lib.storage import get_base_dir, get_sessions_base_dir
+    from lib.storage import get_base_dir
     from lib.db import health_check
 
     base = get_base_dir()
-    sessions_base = get_sessions_base_dir()
 
     if _RICH:
         with Progress(SpinnerColumn(), TextColumn("{task.description}"),
                       transient=True, console=_console) as p:
             p.add_task("Running health checks…")
-            result = health_check(base, sessions_base)
+            result = health_check(base)
     else:
         print("Running health checks…")
-        result = health_check(base, sessions_base)
+        result = health_check(base)
 
     if _RICH:
         t = Table(title="Health Check", box=rich_box.ROUNDED)
@@ -375,7 +374,7 @@ def cmd_health(args: argparse.Namespace) -> None:
                 _console.print(f"  [dim]{p}[/dim]")
 
     else:
-        result = health_check(base, sessions_base)
+        result = health_check(base)
         ok = "OK" if result["db_exists"] else "MISSING"
         print(f"DB exists:     {ok}  ({result['db_path']})")
         if result["db_exists"]:
@@ -670,10 +669,9 @@ def _cmd_list_tags(args: argparse.Namespace) -> None:
 
 
 def _cmd_list_projects(args: argparse.Namespace) -> None:
-    from lib.storage import get_base_dir, get_sessions_base_dir
+    from lib.storage import get_base_dir
 
     base = get_base_dir()
-    sessions_base = get_sessions_base_dir()
 
     projects: dict[str, dict] = {}
 
@@ -688,7 +686,7 @@ def _cmd_list_projects(args: argparse.Namespace) -> None:
             pass
 
     # Discover from sessions dir structure
-    sp = sessions_base / "projects"
+    sp = base / "projects"
     if sp.exists():
         try:
             for d in sorted(sp.iterdir()):
@@ -851,11 +849,7 @@ def cmd_edit(args: argparse.Namespace) -> None:
             content = path.read_text(encoding="utf-8")
             body = _strip_front_matter(content)
             file_tags = all_tags_for_file(path, base, content)
-            try:
-                rel = str(path.relative_to(base))
-            except ValueError:
-                from lib.storage import get_sessions_base_dir
-                rel = str(path.relative_to(get_sessions_base_dir()))
+            rel = str(path.relative_to(base))
             content_store.upsert(
                 id=rel,
                 text=first_paragraph(body),
@@ -872,7 +866,7 @@ def cmd_edit(args: argparse.Namespace) -> None:
 
 def cmd_delete(args: argparse.Namespace) -> None:
     """Remove a memory file from disk and from the index."""
-    from lib.storage import find_file_by_stem, get_base_dir, get_sessions_base_dir
+    from lib.storage import find_file_by_stem, get_base_dir
     from lib.db import remove_file
     from lib.vector_store import content_store
 
@@ -907,14 +901,10 @@ def cmd_delete(args: argparse.Namespace) -> None:
 
     # Remove from vector store first (needs rel path)
     base = get_base_dir()
-    sessions_base = get_sessions_base_dir()
     try:
         rel = str(path.relative_to(base))
     except ValueError:
-        try:
-            rel = str(path.relative_to(sessions_base))
-        except ValueError:
-            rel = path.name
+        rel = path.name
 
     if content_store.enabled:
         content_store.delete(rel)
@@ -934,11 +924,10 @@ def cmd_delete(args: argparse.Namespace) -> None:
 
 def cmd_reindex(args: argparse.Namespace) -> None:
     """Rebuild file index and re-embed all content."""
-    from lib.storage import get_base_dir, get_sessions_base_dir, reindex as reindex_content
+    from lib.storage import get_base_dir, reindex as reindex_content
     from lib.db import reindex as reindex_files
 
     base = get_base_dir()
-    sessions_base = get_sessions_base_dir()
 
     if _RICH:
         _console.print(f"[bold]Base dir:[/bold] {base}")
@@ -950,7 +939,7 @@ def cmd_reindex(args: argparse.Namespace) -> None:
             console=_console,
         ) as p:
             t1 = p.add_task("Reindexing files…")
-            file_stats = reindex_files(base, sessions_base, force=args.force)
+            file_stats = reindex_files(base, force=args.force)
             p.update(t1, description=(
                 f"[green]Files indexed:[/green] {file_stats['indexed']} new, "
                 f"{file_stats['unchanged']} unchanged, {file_stats['deleted']} deleted "
@@ -971,7 +960,7 @@ def cmd_reindex(args: argparse.Namespace) -> None:
     else:
         print(f"Base dir: {base}")
         print("Reindexing files…")
-        file_stats = reindex_files(base, sessions_base, force=args.force)
+        file_stats = reindex_files(base, force=args.force)
         print(f"  {file_stats['total']} total, {file_stats['indexed']} indexed, "
               f"{file_stats['deleted']} deleted, {file_stats['unchanged']} unchanged")
         print("Embedding content vectors…")

@@ -220,11 +220,11 @@ def _find_session(session_id: str, project: str | None) -> Path | None:
     Returns:
         Path to session .md file, or None.
     """
-    sessions_base = storage.get_sessions_base_dir()
+    base = storage.get_base_dir()
     search_dirs: list[Path] = []
     if project:
-        search_dirs.append(sessions_base / "projects" / project / "sessions")
-    search_dirs.append(sessions_base / "sessions")
+        search_dirs.append(base / "projects" / project / "sessions")
+    search_dirs.append(base / "sessions")
 
     for d in search_dirs:
         found = storage._find_session_file(d, session_id)

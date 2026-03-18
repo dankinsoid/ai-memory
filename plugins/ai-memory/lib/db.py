@@ -18,13 +18,13 @@ Tables:
 Public API:
   get_connection() -> sqlite3.Connection
   is_populated() -> bool
-  reindex(base_dir, sessions_base, force) -> dict
+  reindex(base_dir, force) -> dict
   index_file(rel_path, abs_path, base_dir) -> None
   remove_file(rel_path) -> None
   get_state(key) -> str | None
   set_state(key, value) -> None
   delete_state(key) -> None
-  health_check(base_dir, sessions_base) -> dict
+  health_check(base_dir) -> dict
 """
 
 from __future__ import annotations
@@ -238,18 +238,16 @@ def remove_file(rel_path: str) -> None:
 
 def reindex(
     base_dir: Path,
-    sessions_base: Path | None = None,
     force: bool = False,
 ) -> dict:
     """Reconcile filesystem ↔ SQLite index (mtime-based).
 
-    Scans all .md files under base_dir (and sessions_base if different).
+    Scans all .md files under base_dir (facts, rules, and sessions all live here).
     Uses mtime to skip unchanged files unless force=True.
 
     Args:
-        base_dir:      AI_MEMORY_DIR root
-        sessions_base: AI_MEMORY_SESSIONS_DIR override (may equal base_dir)
-        force:         ignore mtime, re-parse everything
+        base_dir: AI_MEMORY_DIR root
+        force:    ignore mtime, re-parse everything
 
     Returns:
         Dict with keys: total, indexed, deleted, unchanged.
@@ -270,61 +268,55 @@ def reindex(
     _BATCH_SIZE = 50
     _pending = 0
 
-    # Scan directories — base_dir always, sessions_base only if different
-    scan_roots: list[tuple[Path, Path]] = [(base_dir, base_dir)]
-    if sessions_base and sessions_base != base_dir:
-        scan_roots.append((sessions_base, sessions_base))
+    for md_file in base_dir.rglob("*.md"):
+        try:
+            rel = str(md_file.relative_to(base_dir))
+        except ValueError:
+            continue
 
-    for scan_root, tag_root in scan_roots:
-        for md_file in scan_root.rglob("*.md"):
-            try:
-                rel = str(md_file.relative_to(scan_root))
-            except ValueError:
-                continue
+        seen.add(rel)
+        stats["total"] += 1
 
-            seen.add(rel)
-            stats["total"] += 1
+        try:
+            st_mtime = md_file.stat().st_mtime
+        except OSError:
+            continue
 
-            try:
-                st_mtime = md_file.stat().st_mtime
-            except OSError:
-                continue
+        # Skip if mtime unchanged (unless force)
+        if not force and rel in existing and existing[rel] == st_mtime:
+            stats["unchanged"] += 1
+            continue
 
-            # Skip if mtime unchanged (unless force)
-            if not force and rel in existing and existing[rel] == st_mtime:
-                stats["unchanged"] += 1
-                continue
+        # (Re-)index this file
+        try:
+            content = md_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
 
-            # (Re-)index this file
-            try:
-                content = md_file.read_text(encoding="utf-8")
-            except OSError:
-                continue
+        fm = parse_front_matter(content)
+        try:
+            tags = all_tags_for_file(md_file, base_dir, content)
+        except ValueError:
+            tags = []
+        md5 = hashlib.md5(content.encode("utf-8")).hexdigest()
+        file_date = fm.get("date", "")
 
-            fm = parse_front_matter(content)
-            try:
-                tags = all_tags_for_file(md_file, tag_root, content)
-            except ValueError:
-                tags = []
-            md5 = hashlib.md5(content.encode("utf-8")).hexdigest()
-            file_date = fm.get("date", "")
+        conn.execute(
+            "INSERT OR REPLACE INTO files (rel_path, mtime, md5, tags_json, date) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (rel, st_mtime, md5, json.dumps(tags), file_date),
+        )
+        conn.execute("DELETE FROM file_tags WHERE rel_path = ?", (rel,))
+        conn.executemany(
+            "INSERT INTO file_tags (rel_path, tag) VALUES (?, ?)",
+            [(rel, t) for t in tags],
+        )
+        stats["indexed"] += 1
+        _pending += 1
 
-            conn.execute(
-                "INSERT OR REPLACE INTO files (rel_path, mtime, md5, tags_json, date) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (rel, st_mtime, md5, json.dumps(tags), file_date),
-            )
-            conn.execute("DELETE FROM file_tags WHERE rel_path = ?", (rel,))
-            conn.executemany(
-                "INSERT INTO file_tags (rel_path, tag) VALUES (?, ?)",
-                [(rel, t) for t in tags],
-            )
-            stats["indexed"] += 1
-            _pending += 1
-
-            if _pending >= _BATCH_SIZE:
-                conn.commit()
-                _pending = 0
+        if _pending >= _BATCH_SIZE:
+            conn.commit()
+            _pending = 0
 
     # Remove orphans — DB entries with no file on disk
     for rel in existing:
@@ -396,7 +388,7 @@ def delete_state(key: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def health_check(base_dir: Path, sessions_base: Path | None = None) -> dict:
+def health_check(base_dir: Path) -> dict:
     """Run integrity checks on the SQLite index and compare with filesystem.
 
     Checks DB integrity via PRAGMA, counts indexed vs on-disk files, detects
@@ -404,8 +396,7 @@ def health_check(base_dir: Path, sessions_base: Path | None = None) -> dict:
     vector collection sizes.
 
     Args:
-        base_dir:      AI_MEMORY_DIR root (facts/rules tree)
-        sessions_base: AI_MEMORY_SESSIONS_DIR override (may equal base_dir)
+        base_dir: AI_MEMORY_DIR root (facts, rules, and sessions all live here)
 
     Returns:
         Dict with keys:
@@ -468,13 +459,8 @@ def health_check(base_dir: Path, sessions_base: Path | None = None) -> dict:
             rows = conn.execute("SELECT rel_path FROM files").fetchall()
             orphans: list[str] = []
             for (rel_path,) in rows:
-                abs_path = base_dir / rel_path
-                if abs_path.exists():
-                    continue
-                if sessions_base and sessions_base != base_dir:
-                    if (sessions_base / rel_path).exists():
-                        continue
-                orphans.append(rel_path)
+                if not (base_dir / rel_path).exists():
+                    orphans.append(rel_path)
             result["orphan_count"] = len(orphans)
             result["orphan_paths"] = orphans[:20]
         except sqlite3.OperationalError:
@@ -485,10 +471,7 @@ def health_check(base_dir: Path, sessions_base: Path | None = None) -> dict:
 
     # Filesystem file count (done outside the DB try-block — independent check)
     try:
-        count = sum(1 for _ in base_dir.rglob("*.md"))
-        if sessions_base and sessions_base != base_dir:
-            count += sum(1 for _ in sessions_base.rglob("*.md"))
-        result["fs_count"] = count
+        result["fs_count"] = sum(1 for _ in base_dir.rglob("*.md"))
     except OSError:
         pass
 

@@ -153,8 +153,9 @@ def format_session_line(sess: dict) -> str:
     date_str = sess.get("date", "")
     path = sess.get("path", "")
 
-    # Extract blob dir from path: e.g. "projects/foo/sessions/2026-03-11 Title.md"
-    # → use stem as blob dir name hint for /load
+    # Use full file stem (includes .{session_id[:8]} suffix) as wikilink ref for /load.
+    # Using [[ref]] format — not [blob: ...] — so the agent treats it as an opaque
+    # identifier and does not strip the UUID suffix thinking it's a file extension.
     stem = Path(path).stem if path else ""
 
     line = f"- **{title}**"
@@ -163,7 +164,7 @@ def format_session_line(sess: dict) -> str:
     if summary:
         line += f" — {summary}"
     if stem:
-        line += f" [blob: {stem}]"
+        line += f" [[{stem}]]"
     return line
 
 
@@ -191,8 +192,8 @@ def main() -> None:
         subprocess.Popen(
             [sys.executable, "-c",
              f"import sys; sys.path.insert(0, {str(_PLUGIN_ROOT)!r}); "
-             "from lib.db import reindex; from lib.storage import get_base_dir, get_sessions_base_dir; "
-             "reindex(get_base_dir(), get_sessions_base_dir())"],
+             "from lib.db import reindex; from lib.storage import get_base_dir; "
+             "reindex(get_base_dir())"],
             start_new_session=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
