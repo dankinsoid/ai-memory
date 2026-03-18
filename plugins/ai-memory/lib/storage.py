@@ -21,7 +21,7 @@ in the body (not front-matter):
 No database or server required.
 
 Public API:
-  get_base_dir() -> Path
+  get_base_dir() -> Path  (sessions live here too)
   search_facts(tags, any_tags, exclude_tags, query, since, until, sort_by, limit, offset) -> list[dict]
   search_sessions(project, text, since, until, sort_by, limit, offset) -> list[dict]
   upsert_session(session_id, project, title, summary, tags, compact) -> str
@@ -33,6 +33,7 @@ Public API:
   resolve_tags(query_tags) -> list[str]
 """
 
+import glob as _glob
 import json
 import os
 import re
@@ -85,20 +86,6 @@ def get_base_dir() -> Path:
     return p
 
 
-def get_sessions_base_dir() -> Path:
-    """Return the root under which sessions/ and projects/*/sessions/ live.
-
-    When AI_MEMORY_SESSIONS_DIR is set (e.g. an Obsidian vault), sessions are
-    stored there instead of inside AI_MEMORY_DIR.  Facts and rules always stay
-    in AI_MEMORY_DIR regardless.
-    """
-    override = os.environ.get("AI_MEMORY_SESSIONS_DIR")
-    if override:
-        p = Path(override).expanduser()
-        p.mkdir(parents=True, exist_ok=True)
-        return p
-    return get_base_dir()
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -120,6 +107,17 @@ def _read_content(path: Path) -> str | None:
         return path.read_text(encoding="utf-8")
     except OSError:
         return None
+
+
+def _yaml_str(value: str) -> str:
+    """Quote a string for safe embedding as a YAML scalar in front-matter.
+
+    Wraps in double quotes and escapes backslashes and double-quote chars.
+    This prevents colons, brackets, and other YAML-special chars from
+    producing malformed front-matter (e.g. in Obsidian).
+    """
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def _safe_title(text: str) -> str:
@@ -274,15 +272,12 @@ def _query_search(
     assert isinstance(store, ContentVectorStore)
 
     base = get_base_dir()
-    sessions_base = get_sessions_base_dir()
 
     hits = store.search(query, top_k=max(limit + offset, 20) * 3, threshold=0.25)
 
     candidates: list[dict] = []
     for h in hits:
         file_path = base / h.id
-        if not file_path.exists():
-            file_path = sessions_base / h.id
         content = _read_content(file_path)
         if content is None:
             continue
@@ -472,17 +467,34 @@ def _is_messages_file(filename: str) -> bool:
 def find_file_by_stem(stem: str) -> Path | None:
     """Resolve a wikilink stem to an absolute file path.
 
-    Searches both base_dir (facts/rules) and sessions_base (sessions).
+    Searches base_dir (facts/rules/sessions all live here).
     Skips .messages.md files. Returns None if no match found.
+
+    Uses targeted glob patterns (``{stem}.md``) instead of scanning all
+    ``.md`` files — far more efficient when thousands of session files exist.
+
+    Exact match is tried first. If not found, falls back to prefix match
+    ``{stem}.*.md`` to recover when an agent strips a UUID suffix like
+    ``2026-03-18 Title.ca892878`` → ``2026-03-18 Title``.
 
     Args:
         stem: filename without extension, e.g. 'always-run-regression-test'
+              or '2026-03-18 Title.ca892878'
     """
-    for root in (get_base_dir(), get_sessions_base_dir()):
-        for md_file in root.rglob("*.md"):
-            if md_file.stem == stem and not _is_messages_file(md_file.name):
+    escaped = _glob.escape(stem)
+    prefix_match: Path | None = None
+    for root in (get_base_dir(),):
+        # Exact match: only files named exactly "{stem}.md"
+        for md_file in root.rglob(f"{escaped}.md"):
+            if not _is_messages_file(md_file.name):
                 return md_file
-    return None
+        # Prefix fallback: "{stem}.{anything}.md" (agent stripped UUID suffix)
+        if prefix_match is None:
+            for md_file in root.rglob(f"{escaped}.*.md"):
+                if not _is_messages_file(md_file.name):
+                    prefix_match = md_file
+                    break
+    return prefix_match
 
 
 def _read_session_file(summary_path: Path, base: Path) -> dict | None:
@@ -552,19 +564,17 @@ def search_sessions(
         id, summary, messages_path, content
     """
     base = get_base_dir()
-    sessions_base = get_sessions_base_dir()
     since_d = _parse_date(since) if since else None
     until_d = _parse_date(until) if until else None
     text_lower = text.lower() if text else None
 
     if project:
         # Strict filter: project= means only that project's sessions dir.
-        search_dirs = [sessions_base / "projects" / project / "sessions"]
+        search_dirs = [base / "projects" / project / "sessions"]
     else:
-        search_dirs = [sessions_base / "sessions"]
+        search_dirs = [base / "sessions"]
 
-    # _read_session_file uses base for relative path — use sessions_base when overridden
-    path_root = sessions_base
+    path_root = base
 
     candidates: list[dict] = []
     for d in search_dirs:
@@ -663,9 +673,7 @@ def upsert_session(
     Matches existing session by id field in summary front-matter; reuses
     the existing filename if found (preserves original date in name).
 
-    Sessions are written under AI_MEMORY_SESSIONS_DIR (or AI_MEMORY_DIR as
-    fallback) so users can point them at an Obsidian vault independently of
-    where facts/rules live.
+    Sessions are written under AI_MEMORY_DIR alongside facts/rules.
 
     Args:
         session_id: unique session identifier (UUID or similar)
@@ -683,13 +691,12 @@ def upsert_session(
         Path to the session summary file, relative to AI_MEMORY_DIR base.
     """
     base = get_base_dir()
-    sessions_base = get_sessions_base_dir()
     today = date.today().isoformat()
 
     if project:
-        sessions_parent = sessions_base / "projects" / project / "sessions"
+        sessions_parent = base / "projects" / project / "sessions"
     else:
-        sessions_parent = sessions_base / "sessions"
+        sessions_parent = base / "sessions"
 
     existing = _find_session_file(sessions_parent, session_id)
     is_new = existing is None
@@ -718,10 +725,10 @@ def upsert_session(
 
     fm_lines = ["---", f"id: {session_id}", f"date: {today}"]
     if project:
-        fm_lines.append(f"project: {project}")
-    fm_lines += [f"title: {title}", f"tags: {tags_str}"]
+        fm_lines.append(f"project: {_yaml_str(project)}")
+    fm_lines += [f"title: {_yaml_str(title)}", f"tags: {tags_str}"]
     if branch:
-        fm_lines.append(f"branch: {branch}")
+        fm_lines.append(f"branch: {_yaml_str(branch)}")
     if commit_start:
         fm_lines.append(f"commit_start: {commit_start}")
     if commit_end:
@@ -750,15 +757,12 @@ def upsert_session(
     summary_path.write_text("\n".join(fm_lines + summary_body), encoding="utf-8")
 
     # Update SQLite file index synchronously.
-    # Only index when session file lives under base_dir (not a separate sessions_base).
     from .db import index_file as _index_file
     try:
         _rel = str(summary_path.relative_to(base))
         _index_file(rel_path=_rel, abs_path=summary_path, base_dir=base)
-    except (ValueError, Exception):
-        # ValueError: sessions_base differs from base — file not under base_dir
-        # Other exceptions: next reindex will catch it
-        pass
+    except Exception:
+        pass  # next reindex will catch it
 
     # Embed session content for semantic search.
     # Combine title + summary + compact for maximum semantic coverage.
@@ -768,10 +772,7 @@ def upsert_session(
     embed_text = f"{title}. {summary}"
     if compact:
         embed_text += f"\n{compact}"
-    try:
-        rel = str(summary_path.relative_to(base))
-    except ValueError:
-        rel = str(summary_path.relative_to(sessions_base))
+    rel = str(summary_path.relative_to(base))
     session_tags = list(tags) if tags else []
     if "session" not in session_tags:
         session_tags.append("session")
@@ -787,14 +788,7 @@ def upsert_session(
         },
     )
 
-    # Return path relative to base_dir (facts root) when sessions_base == base,
-    # or relative to sessions_base when AI_MEMORY_SESSIONS_DIR is overridden so
-    # callers can still locate the file.
-    try:
-        return str(summary_path.relative_to(base))
-    except ValueError:
-        # sessions_base is a different root — return relative to sessions_base
-        return str(summary_path.relative_to(sessions_base))
+    return str(summary_path.relative_to(base))
 
 
 # ---------------------------------------------------------------------------
@@ -924,8 +918,8 @@ def remember(
 def reindex() -> dict:
     """Embed all fact and session files that are missing from the vector store.
 
-    Scans all .md files under base_dir (facts/rules) and sessions_base
-    (session summaries).  For each file, computes the text that would be
+    Scans all .md files under base_dir (facts/rules/sessions).
+    For each file, computes the text that would be
     embedded and checks its MD5 against the stored payload.  Files with
     matching MD5 are skipped; new or changed files are embedded.
 
@@ -942,7 +936,6 @@ def reindex() -> dict:
         return {"total": 0, "embedded": 0, "skipped": 0, "error": "vectorization disabled"}
 
     base = get_base_dir()
-    sessions_base = get_sessions_base_dir()
 
     items: list[tuple[str, str, dict]] = []
 
@@ -964,11 +957,11 @@ def reindex() -> dict:
         items.append((rel_path, first_paragraph(body), {"path": rel_path, "tags": file_tags}))
 
     # --- Sessions ---
-    for sessions_dir in _all_session_dirs(sessions_base):
+    for sessions_dir in _all_session_dirs(base):
         for f in sessions_dir.rglob("*.md"):
             if _is_messages_file(f.name):
                 continue
-            rec = _read_session_file(f, sessions_base)
+            rec = _read_session_file(f, base)
             if rec is None:
                 continue
             title = rec.get("title", "")
@@ -980,10 +973,7 @@ def reindex() -> dict:
                 embed_text += f"\n{compact}"
             if not embed_text.strip():
                 continue
-            try:
-                rel = str(f.relative_to(base))
-            except ValueError:
-                rel = str(f.relative_to(sessions_base))
+            rel = str(f.relative_to(base))
             session_tags = rec.get("tags", [])
             if "session" not in session_tags:
                 session_tags = list(session_tags) + ["session"]
@@ -1092,16 +1082,16 @@ def _extract_compact_text(content: str) -> str | None:
     return text if text else None
 
 
-def _all_session_dirs(sessions_base: Path) -> list[Path]:
+def _all_session_dirs(base: Path) -> list[Path]:
     """Return all directories that may contain session files.
 
     Covers both sessions/ and projects/*/sessions/.
     """
     dirs: list[Path] = []
-    top = sessions_base / "sessions"
+    top = base / "sessions"
     if top.exists():
         dirs.append(top)
-    projects = sessions_base / "projects"
+    projects = base / "projects"
     if projects.exists():
         for p in projects.iterdir():
             sd = p / "sessions"
@@ -1169,7 +1159,6 @@ def get_stats() -> dict:
           top_tags (list[{name, count}] — up to 20, sorted by count desc).
     """
     base = get_base_dir()
-    sessions_base = get_sessions_base_dir()
 
     def _dir_size_mb(p: Path) -> float:
         try:
@@ -1179,7 +1168,7 @@ def get_stats() -> dict:
 
     stats: dict = {
         "data_dir": str(base),
-        "sessions_dir": str(sessions_base),
+        "sessions_dir": str(base),
         "data_dir_size_mb": round(_dir_size_mb(base), 2),
         "total_facts": 0,
         "total_sessions": 0,

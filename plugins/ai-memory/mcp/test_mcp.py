@@ -456,15 +456,6 @@ class TestUpsertSession(StorageTestBase):
         content = (self.base / path2).read_text()
         self.assertNotIn("continues:", content)
 
-    def test_sessions_dir_env_override(self):
-        """AI_MEMORY_SESSIONS_DIR routes sessions to a different root directory."""
-        with tempfile.TemporaryDirectory() as sessions_root:
-            with unittest.mock.patch.dict(os.environ, {"AI_MEMORY_SESSIONS_DIR": sessions_root}):
-                path = storage.upsert_session("env-id", "myproj", "env session", "s", [])
-                self.assertTrue(path.startswith("projects/myproj/sessions/"))
-                full_path = Path(sessions_root) / path
-                self.assertTrue(full_path.exists(), f"Expected session at {full_path}")
-
 
 class TestRemember(StorageTestBase):
     def test_universal_routing(self):
