@@ -10,6 +10,8 @@ Long-term memory plugin for [Claude Code](https://docs.anthropic.com/en/docs/cla
 
 **Lazy rules** (in development) — rules and conventions are not dumped into context all at once. They're loaded dynamically: relevant rules are prefetched based on what you're discussing and injected right before the agent acts. Plan-relevant rules are loaded after planning, before execution.
 
+**Facts & knowledge** — not limited to sessions and rules. You can ask the agent to remember anything — debugging insights, API quirks, deployment notes, personal preferences — and search for it later.
+
 **Plain Markdown** — everything is stored as `.md` files with YAML front-matter. No background process, no database server. You can read, edit, and organize your memory with any text editor, commit it to git, or share across machines. Files are [Obsidian](https://obsidian.md)-compatible — session transcripts use callout blocks, and cross-references use `[[wikilinks]]`.
 
 ## Install
