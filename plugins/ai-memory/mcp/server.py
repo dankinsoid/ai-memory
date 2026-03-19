@@ -238,11 +238,12 @@ def _format_search_result(r: dict) -> str:
     """Format a search result as a compact single entry.
 
     Output format:
-        [[stem]] date [tag1, tag2]
+        [[stem]] date (score: N) (truncated)
+        tags: tag1, tag2
         first paragraph of body (truncated to _MAX_DISPLAY_CHARS)
 
-    Front matter is stripped entirely — all essential metadata is on the
-    header line, body content follows immediately.
+    Front matter is stripped entirely. Tags are on a separate line
+    prefixed with "tags:" to distinguish them from the [[stem]] ref.
     """
     # @ai-generated(solo)
     ref = r.get("ref", "")
@@ -269,12 +270,20 @@ def _format_search_result(r: dict) -> str:
         kept = kept[:cut] + "…"
         truncated = True
 
-    tag_str = f" [{', '.join(tags)}]" if tags else ""
-    score_str = f" (score: {score})" if score is not None else ""
-    trunc_str = " (truncated)" if truncated else ""
-    header = f"{ref} {date}{tag_str}{score_str}{trunc_str}"
+    header_parts = [p for p in [
+        ref,
+        date,
+        f"(score: {score})" if score is not None else "",
+        "(truncated)" if truncated else "",
+    ] if p]
+    header = " ".join(header_parts)
 
-    return f"{header}\n{kept}" if kept else header
+    lines = [header]
+    if tags:
+        lines.append(f"tags: {', '.join(tags)}")
+    if kept:
+        lines.append(kept)
+    return "\n".join(lines)
 
 
 
