@@ -4,7 +4,7 @@ Long-term memory system for AI agents (MCP server).
 
 Early development — no backwards compatibility concerns, no production DB yet.
 
-## Plugin (client-side)
+## Plugin
 
 `plugins/ai-memory/` — Claude Code native plugin. Contains hooks, skills, agents, MCP config, and CLAUDE.md instructions.
 
@@ -20,38 +20,6 @@ claude --plugin-dir ./plugins/ai-memory
 Edit files in `plugins/ai-memory/` — changes take effect after plugin update.
 
 Legacy `claude_config_files/` and `scripts/deploy.bb` are deprecated.
-
-## Server (DigitalOcean) - legacy
-
-IP: `46.101.153.18`, user: `root`, SSH key: `~/.ssh/digital_ocean`
-
-```bash
-# SSH
-ssh -i ~/.ssh/digital_ocean root@46.101.153.18
-
-# lazydocker (interactive TUI)
-ssh -i ~/.ssh/digital_ocean root@46.101.153.18 -t 'cd /opt/ai-memory && lazydocker'
-
-# Docker compose (on server)
-cd /opt/ai-memory
-docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
-docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f app
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-
-# Grafana/Prometheus (behind firewall, access via SSH tunnel)
-ssh -i ~/.ssh/digital_ocean -L 3000:localhost:3000 -L 9090:localhost:9090 root@46.101.153.18
-# then open http://localhost:3000 (Grafana) or http://localhost:9090 (Prometheus)
-
-# Health check
-curl http://46.101.153.18:8080/api/health
-
-# First-time server init
-ssh root@IP 'bash -s' < scripts/server-init.sh
-```
-
-CI: push to `main` → GitHub Actions auto-deploys via SSH. Secrets: `DO_HOST`, `DO_USER`, `DO_SSH_KEY`.
-
-Blobs are located at `/var/lib/docker/volumes/ai-memory_blob-data/_data` on the host.
 
 ## Commit Rules
 
