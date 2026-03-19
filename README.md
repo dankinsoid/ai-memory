@@ -51,7 +51,7 @@ Set `AI_MEMORY_DIR` to point at a folder inside your Obsidian vault:
 export AI_MEMORY_DIR="$HOME/ObsidianVault/ai-memory"
 ```
 
-An [Obsidian plugin](https://github.com/nicch0/obsidian-ai-memory) is available for styling session transcripts.
+A minimal Obsidian plugin for styling session transcripts is included in [`obsidian-chat-view/`](obsidian-chat-view/). Install via [BRAT](https://github.com/TfTHacker/obsidian42-brat) or copy the folder manually into your vault's `.obsidian/plugins/` directory.
 
 ## Slash Commands
 
