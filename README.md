@@ -84,9 +84,9 @@ The plugin uses [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-co
 
 **Start** — loads universal rules/facts (up to 5), project-scoped facts and recent sessions (up to 10). On `/clear`, automatically loads the previous session's summary/compact (see session chaining above).
 
-**During** — reminds the agent to save session metadata early. Tracks context token usage and prompts `/save` before the context window fills up (~100K tokens).
+**During** — reminds the agent to save session summaries sometimes. Tracks context token usage and prompts `/save` before the context window fills up (~100K tokens).
 
-**End** — appends the conversation transcript to the session `.md` file (async). Records git context (branch, commits) in front-matter.
+**Every turn** — appends the latest conversation chunk to the session `.md` file (async). Records git context (branch, commits) in front-matter.
 
 ### Rules loading
 
