@@ -234,6 +234,49 @@ def _truncate_to_first_paragraph(content: str) -> tuple[str, bool]:
     return content[:body_start] + "\n" + kept + "\n", True
 
 
+def _format_search_result(r: dict) -> str:
+    """Format a search result as a compact single entry.
+
+    Output format:
+        [[stem]] date [tag1, tag2]
+        first paragraph of body (truncated to _MAX_DISPLAY_CHARS)
+
+    Front matter is stripped entirely — all essential metadata is on the
+    header line, body content follows immediately.
+    """
+    # @ai-generated(solo)
+    ref = r.get("ref", "")
+    date = r.get("date", "")
+    tags = r.get("tags") or []
+    content = r.get("content", "")
+    score = r.get("score")
+
+    # Strip front matter
+    body_start = 0
+    if content.startswith("---"):
+        end_fm = content.find("\n---", 1)
+        if end_fm != -1:
+            body_start = end_fm + 4
+
+    body = content[body_start:].strip()
+    kept = storage.first_paragraph(body) if body else ""
+    truncated = kept != body
+
+    if len(kept) > _MAX_DISPLAY_CHARS:
+        cut = kept[:_MAX_DISPLAY_CHARS].rfind(" ")
+        if cut <= 0:
+            cut = _MAX_DISPLAY_CHARS
+        kept = kept[:cut] + "…"
+        truncated = True
+
+    tag_str = f" [{', '.join(tags)}]" if tags else ""
+    score_str = f" (score: {score})" if score is not None else ""
+    trunc_str = " (truncated)" if truncated else ""
+    header = f"{ref} {date}{tag_str}{score_str}{trunc_str}"
+
+    return f"{header}\n{kept}" if kept else header
+
+
 
 def _first_content_line(content: str) -> str:
     """Return the first non-empty body line of a .md file, skipping front-matter.
@@ -388,19 +431,9 @@ def _handle_tools_call(params: dict) -> dict:
                 limit=args.get("limit", 20),
                 offset=args.get("offset", 0),
             )
-            # Return raw markdown with truncation — only first section shown,
-            # use memory_read for full content.
-            parts = []
-            for r in results:
-                ref = r.get("ref", "")
-                content = r.get("content", "")
-                truncated_content, was_truncated = _truncate_to_first_paragraph(content)
-                header = f"## {ref}"
-                if "score" in r:
-                    header += f" (score: {r['score']})"
-                if was_truncated:
-                    header += " (truncated)"
-                parts.append(f"{header}\n{truncated_content}")
+            # Return compact entries — front matter stripped, metadata on header line.
+            # Use memory_read for full content.
+            parts = [_format_search_result(r) for r in results]
             if not parts:
                 return _text("No results found.")
             return _text("\n\n".join(parts))
