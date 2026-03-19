@@ -57,9 +57,9 @@ A minimal Obsidian plugin for styling session transcripts is included in [`obsid
 
 | Command | What it does |
 |---------|-------------|
-| `/save` | Write a session compact — goals, status, decisions, blockers, dead ends. Designed as a handoff note for the next agent |
 | `/load` | Load any session and resume. Accepts `last` or free-text search |
 | `/rule` | Save a rule, preference, or convention to memory |
+| `/save` | Write a session compact — a condensed summary of the entire conversation. Not required for `/load` (transcripts are saved automatically), but useful as a checkpoint when context matters |
 
 ## MCP Tools
 
