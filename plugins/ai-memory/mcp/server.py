@@ -7,13 +7,6 @@ Implements JSON-RPC 2.0 over stdin/stdout with newline-delimited messages.
 Reads one JSON object per line from stdin, writes one JSON object per line
 to stdout.  Logs to stderr only.
 
-Tools exposed:
-  memory_session      — upsert session .md file
-  memory_remember     — save a rule/preference .md file
-  memory_search       — search all memory files by tags/text/date (truncated)
-  memory_read         — read full content of a memory file by [[ref]]
-  memory_explore_tags — list all tags (or fuzzy-resolve approximate tag names)
-
 Usage (stdio MCP):
   python3 server.py
 """
@@ -139,7 +132,7 @@ def _build_tools() -> list[dict]:
         },
         {
             "name": "memory_read",
-            "description": "Read full content of a memory file by its [[ref]] wikilink.",
+            "description": "Read full content of a memory file by its [[ref]] wikilink. For sessions prefer memory_load_session — it returns optimized recovery output. Returns file path instead of content if the file is too large.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"ref": {"type": "string"}},
@@ -196,6 +189,7 @@ def _handle_tools_list(_params: dict) -> dict:
 
 
 _MAX_DISPLAY_CHARS = 500
+_MAX_READ_BYTES = 8_000  # memory_read returns path instead of content above this
 
 
 def _truncate_to_first_paragraph(content: str) -> tuple[str, bool]:
@@ -452,6 +446,13 @@ def _handle_tools_call(params: dict) -> dict:
             found = storage.find_file_by_stem(stem)
             if not found:
                 return _error(f"Not found: [[{stem}]]")
+            # @ai-generated(guided) — return path for large files to avoid dumping huge content
+            size = found.stat().st_size
+            if size > _MAX_READ_BYTES:
+                return _text(
+                    f"## [[{stem}]]\n"
+                    f"File too large ({size} bytes). Path: {found}\n"
+                )
             content = found.read_text(encoding="utf-8")
             return _text(f"## [[{stem}]]\n{content}")
 
