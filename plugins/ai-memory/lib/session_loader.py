@@ -32,6 +32,9 @@ class SessionContent:
         transcript_tail: tail of ## Transcript section, or None
         continues: file stem of parent session, or None
         file_stem: file stem for [[wikilink]] refs, or None
+        branch: git branch name, or None
+        commit_start: short SHA at session start, or None
+        commit_end: short SHA at session end, or None
     """
 
     title: str
@@ -41,6 +44,9 @@ class SessionContent:
     transcript_tail: str | None = None
     continues: str | None = None
     file_stem: str | None = None
+    branch: str | None = None
+    commit_start: str | None = None
+    commit_end: str | None = None
 
 
 def load_prev_session(project: str, current_session_id: str) -> SessionContent | None:
@@ -89,6 +95,9 @@ def load_session_by_id(session_id: str, project: str | None = None) -> SessionCo
         transcript_tail=_extract_transcript_tail(content),
         continues=fm.get("continues"),
         file_stem=summary_path.stem,
+        branch=fm.get("branch"),
+        commit_start=fm.get("commit_start"),
+        commit_end=fm.get("commit_end"),
     )
 
 
@@ -117,13 +126,16 @@ def load_session_by_ref(ref: str) -> SessionContent | None:
         transcript_tail=_extract_transcript_tail(content),
         continues=fm.get("continues"),
         file_stem=found.stem,
+        branch=fm.get("branch"),
+        commit_start=fm.get("commit_start"),
+        commit_end=fm.get("commit_end"),
     )
 
 
 def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
     """Format SessionContent for /load skill — full recovery with smart truncation.
 
-    Shows compact + transcript tail (500 chars if compact exists, 2000 otherwise).
+    Shows compact + transcript tail (1000 chars if compact exists, 4000 otherwise).
     Falls back to summary if no compact.  Includes [[wikilink]] ref so the loaded
     session is trackable in the transcript via session-sync ref extraction.
 
@@ -144,6 +156,18 @@ def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
         header += f"  [[{stem}]]"
     if sc.continues:
         header += f"\n\nContinues: [[{sc.continues}]]"
+    # Git context — branch and commit range from the session
+    git_parts: list[str] = []
+    if sc.branch:
+        git_parts.append(f"branch: `{sc.branch}`")
+    if sc.commit_start and sc.commit_end and sc.commit_start != sc.commit_end:
+        git_parts.append(f"commits: `{sc.commit_start}..{sc.commit_end}`")
+    elif sc.commit_start:
+        git_parts.append(f"commit: `{sc.commit_start}`")
+    elif sc.commit_end:
+        git_parts.append(f"commit: `{sc.commit_end}`")
+    if git_parts:
+        header += "\n\n" + " | ".join(git_parts)
     parts = [header]
 
     if sc.compact:
@@ -154,7 +178,7 @@ def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
     truncated = False
     if sc.transcript_tail:
         # Shorter tail when compact exists (agent already has structured context)
-        budget = 500 if sc.compact else 2000
+        budget = 1000 if sc.compact else 4000
         truncated = len(sc.transcript_tail) > budget
         tail = sc.transcript_tail[-budget:]
         # Avoid cutting mid-line
