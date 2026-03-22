@@ -15,15 +15,15 @@ Parse ARGUMENTS to determine which session to load:
    If "Other" is picked, ask for a search query and proceed to step 3.
 
 2. **"last" / "latest"** → load the most recent session directly.
-   Call `memory_search` with `tags: ["session", "project/<project>"]`, `limit: 2`.
-   Skip the result whose `id` matches the current `session_id`, load the other one.
+   Call `memory_search` with `tags: ["session", "project/<project>"]`, `limit: 1`,
+   `exclude_session_id: <current session_id>`. Load the result directly.
 
 3. **Free text** → first scan the sessions already in SessionStart context.
    If a session's title or summary clearly matches the user's request, use its `[[ref]]` directly —
    no need to call `memory_search`.
 
    If no context match, fall back to `memory_search`:
-   - Always include `tags: ["session", "project/<project>"]`
+   - Always include `tags: ["session", "project/<project>"]`, `exclude_session_id: <current session_id>`
    - Temporal hints ("yesterday", "last week") → `since`/`until` (resolve relative to today)
    - Topic keywords → `query` (translate to English)
 

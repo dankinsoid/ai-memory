@@ -45,6 +45,7 @@ def _build_tools() -> list[dict]:
         "since": {"type": "string", "description": "YYYY-MM-DD"},
         "until": {"type": "string", "description": "YYYY-MM-DD"},
         "limit": {"type": "integer", "description": "Default 20"},
+        "exclude_session_id": {"type": "string"},
     }
 
     if embedding.is_enabled():
@@ -434,6 +435,14 @@ def _handle_tools_call(params: dict) -> dict:
                 limit=args.get("limit", 20),
                 offset=args.get("offset", 0),
             )
+            # Filter out caller's own session if requested
+            exclude_sid = args.get("exclude_session_id")
+            if exclude_sid:
+                from lib.tags import parse_front_matter
+                results = [
+                    r for r in results
+                    if parse_front_matter(r.get("content", "")).get("id") != exclude_sid
+                ]
             # Return compact entries — front matter stripped, metadata on header line.
             # Use memory_read for full content.
             parts = [_format_search_result(r) for r in results]
