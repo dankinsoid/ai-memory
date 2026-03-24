@@ -5,7 +5,7 @@ from __future__ import annotations
 #
 # Reminder types (mutually exclusive, checked in priority order):
 # 1. Compact urgent — context >= 100K tokens and compact overdue: MUST run /save before responding
-# 2. Chunk naming  — context crossed a 20K boundary: call memory_session with chunk_title
+# 2. Chunk naming  — context crossed a 20K boundary: call memory_session with updated title/summary
 # 3. Compact stale — 40K+ tokens since last /save: gentle reminder to run /save
 # 4. Summary       — early turns: call memory_session with title/summary
 #
@@ -201,7 +201,7 @@ def main() -> None:
         session_part = f', project: "{project_name}"' if project_name else ""
         parts.append(
             f'Chunk ~{k}K tokens. Call memory_session with session_id: "{session_id}"'
-            f'{session_part}, chunk_title, title, and summary.'
+            f'{session_part}, title, and summary.'
         )
     elif need_compact_stale:
         stale_k = tokens_since_compact // 1000
