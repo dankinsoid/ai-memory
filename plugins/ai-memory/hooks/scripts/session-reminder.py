@@ -8,6 +8,7 @@ from __future__ import annotations
 # 2. Chunk naming  — context crossed a 20K boundary: call memory_session with updated title/summary
 # 3. Compact stale — 40K+ tokens since last /save: gentle reminder to run /save
 # 4. Summary       — early turns: call memory_session with title/summary
+#    (first turn: "before task" if prompt is long enough to infer topic, "after responding" otherwise)
 #
 # State per session (SQLite, JSON file fallback):
 #   prompt_count, first_prompt_len, last_chunk_tokens, last_compact_tokens, context_tokens
@@ -211,12 +212,22 @@ def main() -> None:
     elif need_summary:
         session_part = f', project: "{project_name}"' if project_name else ""
         if prompt_count == 1:
-            parts.append(
-                f'IMPORTANT: After responding to this first message, you MUST call memory_session with session_id: "{session_id}"'
-                f'{session_part}, title, summary, and tags.'
-                " This is required for every conversation — do not skip it."
-                " Summary must describe the session intent, not repeat the user's message verbatim."
-            )
+            # Long first message → topic is clear, register session upfront;
+            # short message (greeting) → respond first, then register.
+            if len(prompt) >= SHORT_PROMPT_LEN:
+                parts.append(
+                    f'IMPORTANT: You MUST call memory_session with session_id: "{session_id}"'
+                    f'{session_part}, title, summary, and tags BEFORE you start working on the task.'
+                    " This is required for every conversation — do not skip it."
+                    " Summary must describe the session intent, not repeat the user's message verbatim."
+                )
+            else:
+                parts.append(
+                    f'IMPORTANT: After responding to this first message, you MUST call memory_session with session_id: "{session_id}"'
+                    f'{session_part}, title, summary, and tags.'
+                    " This is required for every conversation — do not skip it."
+                    " Summary must describe the session intent, not repeat the user's message verbatim."
+                )
         else:
             parts.append(
                 f'Call memory_session with session_id: "{session_id}"'
