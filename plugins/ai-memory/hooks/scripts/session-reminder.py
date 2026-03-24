@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # ---- Config ----
 
 CHUNK_TOKEN_STEP = 20_000    # create a new chunk every N tokens of context growth
-SHORT_PROMPT_LEN = 50        # prompts shorter than this are likely greetings
+SHORT_PROMPT_LEN = 20        # prompts shorter than this are likely greetings
 SUMMARY_REMIND_TURNS = 3     # remind about summary for this many early turns
 COMPACT_STALE_TOKENS = 40_000   # tokens since last compact before gentle /save reminder
 COMPACT_URGENT_TOKENS = 100_000 # total context tokens before urgent /save reminder
