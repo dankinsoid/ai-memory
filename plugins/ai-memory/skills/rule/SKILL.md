@@ -10,6 +10,7 @@ description: Save a rule, preference, or convention to long-term memory. Use whe
    - project-specific → `project/<project-name>`
    - language/tech-specific → `lang/<language>`
    - universal (applies everywhere) → `universal`
-3. **Save** — call `memory_remember`.
+3. **Title** — pick a kebab-case slug, e.g. `always-run-regression-test-before-fixing-bug`.
+4. **Save** — call `memory_remember(content=..., tags=[...], title=...)`. All three params are required.
 
 Confirm: "Saved to memory."
