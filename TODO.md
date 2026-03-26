@@ -153,7 +153,7 @@ Next: implement storage layer
 - [x] `memory_session` возвращает релевантные правила по topic-тегам сессии (с дедупликацией по session_id)
 - [x] `session-end.py` очищает dedup-кэш при завершении сессии (`hooks.json` matcher → `""`)
 - [x] `CLAUDE.md` плагина: конкретные триггеры когда агент должен вызывать `memory_search`
-- [ ] Block 5: 4o-mini автосохранение + LLM-классификация топика
+- [x] Block 5: 4o-mini автосохранение + LLM-классификация топика
 
 ---
 
@@ -172,8 +172,8 @@ Next: implement storage layer
 - [x] Vector store инфраструктура: `lib/vector_store/` (ABC + JSON backend + Qdrant backend)
 - [x] Content vectorization: MD5 freshness check, batch embedding, единая "content" коллекция
 - [x] Конфиг: `OPENAI_API_KEY` (embedding backend auto-detects)
-- [ ] `Stop` hook + 4o-mini: автосохранение compact без участия основного агента
-- [ ] `UserPromptSubmit` hook + 4o-mini: классификация топика → загрузка правил
+- [x] `Stop` hook + 4o-mini: автосохранение compact без участия основного агента
+- [x] `UserPromptSubmit` hook + 4o-mini: классификация топика → загрузка правил
 
 ---
 
@@ -296,7 +296,7 @@ Next: implement storage layer
 - [x] **Чанки:** убраны, сессия перезаписывается целиком
 
 Открытые:
-- [ ] Stop hook + 4o-mini: что передавать в качестве контекста?
+- [x] Stop hook + 4o-mini: что передавать в качестве контекста? → LLM-friendly transcript (text + tool summaries)
 - [x] SQLite индекс: → Блок 9, всегда включён (stdlib, нулевой overhead)
 - [x] Индекс сессий (session_id → filename) — решено через `{date} {title}.{sid8}.md` формат + glob O(1)
 - [x] Индекс тегов (tag → [file paths]) — → Блок 9, таблица file_tags с индексом

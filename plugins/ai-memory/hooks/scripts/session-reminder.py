@@ -32,6 +32,7 @@ SHORT_PROMPT_LEN = 20        # prompts shorter than this are likely greetings
 SUMMARY_REMIND_TURNS = 3     # remind about summary for this many early turns
 COMPACT_STALE_TOKENS = 40_000   # tokens since last compact before gentle /save reminder
 COMPACT_URGENT_TOKENS = 100_000 # total context tokens before urgent /save reminder
+EARLY_PROMPT_THRESHOLD = 200    # chars — minimum first message length for LLM early digest
 
 
 def git_project_name(cwd: str) -> str | None:
@@ -86,6 +87,15 @@ def get_context_tokens(transcript_path: str | None) -> int | None:
 
 
 
+def _is_llm_enabled() -> bool:
+    """Check if LLM auto-digest is enabled."""
+    try:
+        from lib.config import llm_cfg
+        return llm_cfg.enabled
+    except Exception:
+        return False
+
+
 def main() -> None:
     data = json.loads(sys.stdin.read())
     session_id = data.get("session_id")
@@ -96,6 +106,8 @@ def main() -> None:
 
     if not session_id:
         sys.exit(0)
+
+    llm_on = _is_llm_enabled()
 
     # Load or initialize state from SQLite, with JSON file fallback
     reminder_key = f"{session_id}-reminder"
@@ -160,14 +172,36 @@ def main() -> None:
         "context_tokens": context_tokens,
     }
 
-    # Summary reminder on early turns
-    need_summary = (prompt_count == 1) or (
-        prompt_count <= SUMMARY_REMIND_TURNS and first_prompt_len < SHORT_PROMPT_LEN
-    )
+    # --- Early digest via LLM on first long prompt ---
+    if llm_on and prompt_count == 1 and len(prompt) >= EARLY_PROMPT_THRESHOLD:
+        try:
+            from lib.digest import compute_early_digest
+            digest = compute_early_digest(prompt, project_name)
+            from lib import storage
+            auto_tags = ["session"]
+            if project_name:
+                auto_tags.append(f"project/{project_name}")
+            auto_tags.extend(t for t in digest.tags if t not in auto_tags)
+            storage.upsert_session(
+                session_id=session_id,
+                project=project_name,
+                title=digest.title,
+                summary=digest.summary,
+                tags=auto_tags,
+            )
+        except Exception:
+            pass  # Stop hook will handle it
 
-    # Set PreToolUse fallback flag on first prompt so the pretool hook can
-    # remind the agent if it starts working without calling memory_session.
-    if prompt_count == 1:
+    # When LLM is on, skip summary/chunk memory_session reminders —
+    # the Stop hook handles auto-digest. Keep compact/save reminders.
+    need_summary = False
+    if not llm_on:
+        need_summary = (prompt_count == 1) or (
+            prompt_count <= SUMMARY_REMIND_TURNS and first_prompt_len < SHORT_PROMPT_LEN
+        )
+
+    # Set PreToolUse fallback flag on first prompt (only when LLM is off)
+    if not llm_on and prompt_count == 1:
         try:
             from lib.db import set_state
             set_state(
@@ -197,7 +231,7 @@ def main() -> None:
             f'IMPORTANT: Context is large (~{k}K tokens) and compact is overdue. '
             f'You MUST run /save BEFORE responding to this message to avoid losing context on auto-compact.'
         )
-    elif need_chunk:
+    elif not llm_on and need_chunk:
         k = context_tokens // 1000
         session_part = f', project: "{project_name}"' if project_name else ""
         parts.append(

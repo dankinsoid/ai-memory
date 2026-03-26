@@ -30,6 +30,14 @@ def main() -> None:
     if not session_id:
         return
 
+    # When LLM auto-digest is on, the flag is never set — skip entirely.
+    try:
+        from lib.config import llm_cfg
+        if llm_cfg.enabled:
+            return
+    except Exception:
+        pass
+
     state_key = f"session-needs-init-{session_id}"
 
     try:

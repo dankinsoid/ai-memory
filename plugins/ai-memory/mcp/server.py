@@ -344,6 +344,12 @@ def _handle_tools_call(params: dict) -> dict:
                 try:
                     from lib.db import set_state
                     set_state(f"compact-saved-{args['session_id']}", "1")
+                    # Preserve agent compact for auto-digest — agent-written
+                    # compact is higher trust than LLM-generated.
+                    set_state(
+                        f"agent-compact-{args['session_id']}",
+                        args["compact"],
+                    )
                 except Exception:
                     pass
             # Lazy-load rules relevant to the session's topic tags.

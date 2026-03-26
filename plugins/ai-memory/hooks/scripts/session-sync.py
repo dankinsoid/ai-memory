@@ -21,6 +21,7 @@ _PLUGIN_ROOT = _HOOK_DIR.parent.parent
 sys.path.insert(0, str(_PLUGIN_ROOT))
 
 from lib import storage  # noqa: E402
+from lib.config import llm_cfg  # noqa: E402
 from lib.tags import parse_front_matter  # noqa: E402
 
 
@@ -652,10 +653,65 @@ def main() -> None:
     commit_end = _git_head_short(cwd)
     user_name = _git_user_name(cwd) or _system_user_name()
 
+    # --- Auto-digest via LLM (when enabled) ---
+    digest_result = None
+    if llm_cfg.enabled:
+        try:
+            from lib.digest import (
+                DigestState, compute_digest,
+                deserialize_state, serialize_state,
+            )
+            from lib.db import get_state, set_state
+
+            # Load digest state
+            state_raw = get_state(f"digest-state-{session_id}")
+            state = deserialize_state(state_raw) if state_raw else DigestState(
+                last_byte_offset=0, last_digest=None, last_msg_count=0,
+                agent_compact=None,
+            )
+            # Check for agent compact (written by MCP server on /save)
+            agent_compact_raw = get_state(f"agent-compact-{session_id}")
+            if agent_compact_raw:
+                state = DigestState(
+                    last_byte_offset=state.last_byte_offset,
+                    last_digest=state.last_digest,
+                    last_msg_count=state.last_msg_count,
+                    agent_compact=agent_compact_raw,
+                )
+
+            digest_result = compute_digest(entries, state, project)
+            if digest_result:
+                digest, new_state = digest_result
+                set_state(f"digest-state-{session_id}", serialize_state(new_state))
+        except Exception as exc:
+            import traceback
+            print(f"[ai-memory] auto-digest failed: {exc}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+            digest_result = None
+
     # Find or create session summary file
     existing = storage._find_session_file(sessions_parent, session_id)
 
-    if existing is None:
+    if digest_result:
+        # Auto-digest succeeded — upsert with LLM-generated metadata
+        digest, _ = digest_result
+        auto_tags = ["session"]
+        if project:
+            auto_tags.append(f"project/{project}")
+        auto_tags.extend(t for t in digest.tags if t not in auto_tags)
+        storage.upsert_session(
+            session_id=session_id,
+            project=project,
+            title=digest.title,
+            summary=digest.summary,
+            tags=auto_tags,
+            compact=digest.compact,
+            branch=git_ctx.get("branch"),
+            commit_start=git_ctx.get("commit_start"),
+            commit_end=commit_end,
+        )
+        existing = storage._find_session_file(sessions_parent, session_id)
+    elif existing is None:
         # Agent never called memory_session — create minimal summary
         title = derive_title(messages)
         storage.upsert_session(

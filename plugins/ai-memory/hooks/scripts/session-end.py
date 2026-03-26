@@ -79,6 +79,70 @@ def main() -> None:
             except Exception:
                 pass
 
+    # Final auto-digest on /clear — force update regardless of delta threshold
+    if hook_reason == "clear":
+        try:
+            from lib.config import llm_cfg
+            if llm_cfg.enabled:
+                from lib.digest import (
+                    DigestState, compute_digest,
+                    deserialize_state, serialize_state,
+                )
+                from lib.db import get_state, set_state
+
+                # Find transcript
+                transcript_path = data.get("transcript_path")
+                if not transcript_path:
+                    projects_dir = Path.home() / ".claude" / "projects"
+                    matches = list(projects_dir.glob(f"**/{session_id}.jsonl"))
+                    transcript_path = str(matches[0]) if matches else None
+
+                if transcript_path:
+                    tp = Path(transcript_path)
+                    if tp.exists():
+                        entries = []
+                        for line in tp.read_text(encoding="utf-8", errors="replace").splitlines():
+                            try:
+                                entries.append(json.loads(line))
+                            except Exception:
+                                pass
+
+                        project = derive_project(cwd)
+
+                        state_raw = get_state(f"digest-state-{session_id}")
+                        state = deserialize_state(state_raw) if state_raw else DigestState(
+                            last_byte_offset=0, last_digest=None, last_msg_count=0,
+                            agent_compact=None,
+                        )
+                        agent_compact_raw = get_state(f"agent-compact-{session_id}")
+                        if agent_compact_raw:
+                            state = DigestState(
+                                last_byte_offset=state.last_byte_offset,
+                                last_digest=state.last_digest,
+                                last_msg_count=state.last_msg_count,
+                                agent_compact=agent_compact_raw,
+                            )
+
+                        result = compute_digest(entries, state, project, force=True)
+                        if result:
+                            digest, new_state = result
+                            from lib import storage
+                            auto_tags = ["session"]
+                            if project:
+                                auto_tags.append(f"project/{project}")
+                            auto_tags.extend(t for t in digest.tags if t not in auto_tags)
+                            storage.upsert_session(
+                                session_id=session_id,
+                                project=project,
+                                title=digest.title,
+                                summary=digest.summary,
+                                tags=auto_tags,
+                                compact=digest.compact,
+                            )
+                            set_state(f"digest-state-{session_id}", serialize_state(new_state))
+        except Exception:
+            pass  # never block /clear
+
     # Matcher should filter, but double-check: prev-session cache only on /clear
     if hook_reason != "clear":
         sys.exit(0)
