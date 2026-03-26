@@ -61,6 +61,34 @@ DIGEST_DELTA_THRESHOLD = 2000  # chars (~500 tokens) minimum delta to trigger LL
 DIGEST_OVERLAP = 500           # chars overlap with previous window
 EARLY_PROMPT_THRESHOLD = 200   # chars — minimum first message length for early digest
 AGENT_COMPACT_FRESH_MSGS = 10  # messages after agent /save before LLM may overwrite compact
+COMPACT_MIN_MSGS = 6           # minimum messages before generating compact (short sessions don't need it)
+
+# Compact writing spec — mirrored in skills/save/SKILL.md for agent use.
+# If updating, keep both in sync.
+COMPACT_SPEC = """\
+Compact is a handoff to a future agent — write what they'd need to continue \
+this work with no other context. Concrete and actionable, not polished.
+
+Format: a structured header, then a compression-gradient narrative \
+(early work compressed, recent work in full detail).
+
+Header:
+  Goal: <why this session exists — intent, not just topic>
+  Status: in-progress | completed | blocked
+  Next: <immediate next action, one line>
+
+Body:
+  - Overview sentence
+  - Early session — high compression: 1-2 sentences per topic
+  - Recent work — full detail: what was tried, what worked, what didn't
+  - Current state: what is working, what is broken, what is half-done
+  - Dead ends: approach tried → why it failed (if any)
+  - User requirements: direct quotes of constraints/preferences from the user
+
+Rules:
+  - Substance, not mechanics — "chose X over Y because Z" matters; which files were edited does not
+  - Dead ends — rejected approaches and why, so the next agent doesn't retry them
+  - User requirements — preserve exact wording, don't paraphrase"""
 
 
 
@@ -163,6 +191,7 @@ def build_digest_prompt(
     previous_digest: SessionDigest | None,
     project: str | None,
     agent_compact: str | None = None,
+    include_compact: bool = True,
 ) -> str:
     """Build prompt for the Stop hook digest (incremental update).
 
@@ -171,6 +200,8 @@ def build_digest_prompt(
         previous_digest: previous digest result (for context continuity)
         project: project name for context
         agent_compact: higher-trust compact from agent /save, to preserve
+        include_compact: whether to include compact instructions (False for
+            SessionDigestLight when agent compact is fresh or session is short)
 
     Returns:
         Complete prompt string for the LLM.
@@ -195,6 +226,10 @@ def build_digest_prompt(
 
     project_ctx = f" for project '{project}'" if project else ""
 
+    compact_line = ""
+    if include_compact:
+        compact_line = f"\n- compact:\n{COMPACT_SPEC}"
+
     return f"""You are a session metadata extractor{project_ctx}. Analyze this conversation transcript and produce structured metadata.
 {prev_ctx}
 New conversation content:
@@ -205,8 +240,7 @@ New conversation content:
 Instructions:
 - title: 3-8 words capturing the main topic/task. Update if the session evolved.
 - summary: 1-3 sentences describing the full session arc so far (what was done, key decisions). No file/function names.
-- tags: specific topic tags for this session (e.g. "refactoring", "auth", "testing", "deployment"). Do NOT include generic tags like "session" or "project/..." — those are added automatically. 3-7 tags.
-- compact: detailed notes for recovering this session later. Include: what was done, current status, key decisions, next steps, important context. Be thorough but concise.
+- tags: specific topic tags for this session (e.g. "refactoring", "auth", "testing", "deployment"). Do NOT include generic tags like "session" or "project/..." — those are added automatically. 3-7 tags.{compact_line}
 - search_tags: broader tags that would help find related rules/knowledge (superset of tags, may include technology names, patterns, etc.). 5-10 tags.
 
 Produce the metadata as a JSON object."""
@@ -238,7 +272,6 @@ Instructions:
 - title: 3-8 words capturing the likely main topic/task
 - summary: 1-2 sentences describing the session intent. No file/function names.
 - tags: specific topic tags (e.g. "refactoring", "auth", "testing"). Do NOT include "session" or "project/..." tags. 3-5 tags.
-- compact: brief initial context from the user's request
 - search_tags: broader tags for finding related rules/knowledge. 3-7 tags.
 
 Produce the metadata as a JSON object."""
@@ -294,23 +327,27 @@ def compute_digest(
         if e.get("type") in ("user", "assistant") and not e.get("isMeta")
     ])
 
-    # Agent compact still fresh? Skip compact generation entirely —
-    # use lighter schema (no compact field) to save output tokens.
+    # Skip compact when: agent compact is still fresh, or session is too short.
     agent_compact_fresh = (
         state.agent_compact is not None
         and (current_msg_count - state.agent_compact_msg_count) < AGENT_COMPACT_FRESH_MSGS
     )
+    session_too_short = current_msg_count < COMPACT_MIN_MSGS
+    skip_compact = agent_compact_fresh or session_too_short
 
     provider = get_provider()
 
-    if agent_compact_fresh:
-        prompt = build_digest_prompt(delta_text, state.last_digest, project)
+    if skip_compact:
+        prompt = build_digest_prompt(
+            delta_text, state.last_digest, project, include_compact=False,
+        )
         light = provider.complete(prompt, SessionDigestLight)
         digest = SessionDigest(
             title=light.title,
             summary=light.summary,
             tags=normalize_tags(light.tags),
-            compact=state.agent_compact,  # type: ignore[arg-type]
+            # Keep agent compact if fresh; empty string if session too short
+            compact=state.agent_compact or "",
             search_tags=normalize_tags(light.search_tags),
         )
     else:
@@ -361,13 +398,13 @@ def compute_early_digest(
 
     prompt = build_early_prompt(user_message, project)
     provider = get_provider()
-    digest = provider.complete(prompt, SessionDigest)
+    light = provider.complete(prompt, SessionDigestLight)
     return SessionDigest(
-        title=digest.title,
-        summary=digest.summary,
-        tags=normalize_tags(digest.tags),
-        compact=digest.compact,
-        search_tags=normalize_tags(digest.search_tags),
+        title=light.title,
+        summary=light.summary,
+        tags=normalize_tags(light.tags),
+        compact="",  # no compact for first message — too early
+        search_tags=normalize_tags(light.search_tags),
     )
 
 
