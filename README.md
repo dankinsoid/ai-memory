@@ -34,11 +34,15 @@ claude --plugin-dir ./plugins/ai-memory
 
 ### Optional: Semantic search
 
-Embedding is opt-in to avoid silently spending tokens when `OPENAI_API_KEY` is set globally:
+Embedding is opt-in to avoid silently spending tokens when `OPENAI_API_KEY` is set globally. Add to your Claude Code `settings.json`:
 
-```bash
-export AI_MEMORY_EMBEDDING=true   # enable vector embeddings (default: off)
-export OPENAI_API_KEY="sk-..."    # required when embedding is enabled
+```json
+{
+  "env": {
+    "AI_MEMORY_EMBEDDING": "true",
+    "OPENAI_API_KEY": "sk-..."
+  }
+}
 ```
 
 Without these, the plugin works fully via tag-based filtering.
