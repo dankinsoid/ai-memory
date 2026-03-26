@@ -19,6 +19,10 @@ Model selection:
   AI_MEMORY_EMBEDDING_MODEL   default "text-embedding-3-small"
   AI_MEMORY_LLM_MODEL         default "gpt-4o-mini"
 
+Provider selection:
+
+  AI_MEMORY_LLM_PROVIDER      default "openai"
+
 API keys (read from env, typically set in settings.json):
 
   OPENAI_API_KEY        required for both embedding and LLM features
@@ -68,17 +72,19 @@ class EmbeddingConfig:
 
 @dataclass(frozen=True)
 class LLMConfig:
-    """Configuration for LLM chat-completion features (future).
+    """Configuration for LLM chat-completion features.
 
     Attributes:
-        enabled: True when both the feature flag and API key are present.
-        model:   OpenAI chat model name.
-        api_key: OPENAI_API_KEY value or None.
+        enabled:  True when both the feature flag and API key are present.
+        model:    Chat model name (e.g. ``gpt-4o-mini``).
+        api_key:  OPENAI_API_KEY value or None.
+        provider: Backend name (``openai`` by default).
     """
 
     enabled: bool
     model: str
     api_key: str | None
+    provider: str
 
 
 _DIM_MAP = {"text-embedding-3-large": 3072}
@@ -101,10 +107,12 @@ def _load_llm() -> LLMConfig:
     flag = _flag("AI_MEMORY_LLM")
     key = _api_key()
     model = os.environ.get("AI_MEMORY_LLM_MODEL", "gpt-4o-mini")
+    provider = os.environ.get("AI_MEMORY_LLM_PROVIDER", "openai")
     return LLMConfig(
         enabled=flag and key is not None,
         model=model,
         api_key=key,
+        provider=provider,
     )
 
 
