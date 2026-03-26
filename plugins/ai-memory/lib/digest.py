@@ -130,31 +130,32 @@ Rules:
   - User requirements — preserve exact wording, don't paraphrase"""
 
 FACTS_SPEC = """\
-Extract atomic facts from USER messages only. Assistant messages are context \
-for understanding — never a source of facts. If the user asked a question and \
-the assistant answered, that answer is NOT a user fact.
+FORBIDDEN — never extract facts from Assistant messages. The assistant's \
+technical explanations, analysis, and findings are NOT facts to store. \
+Only the human user's own statements matter.
 
-Return an EMPTY list when the user said nothing worth remembering (greetings, \
-short commands, questions without assertions). Most turns produce zero facts — \
-that is expected and correct.
+Before adding any fact, verify: "Is this something the USER typed?" \
+If you cannot point to a specific User: message that contains this claim, \
+discard it.
 
-Each fact: 1-2 sentences preserving the exact meaning. Types:
-  - Requirements ("must", "should", "need")
-  - Corrections ("no, not that", "actually", "wrong")
-  - Confirmations ("yes", "exactly", "that's right")
-  - Explanations (why something works a certain way)
-  - Decisions ("let's go with X", "chose X over Y")
-  - Constraints ("can't use X", "budget is Y", "deadline is Z")
+Return an EMPTY list when the user said nothing worth remembering. \
+Most conversations produce 0-2 user facts — that is normal.
+
+Each fact: 1-2 sentences, only what the user actually said. Types:
+  - Observations the user made about their own experience
+  - Decisions or preferences the user stated
+  - Corrections the user made
+  - Requests or constraints the user expressed
 
 Importance scale (0-100):
   - 30-50: context, background, minor preferences
-  - 60-80: decisions, confirmed approaches, design choices
-  - 85-100: critical requirements, hard constraints, corrections of mistakes
+  - 60-80: decisions, confirmed approaches
+  - 85-100: critical requirements, hard constraints, corrections
 
 Do NOT extract:
-  - General knowledge or well-known facts (even if the user mentioned them)
-  - Anything the assistant said that the user did not explicitly confirm
-  - Rephrased assistant output attributed to the user
+  - Assistant's analysis, findings, or explanations
+  - Technical details the assistant discovered
+  - Conclusions the assistant reached
 
 Do NOT duplicate facts already listed in "Previous facts"."""
 
