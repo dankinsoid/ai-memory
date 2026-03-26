@@ -293,7 +293,7 @@ Next: implement storage layer
 
 ### Задачи
 
-- [ ] Механизм async notification: async хук пишет результат в state DB → следующий синхронный хук (UserPromptSubmit) проверяет и доставляет агенту
+- [ ] Механизм async notification: async хук пишет результат в state DB → доставка агенту при первой возможности (PreToolUse, UserPromptSubmit, любой другой синхронный хук)
 - [ ] Lazy rule loading через `search_tags`: после digest найти релевантные правила, доставить агенту через notification
 - [ ] Решить что делать с `search_tags` в схеме — убрать для экономии токенов или оставить для rule loading
 - [ ] Compact spec sync: `lib/digest.py` COMPACT_SPEC и `skills/save/SKILL.md` описывают одно и то же — при обновлении менять оба
