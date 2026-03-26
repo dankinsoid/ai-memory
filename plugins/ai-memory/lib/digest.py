@@ -243,7 +243,7 @@ Instructions:
 - tags: specific topic tags for this session (e.g. "refactoring", "auth", "testing", "deployment"). Do NOT include generic tags like "session" or "project/..." — those are added automatically. 3-7 tags.{compact_line}
 - search_tags: broader tags that would help find related rules/knowledge (superset of tags, may include technology names, patterns, etc.). 5-10 tags.
 
-Produce the metadata as a JSON object."""
+"""
 
 
 def build_early_prompt(user_message: str, project: str | None) -> str:
@@ -274,7 +274,7 @@ Instructions:
 - tags: specific topic tags (e.g. "refactoring", "auth", "testing"). Do NOT include "session" or "project/..." tags. 3-5 tags.
 - search_tags: broader tags for finding related rules/knowledge. 3-7 tags.
 
-Produce the metadata as a JSON object."""
+"""
 
 
 # ---------------------------------------------------------------------------
