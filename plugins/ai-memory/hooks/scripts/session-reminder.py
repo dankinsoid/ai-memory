@@ -172,26 +172,6 @@ def main() -> None:
         "context_tokens": context_tokens,
     }
 
-    # --- Early digest via LLM on first long prompt ---
-    if llm_on and prompt_count == 1 and len(prompt) >= EARLY_PROMPT_THRESHOLD:
-        try:
-            from lib.digest import compute_early_digest
-            digest = compute_early_digest(prompt, project_name)
-            from lib import storage
-            auto_tags = ["session"]
-            if project_name:
-                auto_tags.append(f"project/{project_name}")
-            auto_tags.extend(t for t in digest.tags if t not in auto_tags)
-            storage.upsert_session(
-                session_id=session_id,
-                project=project_name,
-                title=digest.title,
-                summary=digest.summary,
-                tags=auto_tags,
-            )
-        except Exception:
-            pass  # Stop hook will handle it
-
     # When LLM is on, skip summary/chunk memory_session reminders —
     # the Stop hook handles auto-digest. Keep compact/save reminders.
     need_summary = False
