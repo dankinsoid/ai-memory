@@ -106,7 +106,7 @@ def _load_embedding() -> EmbeddingConfig:
 def _load_llm() -> LLMConfig:
     flag = _flag("AI_MEMORY_LLM")
     key = _api_key()
-    model = os.environ.get("AI_MEMORY_LLM_MODEL", "gpt-4o-mini")
+    model = os.environ.get("AI_MEMORY_LLM_MODEL", "gpt-4.1-nano")
     provider = os.environ.get("AI_MEMORY_LLM_PROVIDER", "openai")
     return LLMConfig(
         enabled=flag and key is not None,
