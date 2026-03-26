@@ -309,11 +309,14 @@ def _handle_tools_call(params: dict) -> dict:
 
     try:
         if name == "memory_session":
+            from lib.tags import normalize_tags
             auto_tags = ["session"]
             if args.get("project"):
                 auto_tags.append(f"project/{args['project']}")
+            # Normalize agent-provided tags (kebab-case + dedup)
+            user_tags = normalize_tags(args.get("tags") or [])
             session_tags: list[str] = list(dict.fromkeys(
-                auto_tags + (args.get("tags") or [])
+                auto_tags + user_tags
             ))
             # Auto-resolve continuation link from state set by SessionStart
             # or /load skill — no agent input needed.
@@ -398,17 +401,8 @@ def _handle_tools_call(params: dict) -> dict:
             return _text(f"ok{rules_text}")
 
         if name == "memory_remember":
-            raw_tags: list[str] = args.get("tags") or []
-            # Deduplicate tags via vector similarity when vectorization is on.
-            # Without it there's no reliable fuzzy match, so tags are stored as-is.
-            from lib.vector_store import tag_store
-            if tag_store.enabled:
-                resolved = storage.resolve_tags(raw_tags)
-                # Preserve originals that had no match (new tags, scope tags, etc.)
-                known = set(resolved)
-                tags = resolved + [t for t in raw_tags if t not in known]
-            else:
-                tags = raw_tags
+            from lib.tags import normalize_tags as _normalize_tags
+            tags = _normalize_tags(args.get("tags") or [])
             rel_path = storage.remember(
                 content_text=args["content"],
                 tags=tags,

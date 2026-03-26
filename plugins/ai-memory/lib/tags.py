@@ -44,6 +44,90 @@ ASPECT_TAGS: list[str] = [
 # Structural tags derived from directory paths — not useful for agent discovery
 STRUCTURAL_TAGS: set[str] = {"universal", "session", "rule", "critical-rule"}
 
+# Chars that become hyphens in kebab-case.
+_TAG_SEP_RE = re.compile(r"[\s_/]+")
+# Anything not alphanumeric or hyphen.
+_TAG_CLEAN_RE = re.compile(r"[^a-z0-9-]")
+
+
+def to_kebab(tag: str) -> str:
+    """Convert a tag to kebab-case.
+
+    Example::
+
+        >>> to_kebab("LLM interface")
+        'llm-interface'
+        >>> to_kebab("feature_implementation")
+        'feature-implementation'
+
+    Args:
+        tag: raw tag string
+
+    Returns:
+        Lowercase kebab-case string.
+    """
+    t = tag.strip().lower()
+    t = _TAG_SEP_RE.sub("-", t)
+    t = _TAG_CLEAN_RE.sub("", t)
+    return t.strip("-")
+
+
+def normalize_tags(raw_tags: list[str]) -> list[str]:
+    """Normalize tags: kebab-case + dedup against existing tags.
+
+    Steps:
+    1. Convert each tag to kebab-case
+    2. Resolve against existing tags via ``storage.resolve_tags`` (vector
+       similarity when available, exact match otherwise)
+    3. Keep unmatched tags as-is — they're genuinely new
+
+    Example::
+
+        >>> normalize_tags(["LLM Interface", "testing", "My New Tag"])
+        ['llm-interface', 'testing', 'my-new-tag']
+
+    Args:
+        raw_tags: tags from LLM or agent output
+
+    Returns:
+        Deduplicated list of normalized tags.
+    """
+    # Deduplicate + kebab-case
+    seen: set[str] = set()
+    unique: list[str] = []
+    for t in raw_tags:
+        k = to_kebab(t)
+        if k and k not in seen:
+            seen.add(k)
+            unique.append(k)
+
+    if not unique:
+        return []
+
+    # Resolve against existing tags (dedup synonyms)
+    try:
+        from . import storage
+        resolved = storage.resolve_tags(unique)
+    except Exception:
+        return unique
+
+    # Merge: use resolved version where available, keep new tags as-is
+    resolved_set = set(resolved)
+    # Build mapping: resolve_tags returns in query order for matched tags
+    result_seen: set[str] = set()
+    result: list[str] = []
+    for tag in unique:
+        pick = tag
+        # If resolve_tags found an existing match, it's in resolved_set
+        if tag in resolved_set:
+            pick = tag
+        # Otherwise tag is new — keep it
+        if pick not in result_seen:
+            result_seen.add(pick)
+            result.append(pick)
+
+    return result
+
 # Matches YAML front-matter block: ---\n...\n---\n
 _FRONT_MATTER_RE = re.compile(r"^---[ \t]*\n(.*?)\n---[ \t]*\n", re.DOTALL)
 

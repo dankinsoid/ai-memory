@@ -14,6 +14,8 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from .tags import normalize_tags
+
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -59,6 +61,7 @@ DIGEST_DELTA_THRESHOLD = 2000  # chars (~500 tokens) minimum delta to trigger LL
 DIGEST_OVERLAP = 500           # chars overlap with previous window
 EARLY_PROMPT_THRESHOLD = 200   # chars — minimum first message length for early digest
 AGENT_COMPACT_FRESH_MSGS = 10  # messages after agent /save before LLM may overwrite compact
+
 
 
 # ---------------------------------------------------------------------------
@@ -306,9 +309,9 @@ def compute_digest(
         digest = SessionDigest(
             title=light.title,
             summary=light.summary,
-            tags=light.tags,
+            tags=normalize_tags(light.tags),
             compact=state.agent_compact,  # type: ignore[arg-type]
-            search_tags=light.search_tags,
+            search_tags=normalize_tags(light.search_tags),
         )
     else:
         prompt = build_digest_prompt(
@@ -316,6 +319,13 @@ def compute_digest(
             agent_compact=state.agent_compact,
         )
         digest = provider.complete(prompt, SessionDigest)
+        digest = SessionDigest(
+            title=digest.title,
+            summary=digest.summary,
+            tags=normalize_tags(digest.tags),
+            compact=digest.compact,
+            search_tags=normalize_tags(digest.search_tags),
+        )
 
     new_state = DigestState(
         last_byte_offset=len(full_text),
@@ -351,7 +361,14 @@ def compute_early_digest(
 
     prompt = build_early_prompt(user_message, project)
     provider = get_provider()
-    return provider.complete(prompt, SessionDigest)
+    digest = provider.complete(prompt, SessionDigest)
+    return SessionDigest(
+        title=digest.title,
+        summary=digest.summary,
+        tags=normalize_tags(digest.tags),
+        compact=digest.compact,
+        search_tags=normalize_tags(digest.search_tags),
+    )
 
 
 # ---------------------------------------------------------------------------
