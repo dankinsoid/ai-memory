@@ -277,10 +277,26 @@ Next: implement storage layer
 4. ~~**Блок 2**~~ ✅
 5. ~~**Блок 4**~~ ✅
 6. ~~**Блок 8**~~ ✅
-7. **Блок 5** — опциональный AI (векторы ✅, LLM-хуки остались)
+7. ~~**Блок 5**~~ ✅ — опциональный AI (векторы ✅, LLM auto-digest ✅)
 8. ~~**Блок 9**~~ ✅ — SQLite локальный индекс
 9. **Блок 10** — wikilinks (MCP ответы ✅, Stop hook ✅, промпты и граф — остались)
-10. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
+10. **Блок 11** — async notifications + rule loading
+11. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
+
+---
+
+## Блок 11 — Async notifications + rule loading
+
+**Цель:** async хуки (digest) могут уведомлять агента о результатах и загружать релевантные правила.
+
+**Проблема:** сейчас async хуки (Stop digest, early digest, final digest) записывают session file, но агент не знает о результатах. `search_tags` из LLM-ответа не используется — раньше `memory_session` загружал правила по topic-тегам, но теперь агент не вызывает `memory_session` при LLM on.
+
+### Задачи
+
+- [ ] Механизм async notification: async хук пишет результат в state DB → следующий синхронный хук (UserPromptSubmit) проверяет и доставляет агенту
+- [ ] Lazy rule loading через `search_tags`: после digest найти релевантные правила, доставить агенту через notification
+- [ ] Решить что делать с `search_tags` в схеме — убрать для экономии токенов или оставить для rule loading
+- [ ] Compact spec sync: `lib/digest.py` COMPACT_SPEC и `skills/save/SKILL.md` описывают одно и то же — при обновлении менять оба
 
 ---
 
