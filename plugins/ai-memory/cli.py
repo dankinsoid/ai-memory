@@ -1116,7 +1116,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # search
     p_search = sub.add_parser("search", help="Search facts and sessions")
-    p_search.add_argument("query", nargs="?", help="Free-text query (semantic if OPENAI_API_KEY set, else substring match for sessions)")
+    p_search.add_argument("query", nargs="?", help="Free-text query (semantic if AI_MEMORY_EMBEDDING enabled, else substring match for sessions)")
     p_search.add_argument("--tags", help="Comma-separated tags (AND filter)")
     p_search.add_argument("--any-tags", dest="any_tags", help="Comma-separated tags (OR filter)")
     p_search.add_argument("--project", help="Filter by project name")

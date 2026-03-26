@@ -27,7 +27,19 @@ EMBEDDING_DIM: int = _DIM_MAP.get(MODEL, 1536)
 
 
 def is_enabled() -> bool:
-    """True when OPENAI_API_KEY is set."""
+    """True when embedding is explicitly opted-in AND OPENAI_API_KEY is set.
+
+    Requires AI_MEMORY_EMBEDDING=1 (or "true"/"yes") so that a globally
+    configured OPENAI_API_KEY doesn't silently spend tokens.
+
+    Returns:
+        bool: True only when both the feature flag and the API key are present.
+    """
+    flag = os.environ.get("AI_MEMORY_EMBEDDING", "").lower()
+    # why: default off — users with a global OPENAI_API_KEY shouldn't
+    # silently spend tokens on embeddings they didn't ask for
+    if flag not in ("1", "true", "yes"):
+        return False
     return bool(os.environ.get("OPENAI_API_KEY"))
 
 

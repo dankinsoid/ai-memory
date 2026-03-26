@@ -34,7 +34,14 @@ claude --plugin-dir ./plugins/ai-memory
 
 ### Optional: Semantic search
 
-Set `OPENAI_API_KEY` to enable vector-based semantic search and smart rules prefetching via gpt-4o-mini. Without it, the plugin works fully via tag-based filtering.
+Embedding is opt-in to avoid silently spending tokens when `OPENAI_API_KEY` is set globally:
+
+```bash
+export AI_MEMORY_EMBEDDING=true   # enable vector embeddings (default: off)
+export OPENAI_API_KEY="sk-..."    # required when embedding is enabled
+```
+
+Without these, the plugin works fully via tag-based filtering.
 
 By default, embeddings are stored in the local SQLite cache. To use an external [Qdrant](https://qdrant.tech) instance instead:
 

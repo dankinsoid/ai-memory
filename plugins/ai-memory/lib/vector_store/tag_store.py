@@ -23,7 +23,7 @@ class TagVectorStore:
     access so the store can be instantiated at module level before env vars
     are read.
 
-    Enabled = embedding.is_enabled() (OPENAI_API_KEY is set).
+    Enabled = embedding.is_enabled() (AI_MEMORY_EMBEDDING + OPENAI_API_KEY).
     When disabled, upsert is a no-op and find_similar returns {q: None}.
 
     ID convention:

@@ -33,7 +33,7 @@ SERVER_INFO = {"name": "ai-memory", "version": "1.0.0"}
 def _build_tools() -> list[dict]:
     """Build MCP tool list, adapting memory_search schema to embedding availability.
 
-    When OPENAI_API_KEY is not set, the `query` parameter is omitted from
+    When embedding is disabled (AI_MEMORY_EMBEDDING unset or no OPENAI_API_KEY), the `query` parameter is omitted from
     memory_search so the agent naturally relies on tag-based filtering instead
     of attempting semantic search that would return nothing useful.
     """

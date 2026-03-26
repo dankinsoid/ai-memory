@@ -53,8 +53,8 @@ class ContentVectorStore:
     fetches the existing payload and compares hashes — a match means the
     content hasn't changed and the upsert is skipped.
 
-    When embedding is disabled (no OPENAI_API_KEY), upsert is a no-op
-    and search returns an empty list.
+    When embedding is disabled (AI_MEMORY_EMBEDDING not set or no
+    OPENAI_API_KEY), upsert is a no-op and search returns an empty list.
 
     Args:
         collection: VectorStore collection name (e.g. "content")

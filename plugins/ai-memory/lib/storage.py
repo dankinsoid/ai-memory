@@ -205,7 +205,7 @@ def search_facts(
       - **query** (semantic): vector cosine search across the "content"
         collection, which holds both facts and sessions.  Results are
         scored; tag/date filters are applied as post-filters.  Requires
-        OPENAI_API_KEY; returns empty list when vectors are disabled.
+        AI_MEMORY_EMBEDDING + OPENAI_API_KEY; returns empty list when vectors are disabled.
       - **no query** (structured): full file-scan under base_dir with
         tag intersection/union, date range, and sort.
 
@@ -1248,7 +1248,7 @@ def resolve_tags(query_tags: list[str]) -> list[str]:
 
     Resolution strategy (priority order):
       1. Exact match — always accepted.
-      2. Vector similarity (cosine) — used when OPENAI_API_KEY is set;
+      2. Vector similarity (cosine) — used when embedding is enabled;
          only matches with score ≥ 0.88 are accepted.
       3. No match — query tag is omitted from results.
 
