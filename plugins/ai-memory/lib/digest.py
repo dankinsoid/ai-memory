@@ -141,11 +141,24 @@ discard it.
 Return an EMPTY list when the user said nothing worth remembering. \
 Most conversations produce 0-2 user facts — that is normal.
 
-Each fact: 1-2 sentences, only what the user actually said. Types:
-  - Observations the user made about their own experience
-  - Decisions or preferences the user stated
-  - Corrections the user made
-  - Requests or constraints the user expressed
+A fact is a DURABLE statement that will be useful in future sessions. \
+Skip anything ephemeral:
+  - Questions ("did you get X?", "why is Y?") — asking is not stating
+  - Situational observations ("it's slow", "it hangs") — transient symptoms
+  - Task instructions to the assistant ("try X", "run Y") — one-time commands
+
+Extract only what reveals the user's lasting intent, decisions, or knowledge:
+  - Decisions or preferences ("let's go with X", "chose X over Y")
+  - Corrections ("no, not that", "actually", "wrong")
+  - Requirements or constraints ("must", "need", "can't use X")
+  - Confirmations of non-obvious approaches ("yes exactly", "that's right")
+
+Example — given this exchange:
+  User: it keeps crashing on startup
+  Assistant: The crash is caused by a null pointer in init(). Fixed it.
+  User: great, also make sure we always validate config before init
+CORRECT facts: ["User requires config validation before init"]
+WRONG facts: ["Crash caused by null pointer in init"] — assistant said this
 
 Importance scale (0-100):
   - 30-50: context, background, minor preferences
