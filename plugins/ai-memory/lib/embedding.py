@@ -2,8 +2,9 @@
 from __future__ import annotations
 """OpenAI embedding backend.
 
-Provides batch text embedding via OpenAI embedding models (default: text-embedding-3-small).
-Model is selected via OPENAI_EMBEDDING_MODEL env var; EMBEDDING_DIM is derived automatically.
+Provides batch text embedding via OpenAI embedding models.
+Model and feature flag are configured via ``lib.config.embedding_cfg``.
+See ``lib.config`` for env vars (AI_MEMORY_EMBEDDING, AI_MEMORY_EMBEDDING_MODEL).
 No external dependencies — uses stdlib urllib.
 
 Public API:
@@ -12,35 +13,26 @@ Public API:
 """
 
 import json
-import os
 import urllib.request
+
+from .config import embedding_cfg
 
 _URL = "https://api.openai.com/v1/embeddings"
 
-# Model can be overridden via env var; dimensions are derived automatically.
-# Absent _model in stored payloads is treated as "text-embedding-3-small" for
-# backwards compatibility — existing vectors are not invalidated on deploy.
-MODEL: str = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
-_MODEL = MODEL  # kept for any external references
-_DIM_MAP = {"text-embedding-3-large": 3072}
-EMBEDDING_DIM: int = _DIM_MAP.get(MODEL, 1536)
+# Re-export for callers that read these directly (vector_store, storage).
+MODEL: str = embedding_cfg.model
+EMBEDDING_DIM: int = embedding_cfg.dim
 
 
 def is_enabled() -> bool:
     """True when embedding is explicitly opted-in AND OPENAI_API_KEY is set.
 
-    Requires AI_MEMORY_EMBEDDING=1 (or "true"/"yes") so that a globally
-    configured OPENAI_API_KEY doesn't silently spend tokens.
+    Reads live from ``embedding_cfg`` (refreshed by ``config.reload()``).
 
     Returns:
         bool: True only when both the feature flag and the API key are present.
     """
-    flag = os.environ.get("AI_MEMORY_EMBEDDING", "").lower()
-    # why: default off — users with a global OPENAI_API_KEY shouldn't
-    # silently spend tokens on embeddings they didn't ask for
-    if flag not in ("1", "true", "yes"):
-        return False
-    return bool(os.environ.get("OPENAI_API_KEY"))
+    return embedding_cfg.enabled
 
 
 def embed_batch(texts: list[str]) -> list[list[float] | None]:
@@ -55,16 +47,16 @@ def embed_batch(texts: list[str]) -> list[list[float] | None]:
         (missing key, network error, etc.) — callers should treat None
         as "embedding unavailable for this item" and skip gracefully.
     """
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
+    cfg = embedding_cfg
+    if not cfg.api_key:
         return [None] * len(texts)
     try:
-        body = json.dumps({"input": texts, "model": _MODEL}).encode()
+        body = json.dumps({"input": texts, "model": cfg.model}).encode()
         req = urllib.request.Request(
             _URL,
             data=body,
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": f"Bearer {cfg.api_key}",
                 "Content-Type": "application/json",
             },
         )

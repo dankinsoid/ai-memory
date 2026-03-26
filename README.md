@@ -34,16 +34,27 @@ claude --plugin-dir ./plugins/ai-memory
 
 ### Optional: Semantic search
 
-Embedding is opt-in to avoid silently spending tokens when `OPENAI_API_KEY` is set globally. Add to your Claude Code `settings.json`:
+OpenAI features are opt-in to avoid silently spending tokens when `OPENAI_API_KEY` is set globally. Add to your Claude Code `settings.json`:
 
 ```json
 {
   "env": {
+    "OPENAI_API_KEY": "sk-...",
     "AI_MEMORY_EMBEDDING": "true",
-    "OPENAI_API_KEY": "sk-..."
+    "AI_MEMORY_EMBEDDING_MODEL": "text-embedding-3-small",
+    "AI_MEMORY_LLM": "true",
+    "AI_MEMORY_LLM_MODEL": "gpt-4o-mini"
   }
 }
 ```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AI_MEMORY_EMBEDDING` | `false` | Enable vector embeddings |
+| `AI_MEMORY_EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model |
+| `AI_MEMORY_LLM` | `false` | Enable LLM calls (future) |
+| `AI_MEMORY_LLM_MODEL` | `gpt-4o-mini` | OpenAI chat model |
+| `OPENAI_API_KEY` | — | Required when any feature above is enabled |
 
 Without these, the plugin works fully via tag-based filtering.
 
