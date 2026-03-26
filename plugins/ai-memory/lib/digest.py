@@ -130,8 +130,13 @@ Rules:
   - User requirements — preserve exact wording, don't paraphrase"""
 
 FACTS_SPEC = """\
-Extract atomic facts from USER messages only (assistant messages are context, \
-not a source of facts).
+Extract atomic facts from USER messages only. Assistant messages are context \
+for understanding — never a source of facts. If the user asked a question and \
+the assistant answered, that answer is NOT a user fact.
+
+Return an EMPTY list when the user said nothing worth remembering (greetings, \
+short commands, questions without assertions). Most turns produce zero facts — \
+that is expected and correct.
 
 Each fact: 1-2 sentences preserving the exact meaning. Types:
   - Requirements ("must", "should", "need")
@@ -142,9 +147,14 @@ Each fact: 1-2 sentences preserving the exact meaning. Types:
   - Constraints ("can't use X", "budget is Y", "deadline is Z")
 
 Importance scale (0-100):
-  - 20-40: context, background, minor preferences
-  - 50-70: decisions, confirmed approaches, design choices
-  - 80-100: critical requirements, hard constraints, corrections of mistakes
+  - 30-50: context, background, minor preferences
+  - 60-80: decisions, confirmed approaches, design choices
+  - 85-100: critical requirements, hard constraints, corrections of mistakes
+
+Do NOT extract:
+  - General knowledge or well-known facts (even if the user mentioned them)
+  - Anything the assistant said that the user did not explicitly confirm
+  - Rephrased assistant output attributed to the user
 
 Do NOT duplicate facts already listed in "Previous facts"."""
 
