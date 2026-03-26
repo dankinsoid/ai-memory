@@ -293,7 +293,7 @@ Next: implement storage layer
 
 ### Задачи
 
-- [ ] Механизм async notification: async хук пишет результат в state DB → доставка агенту при первой возможности (PreToolUse, UserPromptSubmit, любой другой синхронный хук)
+- [ ] Очередь нотификаций (FIFO): async хуки пишут в SQLite очередь → любой синхронный хук (PreToolUse, UserPromptSubmit и т.д.) вычитывает и доставляет агенту через stdout
 - [ ] Lazy rule loading через `search_tags`: после digest найти релевантные правила, доставить агенту через notification
 - [ ] Решить что делать с `search_tags` в схеме — убрать для экономии токенов или оставить для rule loading
 - [ ] Compact spec sync: `lib/digest.py` COMPACT_SPEC и `skills/save/SKILL.md` описывают одно и то же — при обновлении менять оба
