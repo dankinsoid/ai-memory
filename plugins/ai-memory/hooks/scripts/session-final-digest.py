@@ -92,7 +92,7 @@ def main() -> None:
         state_raw = get_state(f"digest-state-{session_id}")
         state = deserialize_state(state_raw) if state_raw else DigestState(
             last_byte_offset=0, last_digest=None, last_msg_count=0,
-            agent_compact=None, agent_compact_msg_count=0,
+            agent_compact=None, agent_compact_msg_count=0, facts=[],
         )
 
         # Check for agent compact
@@ -109,6 +109,7 @@ def main() -> None:
                 last_msg_count=state.last_msg_count,
                 agent_compact=agent_compact_raw,
                 agent_compact_msg_count=current_msgs,
+                facts=state.facts,
             )
 
         result = compute_digest(entries, state, project, force=True)
@@ -119,6 +120,9 @@ def main() -> None:
             if project:
                 auto_tags.append(f"project/{project}")
             auto_tags.extend(t for t in digest.tags if t not in auto_tags)
+            facts_for_storage = [
+                (f.text, f.importance) for f in new_state.facts
+            ] if new_state.facts else None
             storage.upsert_session(
                 session_id=session_id,
                 project=project,
@@ -126,6 +130,7 @@ def main() -> None:
                 summary=digest.summary,
                 tags=auto_tags,
                 compact=digest.compact,
+                facts=facts_for_storage,
             )
             set_state(f"digest-state-{session_id}", serialize_state(new_state))
     except Exception:

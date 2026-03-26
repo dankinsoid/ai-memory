@@ -47,6 +47,7 @@ class SessionContent:
     branch: str | None = None
     commit_start: str | None = None
     commit_end: str | None = None
+    facts: list[tuple[str, int]] | None = None  # (text, importance) pairs
 
 
 def load_prev_session(project: str, current_session_id: str) -> SessionContent | None:
@@ -87,6 +88,7 @@ def load_session_by_id(session_id: str, project: str | None = None) -> SessionCo
     content = storage._read_content(summary_path) or ""
     fm = parse_front_matter(content)
 
+    facts = storage._extract_facts_text(content) or None
     return SessionContent(
         title=fm.get("title", summary_path.stem),
         compact=storage._extract_compact_text(content),
@@ -98,6 +100,7 @@ def load_session_by_id(session_id: str, project: str | None = None) -> SessionCo
         branch=fm.get("branch"),
         commit_start=fm.get("commit_start"),
         commit_end=fm.get("commit_end"),
+        facts=facts,
     )
 
 
@@ -118,6 +121,7 @@ def load_session_by_ref(ref: str) -> SessionContent | None:
     content = storage._read_content(found) or ""
     fm = parse_front_matter(content)
 
+    facts = storage._extract_facts_text(content) or None
     return SessionContent(
         title=fm.get("title", found.stem),
         compact=storage._extract_compact_text(content),
@@ -129,6 +133,7 @@ def load_session_by_ref(ref: str) -> SessionContent | None:
         branch=fm.get("branch"),
         commit_start=fm.get("commit_start"),
         commit_end=fm.get("commit_end"),
+        facts=facts,
     )
 
 
@@ -174,6 +179,29 @@ def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
         parts.append(f"## Compact\n\n{sc.compact}")
     elif sc.summary:
         parts.append(f"## Summary\n\n{sc.summary}")
+
+    # Facts section — top by importance, chronological order preserved.
+    if sc.facts:
+        from lib.digest import FACTS_LOAD_MAX, FACTS_LOAD_BUDGET
+        selected = sc.facts
+        if len(selected) > FACTS_LOAD_MAX:
+            # Keep top N by importance, but preserve original order
+            by_imp = sorted(
+                enumerate(selected), key=lambda x: x[1][1], reverse=True,
+            )[:FACTS_LOAD_MAX]
+            by_imp.sort(key=lambda x: x[0])  # restore chronological order
+            selected = [f for _, f in by_imp]
+        # Apply character budget
+        fact_lines: list[str] = []
+        budget = FACTS_LOAD_BUDGET
+        for text, imp in selected:
+            line = f"- [{imp}] {text}"
+            if budget - len(line) < 0 and fact_lines:
+                break
+            fact_lines.append(line)
+            budget -= len(line) + 1  # +1 for newline
+        if fact_lines:
+            parts.append("## Facts\n\n" + "\n".join(fact_lines))
 
     truncated = False
     if sc.transcript_tail:

@@ -281,7 +281,8 @@ Next: implement storage layer
 8. ~~**Блок 9**~~ ✅ — SQLite локальный индекс
 9. **Блок 10** — wikilinks (MCP ответы ✅, Stop hook ✅, промпты и граф — остались)
 10. **Блок 11** — async notifications + rule loading
-11. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
+11. ~~**Блок 12**~~ ✅ — fact extraction from user messages in LLM digest
+12. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
 
 ---
 
@@ -297,6 +298,33 @@ Next: implement storage layer
 - [ ] Lazy rule loading через `search_tags`: после digest найти релевантные правила, доставить агенту через notification
 - [ ] Решить что делать с `search_tags` в схеме — убрать для экономии токенов или оставить для rule loading
 - [ ] Compact spec sync: `lib/digest.py` COMPACT_SPEC и `skills/save/SKILL.md` описывают одно и то же — при обновлении менять оба
+
+---
+
+## Блок 12 — Fact extraction from user messages ✅
+
+**Цель:** LLM-digest извлекает атомарные факты из пользовательских сообщений с оценкой важности (0-100). Сохраняются в `## Facts` секции session файла, доступны через `/load`.
+
+### Решения
+
+- Факты из user messages only (assistant — контекст)
+- Importance 0-100 (непрерывная шкала)
+- Compact без изменений
+- Дедупликация: последние ~15 фактов передаются в LLM промпт
+- `/load`: все факты если мало, top by importance если много, хронологический порядок
+
+### Задачи
+
+- [x] `Fact` dataclass + `SessionDigestWithFacts`/`SessionDigestLightWithFacts` (parallel lists для structured output)
+- [x] `DigestState.facts` — аккумуляция фактов между digest вызовами
+- [x] `FACTS_SPEC` — инструкции для LLM по извлечению фактов
+- [x] `build_digest_prompt()` — previous facts context для дедупликации
+- [x] `compute_digest()` — zip parallel lists → `Fact`, merge с state
+- [x] `serialize_state()`/`deserialize_state()` — facts в JSON
+- [x] `storage.upsert_session()` — `facts` параметр, `## Facts` секция, preserve existing facts
+- [x] `session_loader.py` — загрузка фактов, отображение в `format_for_load()`
+- [x] `session-sync.py` — передача фактов из DigestState в upsert_session
+- [x] `session-final-digest.py` — аналогично
 
 ---
 
@@ -316,4 +344,3 @@ Next: implement storage layer
 - [x] SQLite индекс: → Блок 9, всегда включён (stdlib, нулевой overhead)
 - [x] Индекс сессий (session_id → filename) — решено через `{date} {title}.{sid8}.md` формат + glob O(1)
 - [x] Индекс тегов (tag → [file paths]) — → Блок 9, таблица file_tags с индексом
-- [ ] Clojure-бэкенд: архивировать или удалить из репо?

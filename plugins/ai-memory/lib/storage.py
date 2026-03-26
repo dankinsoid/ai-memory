@@ -24,7 +24,7 @@ Public API:
   get_base_dir() -> Path  (sessions live here too)
   search_facts(tags, any_tags, exclude_tags, query, since, until, sort_by, limit, offset) -> list[dict]
   search_sessions(project, text, since, until, sort_by, limit, offset) -> list[dict]
-  upsert_session(session_id, project, title, summary, tags, compact) -> str
+  upsert_session(session_id, project, title, summary, tags, compact, ..., facts) -> str
   remember(content_text, tags, title, language) -> str
   reindex() -> dict
   find_file_by_stem(stem) -> Path | None
@@ -653,6 +653,34 @@ def _find_session_file(sessions_parent: Path, session_id: str) -> Path | None:
     return None
 
 
+def _extract_facts_text(content: str) -> list[tuple[str, int]]:
+    """Parse ## Facts section from session file content.
+
+    Each fact line: ``- [importance] text``
+
+    Args:
+        content: full session file content
+
+    Returns:
+        List of (text, importance) tuples, in file order.
+    """
+    facts: list[tuple[str, int]] = []
+    lines = content.splitlines()
+    in_facts = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "## Facts":
+            in_facts = True
+            continue
+        if in_facts:
+            if stripped.startswith("## ") or stripped == "---":
+                break
+            m = re.match(r"^- \[(\d+)\] (.+)$", stripped)
+            if m:
+                facts.append((m.group(2), int(m.group(1))))
+    return facts
+
+
 def upsert_session(
     session_id: str,
     project: str | None,
@@ -664,6 +692,7 @@ def upsert_session(
     commit_start: str | None = None,
     commit_end: str | None = None,
     continues: str | None = None,
+    facts: list[tuple[str, int]] | None = None,
 ) -> str:
     """Create or update a session summary .md file.
 
@@ -686,6 +715,7 @@ def upsert_session(
         commit_start: short SHA of HEAD at session start
         commit_end: short SHA of HEAD at save time
         continues: file stem of the parent session this one continues
+        facts: list of (text, importance) tuples for ## Facts section
 
     Returns:
         Path to the session summary file, relative to AI_MEMORY_DIR base.
@@ -741,10 +771,20 @@ def upsert_session(
     if compact:
         summary_body += ["## Compact", "", compact, ""]
 
-    # Preserve existing transcript section if present (appended by session-sync hook).
-    # The transcript block starts with "---\n\n## Transcript" divider.
+    # Facts section: use provided facts, or preserve existing ones from file.
+    effective_facts = facts
+    existing_content = ""
     if summary_path.exists():
         existing_content = summary_path.read_text(encoding="utf-8")
+        if effective_facts is None:
+            effective_facts = _extract_facts_text(existing_content) or None
+    if effective_facts:
+        facts_lines = [f"- [{imp}] {text}" for text, imp in effective_facts]
+        summary_body += ["## Facts", ""] + facts_lines + [""]
+
+    # Preserve existing transcript section if present (appended by session-sync hook).
+    # The transcript block starts with "---\n\n## Transcript" divider.
+    if existing_content:
         transcript_marker = "\n## Transcript\n"
         idx = existing_content.find(transcript_marker)
         if idx != -1:

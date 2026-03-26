@@ -667,7 +667,7 @@ def main() -> None:
             state_raw = get_state(f"digest-state-{session_id}")
             state = deserialize_state(state_raw) if state_raw else DigestState(
                 last_byte_offset=0, last_digest=None, last_msg_count=0,
-                agent_compact=None, agent_compact_msg_count=0,
+                agent_compact=None, agent_compact_msg_count=0, facts=[],
             )
             # Check for agent compact (written by MCP server on /save)
             agent_compact_raw = get_state(f"agent-compact-{session_id}")
@@ -684,6 +684,7 @@ def main() -> None:
                     last_msg_count=state.last_msg_count,
                     agent_compact=agent_compact_raw,
                     agent_compact_msg_count=current_msgs,
+                    facts=state.facts,
                 )
 
             digest_result = compute_digest(entries, state, project)
@@ -701,11 +702,15 @@ def main() -> None:
 
     if digest_result:
         # Auto-digest succeeded — upsert with LLM-generated metadata
-        digest, _ = digest_result
+        digest, new_state = digest_result
         auto_tags = ["session"]
         if project:
             auto_tags.append(f"project/{project}")
         auto_tags.extend(t for t in digest.tags if t not in auto_tags)
+        # Convert accumulated facts from DigestState for storage
+        facts_for_storage = [
+            (f.text, f.importance) for f in new_state.facts
+        ] if new_state.facts else None
         storage.upsert_session(
             session_id=session_id,
             project=project,
@@ -716,6 +721,7 @@ def main() -> None:
             branch=git_ctx.get("branch"),
             commit_start=git_ctx.get("commit_start"),
             commit_end=commit_end,
+            facts=facts_for_storage,
         )
         existing = storage._find_session_file(sessions_parent, session_id)
     elif existing is None:
