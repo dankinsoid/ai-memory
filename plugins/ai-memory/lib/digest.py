@@ -96,6 +96,7 @@ DIGEST_OVERLAP = 500           # chars overlap with previous window
 EARLY_PROMPT_THRESHOLD = 200   # chars — minimum first message length for early digest
 AGENT_COMPACT_FRESH_MSGS = 10  # messages after agent /save before LLM may overwrite compact
 COMPACT_MIN_MSGS = 6           # minimum messages before generating compact (short sessions don't need it)
+USER_MSG_MIN_CHARS = 20        # skip user messages shorter than this in LLM transcript (slash commands, greetings)
 
 # Compact writing spec — mirrored in skills/save/SKILL.md for agent use.
 # If updating, keep both in sync.
@@ -153,11 +154,12 @@ Do NOT duplicate facts already listed in "Previous facts"."""
 # ---------------------------------------------------------------------------
 
 # System-injected XML tags to strip from user messages.
+_SYSTEM_TAGS = (
+    "ide_opened_file|ide_selection|system-reminder|available-deferred-tools"
+    "|system_instruction|local-command-stdout|local-command-caveat|fast_mode_info"
+)
 _SYSTEM_TAG_RE = re.compile(
-    r"<(?:ide_opened_file|ide_selection|system-reminder|available-deferred-tools"
-    r"|system_instruction|local-command-stdout|fast_mode_info)"
-    r"[^>]*>.*?</(?:ide_opened_file|ide_selection|system-reminder|available-deferred-tools"
-    r"|system_instruction|local-command-stdout|fast_mode_info)>",
+    rf"<(?:{_SYSTEM_TAGS})[^>]*>.*?</(?:{_SYSTEM_TAGS})>",
     re.DOTALL,
 )
 
@@ -232,7 +234,12 @@ def extract_llm_transcript(entries: list[dict]) -> str:
                         chunks.append(f"[Result: {rc}]")
 
         if chunks:
-            parts.append(f"{label}:\n" + "\n".join(chunks))
+            combined = "\n".join(chunks)
+            # Skip user messages that are too short after cleanup — slash
+            # commands like "/plugin" or greetings produce noise titles.
+            if role == "user" and len(combined.strip()) < USER_MSG_MIN_CHARS:
+                continue
+            parts.append(f"{label}:\n" + combined)
 
     return "\n\n".join(parts)
 

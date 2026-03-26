@@ -62,6 +62,11 @@ def main() -> None:
     except Exception:
         pass
 
+    # Strip system tags before length check — prompts with only
+    # slash-command XML (e.g. /plugin) shouldn't trigger early digest.
+    from lib.digest import _strip_system_tags
+    prompt = _strip_system_tags(prompt)
+
     if len(prompt) < EARLY_PROMPT_THRESHOLD:
         sys.exit(0)
 

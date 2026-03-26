@@ -183,22 +183,7 @@ def parse_jsonl(path: Path) -> list[dict]:
     return entries
 
 
-def _strip_system_tags(text: str) -> str:
-    """Remove system-injected XML tags (ide_opened_file, system-reminder, etc.).
-
-    These tags are VSCode/Claude Code noise that shouldn't appear in session
-    transcripts.
-
-    Args:
-        text: raw text possibly containing system XML tags
-
-    Returns:
-        Text with system tags removed and excess blank lines collapsed.
-    """
-    cleaned = _SYSTEM_TAG_RE.sub("", text)
-    # Collapse runs of 3+ newlines left after removal
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    return cleaned
+from lib.digest import _strip_system_tags  # noqa: E402 — single source of truth for tag regex
 
 
 def _extract_text(content) -> str:
@@ -253,13 +238,6 @@ def _resolve_agent(agent: str | None) -> tuple[str, str]:
         return _DEFAULT_AGENT
     return _AGENT_REGISTRY.get(agent.lower(), _DEFAULT_AGENT)
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
-# System-injected XML tags that are noise in session transcripts.
-# Uses re.DOTALL so the pattern spans multiple lines within a single tag.
-_SYSTEM_TAG_RE = re.compile(
-    r"<(?:ide_opened_file|ide_selection|system-reminder|available-deferred-tools|system_instruction|local-command-stdout)"
-    r"[^>]*>.*?</(?:ide_opened_file|ide_selection|system-reminder|available-deferred-tools|system_instruction|local-command-stdout)>",
-    re.DOTALL,
-)
 # Matches markdown links [text](target) where target is NOT an http(s) URL.
 # These are typically code file references that pollute Obsidian's graph
 # by creating phantom nodes. Convert to `text` to neutralize.
@@ -477,21 +455,31 @@ def format_messages_md(
     return "\n".join(lines).strip()
 
 
+_TITLE_MIN_CHARS = 20  # skip short/service user messages when deriving title
+
+
 def derive_title(messages: list[dict]) -> str:
-    """Derive session title from first user message (first line, max 50 chars).
+    """Derive session title from first substantive user message.
+
+    Skips user messages shorter than ``_TITLE_MIN_CHARS`` after cleanup —
+    slash commands (e.g. "/plugin") and greetings shouldn't become the title.
 
     Args:
-        messages: list of dicts from extract_messages
+        messages: list of dicts from extract_message_stream (kind=="message")
 
     Returns:
-        Title string.
+        Title string (first line, max 50 chars).
     """
     for msg in messages:
-        if msg["role"] == "user":
-            first_line = msg["text"].splitlines()[0].strip() if msg["text"] else ""
-            if len(first_line) > 50:
-                first_line = first_line[:47] + "..."
-            return first_line or "untitled session"
+        if msg["role"] != "user":
+            continue
+        text = (msg.get("text") or "").strip()
+        if len(text) < _TITLE_MIN_CHARS:
+            continue
+        first_line = text.splitlines()[0].strip()
+        if len(first_line) > 50:
+            first_line = first_line[:47] + "..."
+        return first_line or "untitled session"
     return "untitled session"
 
 
