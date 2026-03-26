@@ -667,16 +667,23 @@ def main() -> None:
             state_raw = get_state(f"digest-state-{session_id}")
             state = deserialize_state(state_raw) if state_raw else DigestState(
                 last_byte_offset=0, last_digest=None, last_msg_count=0,
-                agent_compact=None,
+                agent_compact=None, agent_compact_msg_count=0,
             )
             # Check for agent compact (written by MCP server on /save)
             agent_compact_raw = get_state(f"agent-compact-{session_id}")
-            if agent_compact_raw:
+            if agent_compact_raw and agent_compact_raw != state.agent_compact:
+                # Agent wrote new compact — record current msg count
+                current_msgs = len([
+                    e for e in entries
+                    if e.get("type") in ("user", "assistant")
+                    and not e.get("isMeta")
+                ])
                 state = DigestState(
                     last_byte_offset=state.last_byte_offset,
                     last_digest=state.last_digest,
                     last_msg_count=state.last_msg_count,
                     agent_compact=agent_compact_raw,
+                    agent_compact_msg_count=current_msgs,
                 )
 
             digest_result = compute_digest(entries, state, project)

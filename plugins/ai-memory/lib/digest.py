@@ -31,6 +31,16 @@ class SessionDigest:
 
 
 @dataclass
+class SessionDigestLight:
+    """LLM output without compact — used when agent compact is still fresh."""
+
+    title: str
+    summary: str
+    tags: list[str]
+    search_tags: list[str]
+
+
+@dataclass
 class DigestState:
     """Tracks incremental digest progress across Stop hook invocations."""
 
@@ -38,6 +48,7 @@ class DigestState:
     last_digest: SessionDigest | None
     last_msg_count: int
     agent_compact: str | None      # higher-trust compact from agent /save
+    agent_compact_msg_count: int   # msg_count when agent compact was written
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +58,7 @@ class DigestState:
 DIGEST_DELTA_THRESHOLD = 2000  # chars (~500 tokens) minimum delta to trigger LLM
 DIGEST_OVERLAP = 500           # chars overlap with previous window
 EARLY_PROMPT_THRESHOLD = 200   # chars — minimum first message length for early digest
+AGENT_COMPACT_FRESH_MSGS = 10  # messages after agent /save before LLM may overwrite compact
 
 
 # ---------------------------------------------------------------------------
@@ -172,11 +184,10 @@ def build_digest_prompt(
     agent_compact_instruction = ""
     if agent_compact:
         agent_compact_instruction = (
-            f"\n\nIMPORTANT — Agent compact notes (preserve verbatim at the TOP of your compact):\n"
+            f"\n\nPrevious compact notes (written by the agent earlier in the session):\n"
             f"---\n{agent_compact}\n---\n"
-            f"Your compact output MUST start with these notes exactly as written above, "
-            f"then add a '\\n\\n---\\n\\n' separator, then your own additional context below. "
-            f"Do NOT rephrase, summarize, or omit any of the agent's notes."
+            f"Use these as a starting point. Your compact should be a complete "
+            f"replacement that incorporates this context plus everything new."
         )
 
     project_ctx = f" for project '{project}'" if project else ""
@@ -275,31 +286,43 @@ def compute_digest(
     if not delta_text.strip():
         return None
 
-    prompt = build_digest_prompt(
-        delta_text, state.last_digest, project,
-        agent_compact=state.agent_compact,
-    )
-    provider = get_provider()
-    digest = provider.complete(prompt, SessionDigest)
+    current_msg_count = len([
+        e for e in entries
+        if e.get("type") in ("user", "assistant") and not e.get("isMeta")
+    ])
 
-    # If agent compact exists, ensure it's at the top of the LLM compact
-    if state.agent_compact and not digest.compact.startswith(state.agent_compact):
+    # Agent compact still fresh? Skip compact generation entirely —
+    # use lighter schema (no compact field) to save output tokens.
+    agent_compact_fresh = (
+        state.agent_compact is not None
+        and (current_msg_count - state.agent_compact_msg_count) < AGENT_COMPACT_FRESH_MSGS
+    )
+
+    provider = get_provider()
+
+    if agent_compact_fresh:
+        prompt = build_digest_prompt(delta_text, state.last_digest, project)
+        light = provider.complete(prompt, SessionDigestLight)
         digest = SessionDigest(
-            title=digest.title,
-            summary=digest.summary,
-            tags=digest.tags,
-            compact=state.agent_compact + "\n\n---\n\n" + digest.compact,
-            search_tags=digest.search_tags,
+            title=light.title,
+            summary=light.summary,
+            tags=light.tags,
+            compact=state.agent_compact,  # type: ignore[arg-type]
+            search_tags=light.search_tags,
         )
+    else:
+        prompt = build_digest_prompt(
+            delta_text, state.last_digest, project,
+            agent_compact=state.agent_compact,
+        )
+        digest = provider.complete(prompt, SessionDigest)
 
     new_state = DigestState(
         last_byte_offset=len(full_text),
         last_digest=digest,
-        last_msg_count=len([
-            e for e in entries
-            if e.get("type") in ("user", "assistant") and not e.get("isMeta")
-        ]),
+        last_msg_count=current_msg_count,
         agent_compact=state.agent_compact,
+        agent_compact_msg_count=state.agent_compact_msg_count,
     )
 
     return digest, new_state
@@ -360,6 +383,7 @@ def serialize_state(state: DigestState) -> str:
         "last_digest": digest_dict,
         "last_msg_count": state.last_msg_count,
         "agent_compact": state.agent_compact,
+        "agent_compact_msg_count": state.agent_compact_msg_count,
     })
 
 
@@ -388,4 +412,5 @@ def deserialize_state(raw: str) -> DigestState:
         last_digest=digest,
         last_msg_count=data.get("last_msg_count", 0),
         agent_compact=data.get("agent_compact"),
+        agent_compact_msg_count=data.get("agent_compact_msg_count", 0),
     )
