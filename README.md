@@ -43,7 +43,8 @@ OpenAI features are opt-in to avoid silently spending tokens when `OPENAI_API_KE
     "AI_MEMORY_EMBEDDING": "true",
     "AI_MEMORY_EMBEDDING_MODEL": "text-embedding-3-small",
     "AI_MEMORY_LLM": "true",
-    "AI_MEMORY_LLM_MODEL": "gpt-4o-mini"
+    "AI_MEMORY_LLM_MODEL": "gpt-4.1-nano",
+    "AI_MEMORY_LLM_PROVIDER": "openai"
   }
 }
 ```
@@ -53,10 +54,11 @@ OpenAI features are opt-in to avoid silently spending tokens when `OPENAI_API_KE
 | `AI_MEMORY_EMBEDDING` | `false` | Enable vector embeddings |
 | `AI_MEMORY_EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model |
 | `AI_MEMORY_LLM` | `false` | Enable LLM calls (future) |
-| `AI_MEMORY_LLM_MODEL` | `gpt-4o-mini` | OpenAI chat model |
-| `OPENAI_API_KEY` | — | Required when any feature above is enabled |
+| `AI_MEMORY_LLM_MODEL` | `gpt-4.1-nano` / `haiku` | Chat model (default depends on provider) |
+| `AI_MEMORY_LLM_PROVIDER` | auto | `openai` or `claude-cli`. When omitted, uses `openai` if `OPENAI_API_KEY` is set, otherwise falls back to `claude-cli` |
+| `OPENAI_API_KEY` | — | Required for embeddings and `openai` LLM provider. `claude-cli` provider uses CLI auth — no key needed |
 
-Without these, the plugin works fully via tag-based filtering.
+Without these, the plugin works fully via tag-based filtering. The `claude-cli` provider requires no API key — it uses your existing Claude Code CLI authentication.
 
 By default, embeddings are stored in the local SQLite cache. To use an external [Qdrant](https://qdrant.tech) instance instead:
 
