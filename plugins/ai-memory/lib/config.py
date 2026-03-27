@@ -17,15 +17,16 @@ Feature flags (default **off** — opt-in to avoid silent token spend):
 Model selection:
 
   AI_MEMORY_EMBEDDING_MODEL   default "text-embedding-3-small"
-  AI_MEMORY_LLM_MODEL         default "gpt-4o-mini"
+  AI_MEMORY_LLM_MODEL         default "gpt-4.1-nano" (openai) / "haiku" (claude-cli)
 
 Provider selection:
 
-  AI_MEMORY_LLM_PROVIDER      default "openai"
+  AI_MEMORY_LLM_PROVIDER      default "openai", also supports "claude-cli"
 
 API keys (read from env, typically set in settings.json):
 
-  OPENAI_API_KEY        required for both embedding and LLM features
+  OPENAI_API_KEY        required for embedding and openai LLM provider
+                        (claude-cli provider uses CLI auth — no key needed)
 """
 
 import os
@@ -75,10 +76,11 @@ class LLMConfig:
     """Configuration for LLM chat-completion features.
 
     Attributes:
-        enabled:  True when both the feature flag and API key are present.
-        model:    Chat model name (e.g. ``gpt-4o-mini``).
-        api_key:  OPENAI_API_KEY value or None.
-        provider: Backend name (``openai`` by default).
+        enabled:  True when the feature flag is on and provider requirements
+                  are met (API key for openai, CLI presence for claude).
+        model:    Chat model name (e.g. ``gpt-4.1-nano``, ``haiku``).
+        api_key:  OPENAI_API_KEY value or None (unused by claude provider).
+        provider: Backend name (``openai`` or ``claude-cli``).
     """
 
     enabled: bool
@@ -106,10 +108,20 @@ def _load_embedding() -> EmbeddingConfig:
 def _load_llm() -> LLMConfig:
     flag = _flag("AI_MEMORY_LLM")
     key = _api_key()
-    model = os.environ.get("AI_MEMORY_LLM_MODEL", "gpt-4.1-nano")
     provider = os.environ.get("AI_MEMORY_LLM_PROVIDER", "openai")
+
+    # Default model depends on provider
+    default_model = "haiku" if provider == "claude-cli" else "gpt-4.1-nano"
+    model = os.environ.get("AI_MEMORY_LLM_MODEL", default_model)
+
+    # claude-cli provider uses CLI auth — no API key needed
+    if provider == "claude-cli":
+        enabled = flag
+    else:
+        enabled = flag and key is not None
+
     return LLMConfig(
-        enabled=flag and key is not None,
+        enabled=enabled,
         model=model,
         api_key=key,
         provider=provider,

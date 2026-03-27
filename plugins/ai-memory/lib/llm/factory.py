@@ -4,8 +4,7 @@ from __future__ import annotations
 """LLM provider factory.
 
 Reads ``lib.config.llm_cfg`` and returns the appropriate provider
-instance.  Currently only ``openai`` is supported; add new backends
-by extending the ``_BUILDERS`` dict.
+instance.  Supports ``openai`` and ``claude-cli`` backends.
 
 Usage::
 
@@ -16,7 +15,6 @@ Usage::
 
 from ..config import llm_cfg
 from .base import LLMError, LLMProvider
-from .openai import OpenAIProvider
 
 
 def get_provider() -> LLMProvider:
@@ -30,20 +28,26 @@ def get_provider() -> LLMProvider:
         Configured LLMProvider instance.
 
     Raises:
-        LLMError: if LLM feature is disabled, API key is missing,
+        LLMError: if LLM feature is disabled, requirements are not met,
                   or provider name is unrecognised.
     """
     cfg = llm_cfg
     if not cfg.enabled:
         raise LLMError(
             "LLM feature is disabled. "
-            "Set AI_MEMORY_LLM=true and OPENAI_API_KEY to enable."
+            "Set AI_MEMORY_LLM=true (and OPENAI_API_KEY for openai provider)."
         )
-    if not cfg.api_key:
-        raise LLMError("OPENAI_API_KEY is not set.")
 
     provider = cfg.provider
+
     if provider == "openai":
+        if not cfg.api_key:
+            raise LLMError("OPENAI_API_KEY is not set.")
+        from .openai import OpenAIProvider
         return OpenAIProvider(model=cfg.model, api_key=cfg.api_key)
+
+    if provider == "claude-cli":
+        from .claude_cli import ClaudeCLIProvider
+        return ClaudeCLIProvider(model=cfg.model)
 
     raise LLMError(f"Unknown LLM provider: {provider!r}")
