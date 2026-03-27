@@ -21,7 +21,9 @@ Model selection:
 
 Provider selection:
 
-  AI_MEMORY_LLM_PROVIDER      default "openai", also supports "claude-cli"
+  AI_MEMORY_LLM_PROVIDER      "openai" or "claude-cli"; when omitted, uses
+                               "openai" if OPENAI_API_KEY is set, else
+                               falls back to "claude-cli"
 
 API keys (read from env, typically set in settings.json):
 
@@ -108,7 +110,15 @@ def _load_embedding() -> EmbeddingConfig:
 def _load_llm() -> LLMConfig:
     flag = _flag("AI_MEMORY_LLM")
     key = _api_key()
-    provider = os.environ.get("AI_MEMORY_LLM_PROVIDER", "openai")
+    explicit_provider = os.environ.get("AI_MEMORY_LLM_PROVIDER")
+
+    if explicit_provider:
+        provider = explicit_provider
+    elif key:
+        provider = "openai"
+    else:
+        # No provider specified and no OpenAI key — fall back to claude-cli
+        provider = "claude-cli"
 
     # Default model depends on provider
     default_model = "haiku" if provider == "claude-cli" else "gpt-4.1-nano"

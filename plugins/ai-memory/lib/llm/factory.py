@@ -35,7 +35,7 @@ def get_provider() -> LLMProvider:
     if not cfg.enabled:
         raise LLMError(
             "LLM feature is disabled. "
-            "Set AI_MEMORY_LLM=true (and OPENAI_API_KEY for openai provider)."
+            "Set AI_MEMORY_LLM=true to enable."
         )
 
     provider = cfg.provider
