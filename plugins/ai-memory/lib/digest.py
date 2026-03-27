@@ -452,13 +452,14 @@ def compute_digest(
         if e.get("type") in ("user", "assistant") and not e.get("isMeta")
     ])
 
-    # Skip compact when: agent compact is still fresh, or session is too short.
-    agent_compact_fresh = (
-        state.agent_compact is not None
-        and (current_msg_count - state.agent_compact_msg_count) < AGENT_COMPACT_FRESH_MSGS
-    )
-    session_too_short = current_msg_count < COMPACT_MIN_MSGS
-    skip_compact = agent_compact_fresh or session_too_short
+    # LLM compact disabled — cheap models produce compact shorter than summary,
+    # making it useless. Compact is now agent-only (via /save skill).
+    # To re-enable, restore the original condition:
+    #   agent_compact_fresh = (state.agent_compact is not None
+    #       and (current_msg_count - state.agent_compact_msg_count) < AGENT_COMPACT_FRESH_MSGS)
+    #   session_too_short = current_msg_count < COMPACT_MIN_MSGS
+    #   skip_compact = agent_compact_fresh or session_too_short
+    skip_compact = True
 
     provider = get_provider()
 
