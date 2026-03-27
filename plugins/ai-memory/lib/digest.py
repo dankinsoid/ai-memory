@@ -336,7 +336,7 @@ New conversation content:
 ---
 {agent_compact_instruction}
 Instructions:
-- title: 3-8 words capturing the main topic/task. Update if the session evolved.
+- title: 3-8 words capturing the main topic/task. Update if the session evolved. Return empty string "" if there is no clear topic yet (e.g. only greetings, slash commands, or system messages without an explicit user request or question).
 - summary: 1-3 sentences describing the full session arc so far (what was done, key decisions). No file/function names.
 - tags: specific topic tags for this session (e.g. "refactoring", "auth", "testing", "deployment"). Do NOT include generic tags like "session" or "project/..." — those are added automatically. 3-7 tags.{compact_line}
 - search_tags: broader tags that would help find related rules/knowledge (superset of tags, may include technology names, patterns, etc.). 5-10 tags.
@@ -369,7 +369,7 @@ User's message:
 ---
 
 Instructions:
-- title: 3-8 words capturing the likely main topic/task
+- title: 3-8 words capturing the likely main topic/task. Return empty string "" if the message has no clear topic or intent (e.g. only a greeting, slash command, or pasted code without context).
 - summary: 1-2 sentences describing the session intent. No file/function names.
 - tags: specific topic tags (e.g. "refactoring", "auth", "testing"). Do NOT include "session" or "project/..." tags. 3-5 tags.
 - search_tags: broader tags for finding related rules/knowledge. 3-7 tags.
@@ -463,6 +463,9 @@ def compute_digest(
 
     provider = get_provider()
 
+    # Fall back to previous title when LLM returns empty (no clear topic yet)
+    prev_title = (state.last_digest.title if state.last_digest else None) or "untitled session"
+
     if skip_compact:
         prompt = build_digest_prompt(
             delta_text, state.last_digest, project, include_compact=False,
@@ -470,7 +473,7 @@ def compute_digest(
         )
         light = provider.complete(prompt, SessionDigestLightWithFacts)
         digest = SessionDigest(
-            title=light.title,
+            title=light.title.strip() or prev_title,
             summary=light.summary,
             tags=normalize_tags(light.tags),
             # Keep agent compact if fresh; empty string if session too short
@@ -486,7 +489,7 @@ def compute_digest(
         )
         raw = provider.complete(prompt, SessionDigestWithFacts)
         digest = SessionDigest(
-            title=raw.title,
+            title=raw.title.strip() or prev_title,
             summary=raw.summary,
             tags=normalize_tags(raw.tags),
             compact=raw.compact,
@@ -533,7 +536,7 @@ def compute_early_digest(
     provider = get_provider()
     light = provider.complete(prompt, SessionDigestLight)
     return SessionDigest(
-        title=light.title,
+        title=light.title.strip() or "untitled session",
         summary=light.summary,
         tags=normalize_tags(light.tags),
         compact="",  # no compact for first message — too early

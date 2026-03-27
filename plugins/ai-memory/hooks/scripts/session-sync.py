@@ -455,39 +455,57 @@ def format_messages_md(
     return "\n".join(lines).strip()
 
 
-_TITLE_MIN_CHARS = 20  # skip short/service user messages when deriving title
+_TITLE_MIN_CHARS = 20  # skip user messages with less plain text than this
 
-# Matches any XML-like tag pair: <tag ...>content</tag>
-_XML_TAG_RE = re.compile(r"<[^>]+>.*?</[^>]+>", re.DOTALL)
+# Matches balanced XML tag pairs — used to measure plain-text ratio only.
+_XML_TAG_PAIR_RE = re.compile(r"<([a-zA-Z][a-zA-Z0-9_-]*)(?:\s[^>]*)?>.*?</\1>", re.DOTALL)
+# Fenced code blocks (``` ... ```)
+_FENCED_CODE_RE = re.compile(r"```[\s\S]*?```", re.DOTALL)
 
 
-def derive_title(messages: list[dict]) -> str:
+def _plain_text(text: str) -> str:
+    """Extract plain text from a message by removing XML tags and code blocks.
+
+    Used only for evaluating whether a message has enough substance for
+    a title — not for stripping content from transcripts.
+
+    Args:
+        text: raw message text
+
+    Returns:
+        Text with XML tag pairs and fenced code blocks removed.
+    """
+    result = _XML_TAG_PAIR_RE.sub("", text)
+    result = _FENCED_CODE_RE.sub("", result)
+    return result.strip()
+
+
+def derive_title(messages: list[dict]) -> str | None:
     """Derive session title from first substantive user message.
 
-    Skips user messages shorter than ``_TITLE_MIN_CHARS`` after stripping
-    XML tags — slash commands, system wrappers, and greetings shouldn't
-    become the title.
+    Skips messages that are mostly markup (XML tags, code blocks) or too
+    short — these lack clear user intent and shouldn't become the title.
+    Returns None when no qualifying message is found, signalling that the
+    session doesn't have a clear topic yet.
 
     Args:
         messages: list of dicts from extract_message_stream (kind=="message")
 
     Returns:
-        Title string (first line, max 50 chars).
+        Title string (first line, max 50 chars) or None.
     """
     for msg in messages:
         if msg["role"] != "user":
             continue
         text = (msg.get("text") or "").strip()
-        # Strip XML tags so wrapper markup (command-name, etc.) doesn't
-        # inflate apparent length or leak into the title.
-        clean = _XML_TAG_RE.sub("", text).strip()
-        if len(clean) < _TITLE_MIN_CHARS:
+        plain = _plain_text(text)
+        if len(plain) < _TITLE_MIN_CHARS:
             continue
-        first_line = clean.splitlines()[0].strip()
+        first_line = plain.splitlines()[0].strip()
         if len(first_line) > 50:
             first_line = first_line[:47] + "..."
-        return first_line or "untitled session"
-    return "untitled session"
+        return first_line or None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -721,7 +739,7 @@ def main() -> None:
         existing = storage._find_session_file(sessions_parent, session_id)
     elif existing is None:
         # Agent never called memory_session — create minimal summary
-        title = derive_title(messages)
+        title = derive_title(messages) or "untitled session"
         storage.upsert_session(
             session_id=session_id,
             project=project,
