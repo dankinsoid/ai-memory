@@ -457,12 +457,16 @@ def format_messages_md(
 
 _TITLE_MIN_CHARS = 20  # skip short/service user messages when deriving title
 
+# Matches any XML-like tag pair: <tag ...>content</tag>
+_XML_TAG_RE = re.compile(r"<[^>]+>.*?</[^>]+>", re.DOTALL)
+
 
 def derive_title(messages: list[dict]) -> str:
     """Derive session title from first substantive user message.
 
-    Skips user messages shorter than ``_TITLE_MIN_CHARS`` after cleanup —
-    slash commands (e.g. "/plugin") and greetings shouldn't become the title.
+    Skips user messages shorter than ``_TITLE_MIN_CHARS`` after stripping
+    XML tags — slash commands, system wrappers, and greetings shouldn't
+    become the title.
 
     Args:
         messages: list of dicts from extract_message_stream (kind=="message")
@@ -474,9 +478,12 @@ def derive_title(messages: list[dict]) -> str:
         if msg["role"] != "user":
             continue
         text = (msg.get("text") or "").strip()
-        if len(text) < _TITLE_MIN_CHARS:
+        # Strip XML tags so wrapper markup (command-name, etc.) doesn't
+        # inflate apparent length or leak into the title.
+        clean = _XML_TAG_RE.sub("", text).strip()
+        if len(clean) < _TITLE_MIN_CHARS:
             continue
-        first_line = text.splitlines()[0].strip()
+        first_line = clean.splitlines()[0].strip()
         if len(first_line) > 50:
             first_line = first_line[:47] + "..."
         return first_line or "untitled session"
