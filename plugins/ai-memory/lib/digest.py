@@ -76,6 +76,14 @@ class SessionDigestLightWithFacts:
 
 
 @dataclass
+class ConsolidatedFacts:
+    """LLM output for fact consolidation — compressed list of facts."""
+
+    fact_texts: list[str]
+    fact_importances: list[int]
+
+
+@dataclass
 class DigestState:
     """Tracks incremental digest progress across Stop hook invocations."""
 
@@ -85,6 +93,7 @@ class DigestState:
     agent_compact: str | None      # higher-trust compact from agent /save
     agent_compact_msg_count: int   # msg_count when agent compact was written
     facts: list[Fact]              # accumulated facts across digests
+    digests_since_consolidation: int = 0  # digest calls since last fact consolidation
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +112,8 @@ USER_MSG_MIN_CHARS = 20        # skip user messages shorter than this in LLM tra
 FACTS_RECENT_COUNT = 15    # max facts to pass to LLM prompt for dedup
 FACTS_LOAD_MAX = 50        # max facts to show in /load
 FACTS_LOAD_BUDGET = 3000   # chars budget for facts in /load
+FACTS_CONSOLIDATE_CHARS = 2000  # total chars across all facts before triggering consolidation
+FACTS_CONSOLIDATE_COOLDOWN = 5  # minimum digest calls between consolidations
 
 COMPACT_SPEC = """\
 Compact is a handoff to a future agent — write what they'd need to continue \
@@ -171,6 +182,23 @@ Do NOT extract:
   - Conclusions the assistant reached
 
 Do NOT duplicate facts already listed in "Previous facts"."""
+
+FACTS_CONSOLIDATE_SPEC = """\
+You are compressing a list of session facts. These facts capture user's \
+nuances, requirements, explanations, corrections, and preferences — things \
+that cannot be learned from code or git history.
+
+Rules:
+- Merge facts that form a decision chain into one dense fact \
+(e.g. "tried X → didn't work → switched to Y because Z")
+- Remove facts that are now redundant because a later fact supersedes them
+- Keep every distinct user intent — compress, NEVER discard
+- Preserve the user's voice — if the original was a quote, keep the quote
+- Each fact should be ≤150 characters
+- Importance: keep the highest importance from merged facts
+
+Return the consolidated list. It must be strictly shorter (fewer total \
+characters) than the input."""
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +430,44 @@ def _zip_facts(texts: list[str], importances: list[int]) -> list[Fact]:
     ]
 
 
+def _facts_total_chars(facts: list[Fact]) -> int:
+    """Total character count across all fact texts."""
+    return sum(len(f.text) for f in facts)
+
+
+def _consolidate_facts(facts: list[Fact]) -> list[Fact]:
+    """Compress accumulated facts via LLM to reduce total size.
+
+    Merges decision chains, removes superseded facts, keeps all user intent.
+    Returns a shorter list or the original if LLM fails.
+
+    Args:
+        facts: accumulated facts to consolidate
+
+    Returns:
+        Consolidated list of facts (strictly fewer total chars).
+    """
+    from .llm import get_provider
+
+    lines = [f"- [{f.importance}] {f.text}" for f in facts]
+    prompt = f"""{FACTS_CONSOLIDATE_SPEC}
+
+Current facts ({len(facts)} items, {_facts_total_chars(facts)} chars):
+{chr(10).join(lines)}
+"""
+
+    try:
+        provider = get_provider()
+        result = provider.complete(prompt, ConsolidatedFacts)
+        consolidated = _zip_facts(result.fact_texts, result.fact_importances)
+        # Only accept if actually shorter
+        if consolidated and _facts_total_chars(consolidated) < _facts_total_chars(facts):
+            return consolidated
+        return facts
+    except Exception:
+        return facts
+
+
 # ---------------------------------------------------------------------------
 # Orchestrators
 # ---------------------------------------------------------------------------
@@ -499,6 +565,16 @@ def compute_digest(
 
     merged_facts = list(state.facts) + new_facts
 
+    # Consolidate facts when they exceed the char budget and cooldown has passed
+    digests_since = state.digests_since_consolidation + 1
+    needs_consolidation = (
+        _facts_total_chars(merged_facts) > FACTS_CONSOLIDATE_CHARS
+        and digests_since >= FACTS_CONSOLIDATE_COOLDOWN
+    )
+    if needs_consolidation:
+        merged_facts = _consolidate_facts(merged_facts)
+        digests_since = 0
+
     new_state = DigestState(
         last_byte_offset=len(full_text),
         last_digest=digest,
@@ -506,6 +582,7 @@ def compute_digest(
         agent_compact=state.agent_compact,
         agent_compact_msg_count=state.agent_compact_msg_count,
         facts=merged_facts,
+        digests_since_consolidation=digests_since,
     )
 
     return digest, new_state
@@ -579,6 +656,7 @@ def serialize_state(state: DigestState) -> str:
         "agent_compact": state.agent_compact,
         "agent_compact_msg_count": state.agent_compact_msg_count,
         "facts": facts_list,
+        "digests_since_consolidation": state.digests_since_consolidation,
     })
 
 
@@ -614,4 +692,5 @@ def deserialize_state(raw: str) -> DigestState:
         agent_compact=data.get("agent_compact"),
         agent_compact_msg_count=data.get("agent_compact_msg_count", 0),
         facts=facts,
+        digests_since_consolidation=data.get("digests_since_consolidation", 0),
     )
