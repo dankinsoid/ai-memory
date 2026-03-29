@@ -525,13 +525,30 @@ def compute_digest(
     )
     transcript_too_short = len(full_text) < COMPACT_MIN_TRANSCRIPT
     skip_compact = agent_compact_fresh or transcript_too_short
+    # Facts are redundant when the full transcript fits in /load output
+    skip_facts = transcript_too_short
 
     provider = get_provider()
 
     # Fall back to previous title when LLM returns empty (no clear topic yet)
     prev_title = (state.last_digest.title if state.last_digest else None) or "untitled session"
 
-    if skip_compact:
+    if skip_compact and skip_facts:
+        # Short session: transcript fits in /load — no compact, no facts needed
+        prompt = build_digest_prompt(
+            delta_text, state.last_digest, project, include_compact=False,
+        )
+        light = provider.complete(prompt, SessionDigestLight)
+        digest = SessionDigest(
+            title=light.title.strip() or prev_title,
+            summary=light.summary,
+            tags=normalize_tags(light.tags),
+            compact=state.agent_compact or "",
+            search_tags=normalize_tags(light.search_tags),
+        )
+        new_facts = []
+    elif skip_compact:
+        # Medium session: facts needed but compact skipped (agent compact fresh)
         prompt = build_digest_prompt(
             delta_text, state.last_digest, project, include_compact=False,
             previous_facts=state.facts or None,
@@ -541,7 +558,6 @@ def compute_digest(
             title=light.title.strip() or prev_title,
             summary=light.summary,
             tags=normalize_tags(light.tags),
-            # Keep agent compact if fresh; empty string if session too short
             compact=state.agent_compact or "",
             search_tags=normalize_tags(light.search_tags),
         )
