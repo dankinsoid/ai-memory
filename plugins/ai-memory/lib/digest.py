@@ -105,6 +105,7 @@ DIGEST_OVERLAP = 500           # chars overlap with previous window
 EARLY_PROMPT_THRESHOLD = 200   # chars — minimum first message length for early digest
 AGENT_COMPACT_FRESH_MSGS = 10  # messages after agent /save before LLM may overwrite compact
 COMPACT_MIN_MSGS = 6           # minimum messages before generating compact (short sessions don't need it)
+COMPACT_MIN_TRANSCRIPT = 8000  # chars — minimum transcript size to generate compact (short sessions don't need it)
 USER_MSG_MIN_CHARS = 20        # skip user messages shorter than this in LLM transcript (slash commands, greetings)
 
 # Compact writing spec — mirrored in skills/save/SKILL.md for agent use.
@@ -518,14 +519,12 @@ def compute_digest(
         if e.get("type") in ("user", "assistant") and not e.get("isMeta")
     ])
 
-    # LLM compact disabled — cheap models produce compact shorter than summary,
-    # making it useless. Compact is now agent-only (via /save skill).
-    # To re-enable, restore the original condition:
-    #   agent_compact_fresh = (state.agent_compact is not None
-    #       and (current_msg_count - state.agent_compact_msg_count) < AGENT_COMPACT_FRESH_MSGS)
-    #   session_too_short = current_msg_count < COMPACT_MIN_MSGS
-    #   skip_compact = agent_compact_fresh or session_too_short
-    skip_compact = True
+    agent_compact_fresh = (
+        state.agent_compact is not None
+        and (current_msg_count - state.agent_compact_msg_count) < AGENT_COMPACT_FRESH_MSGS
+    )
+    transcript_too_short = len(full_text) < COMPACT_MIN_TRANSCRIPT
+    skip_compact = agent_compact_fresh or transcript_too_short
 
     provider = get_provider()
 
