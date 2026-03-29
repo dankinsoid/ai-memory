@@ -175,25 +175,31 @@ def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
         header += "\n\n" + " | ".join(git_parts)
     parts = [header]
 
+    from lib.digest import FACTS_LOAD_MAX, LOAD_TOTAL_BUDGET
+
+    budget = LOAD_TOTAL_BUDGET
+
+    # Compact / summary — takes from shared budget
     if sc.compact:
-        parts.append(f"## Compact\n\n{sc.compact}")
+        compact_text = sc.compact
+        if len(compact_text) > budget:
+            compact_text = compact_text[:budget]
+        parts.append(f"## Compact\n\n{compact_text}")
+        budget -= len(compact_text)
     elif sc.summary:
         parts.append(f"## Summary\n\n{sc.summary}")
+        budget -= len(sc.summary)
 
-    # Facts section — top by importance, chronological order preserved.
-    if sc.facts:
-        from lib.digest import FACTS_LOAD_MAX, FACTS_LOAD_BUDGET
+    # Facts — top by importance, takes from shared budget
+    if sc.facts and budget > 0:
         selected = sc.facts
         if len(selected) > FACTS_LOAD_MAX:
-            # Keep top N by importance, but preserve original order
             by_imp = sorted(
                 enumerate(selected), key=lambda x: x[1][1], reverse=True,
             )[:FACTS_LOAD_MAX]
             by_imp.sort(key=lambda x: x[0])  # restore chronological order
             selected = [f for _, f in by_imp]
-        # Apply character budget
         fact_lines: list[str] = []
-        budget = FACTS_LOAD_BUDGET
         for text, imp in selected:
             line = f"- [{imp}] {text}"
             if budget - len(line) < 0 and fact_lines:
@@ -203,10 +209,9 @@ def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
         if fact_lines:
             parts.append("## Facts\n\n" + "\n".join(fact_lines))
 
+    # Transcript tail — gets whatever budget remains
     truncated = False
-    if sc.transcript_tail:
-        # Shorter tail when compact exists (agent already has structured context)
-        budget = 1000 if sc.compact else 4000
+    if sc.transcript_tail and budget > 0:
         truncated = len(sc.transcript_tail) > budget
         tail = sc.transcript_tail[-budget:]
         # Avoid cutting mid-line

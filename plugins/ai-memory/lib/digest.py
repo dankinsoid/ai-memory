@@ -112,7 +112,7 @@ USER_MSG_MIN_CHARS = 20        # skip user messages shorter than this in LLM tra
 # If updating, keep both in sync.
 FACTS_RECENT_COUNT = 15    # max facts to pass to LLM prompt for dedup
 FACTS_LOAD_MAX = 50        # max facts to show in /load
-FACTS_LOAD_BUDGET = 3000   # chars budget for facts in /load
+LOAD_TOTAL_BUDGET = 5000   # shared chars budget for compact + facts + transcript tail in /load
 FACTS_CONSOLIDATE_CHARS = 2000  # total chars across all facts before triggering consolidation
 FACTS_CONSOLIDATE_COOLDOWN = 5  # minimum digest calls between consolidations
 
