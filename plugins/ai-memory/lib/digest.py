@@ -139,7 +139,7 @@ Rules:
   - Substance, not mechanics — "chose X over Y because Z" matters; which files were edited does not
   - Dead ends — rejected approaches and why, so the next agent doesn't retry them
   - User requirements — preserve exact wording, don't paraphrase
-  - Length: keep total compact under 2000 characters; compress aggressively if needed"""
+  - Length: keep total compact under 2000 characters; if space is tight, prioritize current state and recent decisions over early history"""
 
 FACTS_SPEC = """\
 FORBIDDEN — never extract facts from Assistant messages. The assistant's \
