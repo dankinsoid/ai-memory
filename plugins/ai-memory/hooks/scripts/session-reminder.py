@@ -32,7 +32,6 @@ SHORT_PROMPT_LEN = 20        # prompts shorter than this are likely greetings
 SUMMARY_REMIND_TURNS = 3     # remind about summary for this many early turns
 COMPACT_STALE_TOKENS = 40_000   # tokens since last compact before gentle /save reminder
 COMPACT_URGENT_TOKENS = 100_000 # total context tokens before urgent /save reminder
-EARLY_PROMPT_THRESHOLD = 200    # chars — minimum first message length for LLM early digest
 
 
 def git_project_name(cwd: str) -> str | None:
