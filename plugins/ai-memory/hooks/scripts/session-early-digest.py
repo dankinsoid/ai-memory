@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-EARLY_PROMPT_THRESHOLD = 200  # chars — minimum first message length
+EARLY_PROMPT_THRESHOLD = 10  # chars — skip only empty/near-empty prompts
 
 
 def git_project_name(cwd: str) -> str | None:

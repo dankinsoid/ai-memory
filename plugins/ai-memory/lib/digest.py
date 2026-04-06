@@ -102,7 +102,6 @@ class DigestState:
 
 DIGEST_DELTA_THRESHOLD = 2000  # chars (~500 tokens) minimum delta to trigger LLM
 DIGEST_OVERLAP = 500           # chars overlap with previous window
-EARLY_PROMPT_THRESHOLD = 200   # chars — minimum first message length for early digest
 AGENT_COMPACT_FRESH_MSGS = 10  # messages after agent /save before LLM may overwrite compact
 COMPACT_MIN_MSGS = 6           # minimum messages before generating compact (short sessions don't need it)
 COMPACT_MIN_TRANSCRIPT = 8000  # chars — minimum transcript size to generate compact (short sessions don't need it)
@@ -141,7 +140,8 @@ Body:
 Rules:
   - Substance, not mechanics — "chose X over Y because Z" matters; which files were edited does not
   - Dead ends — rejected approaches and why, so the next agent doesn't retry them
-  - User requirements — preserve exact wording, don't paraphrase"""
+  - User requirements — preserve exact wording, don't paraphrase
+  - Length: keep total compact under 2000 characters; if space is tight, prioritize current state and recent decisions over early history"""
 
 FACTS_SPEC = """\
 FORBIDDEN — never extract facts from Assistant messages. The assistant's \

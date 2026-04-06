@@ -48,6 +48,7 @@ Include code snippets, exact error messages, specific function names.>
 - **Dead ends** — rejected approaches and *why* they were rejected, so the next agent doesn't retry them. Promote to a dedicated section.
 - **User requirements — preserve exact wording** — paraphrase loses intent. Use direct quotes (translated to English if needed): "User: 'don't mock the database'" is better than "user prefers real DB in tests". Only quote requirements relevant to the current task — skip stale topics from earlier in the conversation that were superseded or abandoned.
 - **Current task in focus, history through its lens** — most detail goes to what we're working on now. Earlier parts of the conversation are kept only to the extent they inform the current task: decisions still in effect, constraints discovered, context that explains *why* we're doing what we're doing. Drop the chronological journey — keep the causal chain.
+- **Length: keep total compact under 2000 characters** — if space is tight, prioritize current state and recent decisions over early history. The `/load` budget is shared with facts and transcript tail; a bloated compact crowds them out.
 
 ## 2. Call `memory_session` mcp tool
 
