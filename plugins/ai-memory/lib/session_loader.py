@@ -175,23 +175,28 @@ def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
         header += "\n\n" + " | ".join(git_parts)
     parts = [header]
 
-    from lib.digest import FACTS_LOAD_MAX, LOAD_TOTAL_BUDGET
+    from lib.digest import FACTS_LOAD_MAX, LOAD_TOTAL_BUDGET, LOAD_FACTS_MIN, LOAD_TAIL_MIN
 
     budget = LOAD_TOTAL_BUDGET
+    has_facts = bool(sc.facts)
+    has_tail  = bool(sc.transcript_tail)
 
-    # Compact / summary — takes from shared budget
+    # Compact / summary — reserve minimums for subsequent parts before truncating
     if sc.compact:
-        compact_text = sc.compact
-        if len(compact_text) > budget:
-            compact_text = compact_text[:budget]
+        reserved     = (LOAD_FACTS_MIN if has_facts else 0) + (LOAD_TAIL_MIN if has_tail else 0)
+        max_compact  = max(budget - reserved, 0)
+        compact_text = sc.compact[:max_compact] if len(sc.compact) > max_compact else sc.compact
         parts.append(f"## Compact\n\n{compact_text}")
         budget -= len(compact_text)
     elif sc.summary:
-        parts.append(f"## Summary\n\n{sc.summary}")
-        budget -= len(sc.summary)
+        reserved     = (LOAD_FACTS_MIN if has_facts else 0) + (LOAD_TAIL_MIN if has_tail else 0)
+        max_summary  = max(budget - reserved, 0)
+        summary_text = sc.summary[:max_summary] if len(sc.summary) > max_summary else sc.summary
+        parts.append(f"## Summary\n\n{summary_text}")
+        budget -= len(summary_text)
 
-    # Facts — top by importance, takes from shared budget
-    if sc.facts and budget > 0:
+    # Facts — top by importance; reserve tail minimum before stopping
+    if has_facts and budget > 0:
         selected = sc.facts
         if len(selected) > FACTS_LOAD_MAX:
             by_imp = sorted(
@@ -199,17 +204,19 @@ def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
             )[:FACTS_LOAD_MAX]
             by_imp.sort(key=lambda x: x[0])  # restore chronological order
             selected = [f for _, f in by_imp]
+        facts_budget = max(budget - (LOAD_TAIL_MIN if has_tail else 0), 0)
         fact_lines: list[str] = []
         for text, imp in selected:
             line = f"- [{imp}] {text}"
-            if budget - len(line) < 0 and fact_lines:
+            if facts_budget - len(line) < 0 and fact_lines:
                 break
             fact_lines.append(line)
-            budget -= len(line) + 1  # +1 for newline
+            facts_budget -= len(line) + 1  # +1 for newline
+            budget -= len(line) + 1
         if fact_lines:
             parts.append("## Facts\n\n" + "\n".join(fact_lines))
 
-    # Transcript tail — gets whatever budget remains
+    # Transcript tail — gets whatever budget remains (at least LOAD_TAIL_MIN was reserved)
     truncated = False
     if sc.transcript_tail and budget > 0:
         truncated = len(sc.transcript_tail) > budget
