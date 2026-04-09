@@ -108,6 +108,19 @@ def main() -> None:
 
     llm_on = _is_llm_enabled()
 
+    # If LLM is enabled but auto-digest failed (e.g. credit balance depleted),
+    # fall back to agent-driven mode so the agent gets reminders to call
+    # memory_session manually.
+    llm_failed = False
+    if llm_on and session_id:
+        try:
+            from lib.db import get_state
+            if get_state(f"llm-failed-{session_id}"):
+                llm_on = False
+                llm_failed = True
+        except Exception:
+            pass
+
     # Load or initialize state from SQLite, with JSON file fallback
     reminder_key = f"{session_id}-reminder"
     reminder_state: dict = {}
@@ -175,9 +188,13 @@ def main() -> None:
     # the Stop hook handles auto-digest. Keep compact/save reminders.
     need_summary = False
     if not llm_on:
-        need_summary = (prompt_count == 1) or (
-            prompt_count <= SUMMARY_REMIND_TURNS and first_prompt_len < SHORT_PROMPT_LEN
-        )
+        if llm_failed:
+            # LLM was expected to handle digest but failed — ask agent once
+            need_summary = prompt_count <= SUMMARY_REMIND_TURNS
+        else:
+            need_summary = (prompt_count == 1) or (
+                prompt_count <= SUMMARY_REMIND_TURNS and first_prompt_len < SHORT_PROMPT_LEN
+            )
 
     # Set PreToolUse fallback flag on first prompt (only when LLM is off)
     if not llm_on and prompt_count == 1:

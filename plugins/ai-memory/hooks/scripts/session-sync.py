@@ -704,11 +704,23 @@ def main() -> None:
             if digest_result:
                 digest, new_state = digest_result
                 set_state(f"digest-state-{session_id}", serialize_state(new_state))
+                # Clear failure flag — LLM recovered
+                try:
+                    from lib.db import delete_state
+                    delete_state(f"llm-failed-{session_id}")
+                except Exception:
+                    pass
         except Exception as exc:
             import traceback
             print(f"[ai-memory] auto-digest failed: {exc}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
             digest_result = None
+            # Signal reminder hook to fall back to agent-driven mode
+            try:
+                from lib.db import set_state
+                set_state(f"llm-failed-{session_id}", "1")
+            except Exception:
+                pass
 
     # Find or create session summary file
     existing = storage._find_session_file(sessions_parent, session_id)
