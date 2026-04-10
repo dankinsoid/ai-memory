@@ -282,7 +282,8 @@ Next: implement storage layer
 9. **Блок 10** — wikilinks (MCP ответы ✅, Stop hook ✅, промпты и граф — остались)
 10. **Блок 11** — async notifications + rule loading
 11. ~~**Блок 12**~~ ✅ — fact extraction from user messages in LLM digest
-12. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
+12. **Блок 13** — cross-agent support (Codex CLI)
+13. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
 
 ---
 
@@ -298,6 +299,98 @@ Next: implement storage layer
 - [ ] Lazy rule loading через `search_tags`: после digest найти релевантные правила, доставить агенту через notification
 - [ ] Решить что делать с `search_tags` в схеме — убрать для экономии токенов или оставить для rule loading
 - [ ] Compact spec sync: `lib/digest.py` COMPACT_SPEC и `skills/save/SKILL.md` описывают одно и то же — при обновлении менять оба
+
+---
+
+## Блок 13 — Cross-agent support: Codex CLI
+
+**Цель:** запустить ai-memory из Codex CLI с минимальными изменениями. Codex поддерживает хуки (экспериментально, feature-flag `features.codex_hooks`), протокол почти идентичен Claude Code.
+
+### Контекст — что совместимо
+
+Codex hooks передают stdin JSON с теми же полями что Claude Code: `session_id`, `transcript_path`, `cwd`, `hook_event_name`, `model`. Exit code 2 = блок, конфиг в `~/.codex/hooks.json` + `<repo>/.codex/hooks.json` (JSON формат). Сессии в `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`.
+
+**Маппинг событий:**
+
+| Claude Code | Codex | Действие |
+|---|---|---|
+| `SessionStart` (startup/resume) | `SessionStart` ✅ | 1:1, но `source` не включает `clear`/`compact` |
+| `UserPromptSubmit` | `UserPromptSubmit` ✅ (v0.116.0+) | 1:1 |
+| `PreToolUse` | `PreToolUse` ⚠️ | **только Bash**, MCP-вызовы не перехватываются |
+| `PostToolUse` | `PostToolUse` ⚠️ | только Bash |
+| `Stop` | `Stop` ✅ | 1:1 |
+| `SessionEnd` | ❌ отсутствует | финальный digest переехать в `Stop` |
+| `PreCompact` / `source==clear` | ❌ отсутствует (нет концепции) | auto-chain сессии недоступен |
+| `SubagentStop`, `Notification` | ❌ отсутствует | не критично |
+
+### Что уже портируемо без изменений
+
+- ✅ **MCP-сервер** (`mcp/server.py`) — чистый JSON-RPC stdio, Codex тоже MCP-клиент
+- ✅ **Storage** (`lib/storage.py`) — `AI_MEMORY_DIR` env var, git-based project derivation
+- ✅ **SQLite cache** (`~/Library/Caches/ai-memory/`) — платформно-нейтрально
+- ✅ **Формат session/fact файлов** — Markdown + frontmatter
+- ✅ **Hook-скрипты логически** — читают те же поля из stdin JSON
+
+### Потери функциональности (приемлемые)
+
+- **Нет auto-chain на `/clear`** — у Codex нет clear-концепта. Mitigation: ручной `/load`.
+- **Нет гарантированного финального digest** — `SessionEnd` отсутствует. Mitigation: per-turn digest в `Stop` покрывает 95%.
+- **Нет auto-approve MCP tools через PreToolUse** — Codex не перехватывает MCP. Mitigation: whitelist в Codex конфиге.
+
+### Формат transcript (важно)
+
+**Codex rollout JSONL несовместим с Claude Code JSONL структурно** — нужен отдельный парсер. Файлы: `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`.
+
+Ключевые отличия формата:
+- Envelope: `{timestamp, type, payload}` с 4 типами: `session_meta` (1-я строка), `turn_context` (per turn, здесь `model`), `response_item` (канонический поток), `event_msg` (телеметрия + дубликат текста — игнорировать)
+- Tool calls — **отдельные top-level items** (не nested content blocks), парные по `call_id`
+- `arguments` и `output` у function_call — **JSON-encoded strings** (нужен двойной decode)
+- Два семейства tool-вызовов: `function_call` (builtin, arguments=JSON) и `custom_tool_call` (input=raw string)
+- Нет `parentUuid` → линейный поток, без DAG-обхода
+- Reasoning — отдельный `response_item` с `encrypted_content` blob
+- User/assistant текст дублируется в `response_item.message` и `event_msg.user_message` — использовать только `response_item`
+
+**Оценка:** новый `lib/codex_session_loader.py` ~100-150 строк, выдаёт тот же промежуточный формат (turns с user/assistant/tool) что ест digest pipeline. Архитектурных изменений в storage/digest/формате .md не требуется.
+
+### Фаза 1 — MVP (минимальная склейка)
+
+- [ ] Переименовать дефолт `AI_MEMORY_DIR`: `~/.claude/ai-memory/` → `~/.ai-memory/` (fallback на старый путь для миграции существующих установок)
+- [ ] Убрать `${CLAUDE_SESSION_ID}` из `skills/save/SKILL.md:54-56` — использовать session_id из контекста/stdin payload
+- [ ] Создать `plugins/ai-memory/.codex/hooks.json` — зеркало `hooks.json` с маппингом:
+  - `SessionStart` (startup|resume) → `session-start.py` (ветка `source==clear` станет мёртвой, это ок)
+  - `UserPromptSubmit` → `session-reminder.py` + `session-early-digest.py`
+  - `Stop` → `session-sync.py` + `session-final-digest.py` (компенсирует отсутствие `SessionEnd`)
+  - PreToolUse auto-approve для MCP — **не включать** (Codex не перехватывает MCP-вызовы)
+- [ ] Проверить что MCP сервер запускается из Codex через `.codex/config.toml` (или аналог `.mcp.json`)
+- [ ] Smoke-тест: MCP-операции (`memory_search`, `memory_remember`) работают из Codex без транскрипта
+
+### Фаза 1.5 — Codex transcript parser (блокирующее для session-sync)
+
+Без этого в Codex не будут работать: session-sync (Stop hook), LLM digest, auto-save транскрипта, fact extraction. То есть MCP-tools будут работать, а автоматическая память — нет.
+
+- [ ] `lib/codex_session_loader.py` — парсер rollout JSONL (~100-150 строк)
+  - Парсить `session_meta` → session_id, cwd, git, cli_version
+  - Парсить первый `turn_context` → model
+  - Для `response_item`: обрабатывать `message`/`reasoning`/`function_call`/`function_call_output`/`custom_tool_call`/`custom_tool_call_output`
+  - Индексировать tool calls по `call_id` для pairing
+  - Двойной `json.loads` для `arguments` и `output`
+  - Игнорировать `event_msg` и `turn_context` (кроме первого)
+- [ ] Определить формат-агностичный intermediate representation в `lib/transcript.py` — общий для Claude и Codex парсеров (list of turns: user_text, assistant_text, tool_calls[])
+- [ ] Рефакторинг `session-sync.py`: выделить парсинг в pluggable loader (Claude vs Codex), downstream логика (digest, transcript render, fact extraction) принимает intermediate representation
+- [ ] Определить какой парсер использовать: по расширению/пути файла (`~/.claude/projects/` vs `~/.codex/sessions/`) или по первой строке (наличие `session_meta`)
+- [ ] Smoke-тест full round-trip: работа в Codex → Stop hook → digest → .md файл в `~/.ai-memory/`
+
+### Фаза 2 — Полный паритет
+
+- [ ] Codex-адаптация `/load` skill — заменить `AskUserQuestion` (Claude-specific) на textual prompt или Codex-аналог
+- [ ] Добавить `agent` поле во frontmatter сессий (`claude-code` / `codex`) для cross-agent трекинга
+- [ ] Документировать установку в Codex в README (feature-flag, пути конфигов)
+- [ ] Проверить что session-final-digest корректно вызывается из `Stop` hook (вместо `SessionEnd`) в Codex — возможно нужен флаг "последний Stop"
+
+### Фаза 3 — Опционально
+
+- [ ] Graceful handling ветвления `source == clear|compact` в `session-start.py` — вынести в отдельную функцию, документировать что это Claude-only
+- [ ] Research: есть ли в Codex Notification-подобный механизм для доставки async уведомлений (связано с Блок 11)
 
 ---
 
