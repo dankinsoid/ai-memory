@@ -283,7 +283,8 @@ Next: implement storage layer
 10. **Блок 11** — async notifications + rule loading
 11. ~~**Блок 12**~~ ✅ — fact extraction from user messages in LLM digest
 12. **Блок 13** — cross-agent support (Codex CLI)
-13. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
+13. **Блок 14** — tool call pattern learning
+14. **Блок 7** — финальный рефактор плагина (CLAUDE.md осталось)
 
 ---
 
@@ -418,6 +419,29 @@ Codex hooks передают stdin JSON с теми же полями что Cla
 - [x] `session_loader.py` — загрузка фактов, отображение в `format_for_load()`
 - [x] `session-sync.py` — передача фактов из DigestState в upsert_session
 - [x] `session-final-digest.py` — аналогично
+
+---
+
+## Блок 14 — Tool call pattern learning
+
+**Цель:** анализировать tool calls пользователя и запоминать паттерны поведения. Например, если пользователь постоянно отклоняет определённую команду — сохранить это как правило или предпочтение.
+
+### Идея
+
+- Отслеживать `PreToolUse` / `PostToolUse` хуки — фиксировать какие tool calls пользователь approve/deny
+- Если пользователь N раз подряд отклоняет один и тот же тип tool call — сохранить как правило (через `memory_remember`) или добавить в session context
+- Возможные паттерны для отслеживания:
+  - Repeatedly denied tools (e.g. "user always denies `git push`")
+  - Часто используемые tool sequences (workflow patterns)
+  - Tool calls которые пользователь всегда редактирует перед approve
+
+### Задачи
+
+- [ ] Определить какие события доступны (exit code 2 = deny в PreToolUse)
+- [ ] Счётчик deny per tool type в SQLite state таблице
+- [ ] Порог для автоматического сохранения правила (e.g. 3+ deny подряд за сессию)
+- [ ] Формат правила: `"User prefers not to use {tool} for {pattern}"` → `memory_remember`
+- [ ] Альтернатива: уведомление агенту через notification queue (Блок 11) вместо автосохранения
 
 ---
 
