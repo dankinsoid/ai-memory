@@ -52,5 +52,5 @@ Include code snippets, exact error messages, specific function names.>
 
 ## 2. Call `memory_session` mcp tool
 
-Pass `session_id`: `${CLAUDE_SESSION_ID}`
+Pass `session_id`: use the session_id from the SessionStart hook output (shown in the Memory Context system-reminder at the top of your conversation).
 Pass `project`: from the SessionStart context

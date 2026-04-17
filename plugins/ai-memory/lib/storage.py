@@ -78,10 +78,21 @@ def _file_mtime(path: Path) -> float:
 def get_base_dir() -> Path:
     """Return the ai-memory storage root, creating it if absent.
 
-    Controlled by AI_MEMORY_DIR env var; defaults to ~/.claude/ai-memory/.
+    Controlled by AI_MEMORY_DIR env var.  Default resolution order:
+      1. ``~/.ai-memory/`` (new agent-agnostic default)
+      2. ``~/.claude/ai-memory/`` (legacy — used if it exists and new path doesn't)
+    This allows existing installations to keep working without migration.
     """
-    d = os.environ.get("AI_MEMORY_DIR", str(Path.home() / ".claude" / "ai-memory"))
-    p = Path(d).expanduser()
+    explicit = os.environ.get("AI_MEMORY_DIR")
+    if explicit:
+        p = Path(explicit).expanduser()
+    else:
+        new_default = Path.home() / ".ai-memory"
+        legacy = Path.home() / ".claude" / "ai-memory"
+        if new_default.exists() or not legacy.exists():
+            p = new_default
+        else:
+            p = legacy
     p.mkdir(parents=True, exist_ok=True)
     return p
 

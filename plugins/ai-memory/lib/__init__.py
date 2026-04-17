@@ -26,3 +26,36 @@ def get_plugin_root() -> Path:
     relative to this file's location (__file__ is always the installed path).
     """
     return Path(__file__).resolve().parent.parent
+
+
+def detect_agent(hook_data: dict) -> str:
+    """Detect which AI agent is running from hook stdin payload.
+
+    Detection order:
+      1. Explicit ``agent`` field in payload (future-proof).
+      2. ``transcript_path`` containing ``/.codex/`` → codex.
+      3. ``model`` field matching known OpenAI model prefixes → codex.
+      4. Default → claude.
+
+    Args:
+        hook_data: parsed JSON from hook stdin.
+
+    Returns:
+        Agent identifier string: ``"claude"`` or ``"codex"``.
+    """
+    # Explicit field — highest priority
+    explicit = hook_data.get("agent")
+    if explicit:
+        return str(explicit).lower()
+
+    # Transcript path heuristic
+    tp = hook_data.get("transcript_path", "")
+    if "/.codex/" in tp:
+        return "codex"
+
+    # Model heuristic — Codex uses OpenAI models (o3, o4-mini, gpt-*, etc.)
+    model = hook_data.get("model", "")
+    if model and any(model.startswith(p) for p in ("o1", "o3", "o4", "gpt-", "codex")):
+        return "codex"
+
+    return "claude"

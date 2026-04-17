@@ -20,7 +20,7 @@ _HOOK_DIR = Path(__file__).resolve().parent
 _PLUGIN_ROOT = _HOOK_DIR.parent.parent
 sys.path.insert(0, str(_PLUGIN_ROOT))
 
-from lib import storage  # noqa: E402
+from lib import storage, detect_agent  # noqa: E402
 from lib.config import llm_cfg  # noqa: E402
 from lib.tags import parse_front_matter  # noqa: E402
 
@@ -149,20 +149,32 @@ def _load_git_context(session_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def find_transcript(session_id: str) -> Path | None:
-    """Search ~/.claude/projects recursively for the session JSONL file.
+def find_transcript(session_id: str, agent: str = "claude") -> Path | None:
+    """Search for the session transcript JSONL file.
+
+    Looks in agent-specific locations:
+      - claude: ``~/.claude/projects/**/{session_id}.jsonl``
+      - codex:  ``~/.codex/sessions/**/*{session_id}*.jsonl``
 
     Args:
         session_id: session UUID
+        agent: agent identifier (``"claude"`` or ``"codex"``)
 
     Returns:
         Path to the .jsonl file, or None if not found.
     """
-    projects_dir = Path.home() / ".claude" / "projects"
-    if not projects_dir.exists():
-        return None
-    matches = list(projects_dir.glob(f"**/{session_id}.jsonl"))
-    return matches[0] if matches else None
+    search_dirs: list[tuple[Path, str]] = []
+    if agent == "codex":
+        search_dirs.append((Path.home() / ".codex" / "sessions", f"**/*{session_id}*.jsonl"))
+    search_dirs.append((Path.home() / ".claude" / "projects", f"**/{session_id}.jsonl"))
+
+    for base, pattern in search_dirs:
+        if not base.exists():
+            continue
+        matches = list(base.glob(pattern))
+        if matches:
+            return matches[0]
+    return None
 
 
 def parse_jsonl(path: Path) -> list[dict]:
@@ -637,13 +649,13 @@ def main() -> None:
     data = json.loads(sys.stdin.read())
     session_id = data.get("session_id")
     cwd = data.get("cwd", "")
-    agent = data.get("agent", "claude")
+    agent = detect_agent(data)
 
     if not session_id:
         sys.exit(0)
 
     transcript_path = data.get("transcript_path")
-    transcript = Path(transcript_path) if transcript_path else find_transcript(session_id)
+    transcript = Path(transcript_path) if transcript_path else find_transcript(session_id, agent)
     if not transcript or not transcript.exists():
         sys.exit(0)
 

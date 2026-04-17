@@ -1,0 +1,63 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $AI_MEMORY_PLUGIN_ROOT/hooks/scripts/session-start.py",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $AI_MEMORY_PLUGIN_ROOT/hooks/scripts/session-reminder.py",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $AI_MEMORY_PLUGIN_ROOT/hooks/scripts/session-early-digest.py",
+            "timeout": 30000,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $AI_MEMORY_PLUGIN_ROOT/hooks/scripts/session-sync.py",
+            "timeout": 30000,
+            "async": true
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $AI_MEMORY_PLUGIN_ROOT/hooks/scripts/session-final-digest.py",
+            "timeout": 30000,
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

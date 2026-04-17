@@ -18,6 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from lib import detect_agent  # noqa: E402
+
 
 def git_project_name(cwd: str) -> str | None:
     """Extract repo name from git remote URL."""
@@ -45,6 +47,7 @@ def main() -> None:
     data = json.loads(sys.stdin.read())
     session_id = data.get("session_id")
     cwd = data.get("cwd", "")
+    agent = detect_agent(data)
 
     if not session_id:
         sys.exit(0)
@@ -63,12 +66,19 @@ def main() -> None:
         )
         from lib.db import get_state, set_state
 
-        # Find transcript
+        # Find transcript — search agent-specific locations
         transcript_path = data.get("transcript_path")
         if not transcript_path:
-            projects_dir = Path.home() / ".claude" / "projects"
-            matches = list(projects_dir.glob(f"**/{session_id}.jsonl"))
-            transcript_path = str(matches[0]) if matches else None
+            search_dirs: list[tuple[Path, str]] = []
+            if agent == "codex":
+                search_dirs.append((Path.home() / ".codex" / "sessions", f"**/*{session_id}*.jsonl"))
+            search_dirs.append((Path.home() / ".claude" / "projects", f"**/{session_id}.jsonl"))
+            for base, pattern in search_dirs:
+                if base.exists():
+                    matches = list(base.glob(pattern))
+                    if matches:
+                        transcript_path = str(matches[0])
+                        break
 
         if not transcript_path:
             sys.exit(0)

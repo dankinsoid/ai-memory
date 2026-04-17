@@ -327,10 +327,11 @@ Codex hooks передают stdin JSON с теми же полями что Cla
 ### Что уже портируемо без изменений
 
 - ✅ **MCP-сервер** (`mcp/server.py`) — чистый JSON-RPC stdio, Codex тоже MCP-клиент
-- ✅ **Storage** (`lib/storage.py`) — `AI_MEMORY_DIR` env var, git-based project derivation
+- ✅ **Storage** (`lib/storage.py`) — `AI_MEMORY_DIR` env var (default `~/.ai-memory/`), git-based project derivation
 - ✅ **SQLite cache** (`~/Library/Caches/ai-memory/`) — платформно-нейтрально
 - ✅ **Формат session/fact файлов** — Markdown + frontmatter
 - ✅ **Hook-скрипты логически** — читают те же поля из stdin JSON
+- ✅ **Agent detection** (`lib/__init__.py:detect_agent()`) — определяет claude/codex по transcript_path, model, или явному полю
 
 ### Потери функциональности (приемлемые)
 
@@ -355,14 +356,14 @@ Codex hooks передают stdin JSON с теми же полями что Cla
 
 ### Фаза 1 — MVP (минимальная склейка)
 
-- [ ] Переименовать дефолт `AI_MEMORY_DIR`: `~/.claude/ai-memory/` → `~/.ai-memory/` (fallback на старый путь для миграции существующих установок)
-- [ ] Убрать `${CLAUDE_SESSION_ID}` из `skills/save/SKILL.md:54-56` — использовать session_id из контекста/stdin payload
-- [ ] Создать `plugins/ai-memory/.codex/hooks.json` — зеркало `hooks.json` с маппингом:
+- [x] Переименовать дефолт `AI_MEMORY_DIR`: `~/.claude/ai-memory/` → `~/.ai-memory/` (fallback на старый путь для миграции существующих установок)
+- [x] Убрать `${CLAUDE_SESSION_ID}` из `skills/save/SKILL.md:54-56` — использовать session_id из контекста/stdin payload
+- [x] Создать `plugins/ai-memory/.codex/hooks.json` — зеркало `hooks.json` с маппингом:
   - `SessionStart` (startup|resume) → `session-start.py` (ветка `source==clear` станет мёртвой, это ок)
   - `UserPromptSubmit` → `session-reminder.py` + `session-early-digest.py`
   - `Stop` → `session-sync.py` + `session-final-digest.py` (компенсирует отсутствие `SessionEnd`)
   - PreToolUse auto-approve для MCP — **не включать** (Codex не перехватывает MCP-вызовы)
-- [ ] Проверить что MCP сервер запускается из Codex через `.codex/config.toml` (или аналог `.mcp.json`)
+- [x] Проверить что MCP сервер запускается из Codex через `.codex/config.toml` (или аналог `.mcp.json`)
 - [ ] Smoke-тест: MCP-операции (`memory_search`, `memory_remember`) работают из Codex без транскрипта
 
 ### Фаза 1.5 — Codex transcript parser (блокирующее для session-sync)
