@@ -57,7 +57,13 @@ def derive_project(cwd: str) -> str | None:
 
 
 def get_context_tokens(transcript_path: str | None) -> int | None:
-    """Extract total token usage from last assistant message in transcript JSONL.
+    """Extract total token usage from the most recent entry in transcript JSONL.
+
+    Supports both Claude Code and Codex transcript formats:
+      - Claude Code: ``entry.message.usage.input_tokens`` (+ cache fields)
+      - Codex: ``event_msg`` with ``payload.type == "token_count"``,
+        usage in ``payload.info.total_token_usage.input_tokens`` (+ cached)
+
     Reads last 100 lines to find the most recent usage entry.
     Returns None if transcript unavailable or unreadable.
     """
@@ -71,6 +77,8 @@ def get_context_tokens(transcript_path: str | None) -> int | None:
         for line in reversed(lines[-100:]):
             try:
                 entry = json.loads(line)
+
+                # Claude Code format: message.usage
                 usage = (entry.get("message") or {}).get("usage")
                 if usage:
                     return (
@@ -78,6 +86,19 @@ def get_context_tokens(transcript_path: str | None) -> int | None:
                         + usage.get("cache_read_input_tokens", 0)
                         + usage.get("cache_creation_input_tokens", 0)
                     )
+
+                # Codex format: event_msg with token_count payload
+                if entry.get("type") == "event_msg":
+                    payload = entry.get("payload") or {}
+                    if payload.get("type") == "token_count":
+                        info = payload.get("info") or {}
+                        tu = info.get("total_token_usage") or {}
+                        input_tokens = tu.get("input_tokens", 0)
+                        cached = tu.get("cached_input_tokens", 0)
+                        # Codex reports cached separately; total already
+                        # includes cached, so just return input_tokens.
+                        if input_tokens:
+                            return input_tokens
             except Exception:
                 pass
     except Exception:
