@@ -43,10 +43,13 @@ def derive_project(cwd: str) -> str | None:
 
 
 def main() -> None:
+    from lib import detect_agent  # noqa: E402
+
     data = json.loads(sys.stdin.read())
     session_id = data.get("session_id")
     prompt = data.get("prompt", "") or ""
     cwd = data.get("cwd", "")
+    agent = detect_agent(data)
 
     if not session_id:
         sys.exit(0)
@@ -95,6 +98,7 @@ def main() -> None:
             title=digest.title,
             summary=digest.summary,
             tags=auto_tags,
+            agent=agent,
         )
     except Exception:
         pass  # Stop hook will handle it

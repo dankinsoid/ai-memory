@@ -317,7 +317,7 @@ Codex hooks передают stdin JSON с теми же полями что Cla
 |---|---|---|
 | `SessionStart` (startup/resume) | `SessionStart` ✅ | 1:1, но `source` не включает `clear`/`compact` |
 | `UserPromptSubmit` | `UserPromptSubmit` ✅ (v0.116.0+) | 1:1 |
-| `PreToolUse` | `PreToolUse` ⚠️ | **только Bash**, MCP-вызовы не перехватываются |
+| `PreTа`PreToolUse` ⚠️ | **только Bash**, MCP-вызовы не перехватываются |
 | `PostToolUse` | `PostToolUse` ⚠️ | только Bash |
 | `Stop` | `Stop` ✅ | 1:1 |
 | `SessionEnd` | ❌ отсутствует | финальный digest переехать в `Stop` |
@@ -384,10 +384,10 @@ Codex hooks передают stdin JSON с теми же полями что Cla
 
 ### Фаза 2 — Полный паритет
 
-- [ ] Codex-адаптация `/load` skill — заменить `AskUserQuestion` (Claude-specific) на textual prompt или Codex-аналог
-- [ ] Добавить `agent` поле во frontmatter сессий (`claude-code` / `codex`) для cross-agent трекинга
+- [x] Codex-адаптация `/load` skill — agent-agnostic: AskUserQuestion if available, numbered list otherwise
+- [x] Добавить `agent` поле во frontmatter сессий (`claude` / `codex`) для cross-agent трекинга
 - [ ] Документировать установку в Codex в README (feature-flag, пути конфигов)
-- [ ] Проверить что session-final-digest корректно вызывается из `Stop` hook (вместо `SessionEnd`) в Codex — возможно нужен флаг "последний Stop"
+- [x] session-final-digest убран из `.codex/hooks.json` Stop — session-sync покрывает per-turn digest, force=True на каждый Stop избыточен и создаёт race condition
 
 ### Фаза 3 — Опционально
 

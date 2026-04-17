@@ -714,6 +714,7 @@ def main() -> None:
             commit_start=git_ctx.get("commit_start"),
             commit_end=commit_end,
             facts=facts_for_storage,
+            agent=agent,
         )
         existing = storage._find_session_file(sessions_parent, session_id)
     elif existing is None:
@@ -728,6 +729,7 @@ def main() -> None:
             branch=git_ctx.get("branch"),
             commit_start=git_ctx.get("commit_start"),
             commit_end=commit_end,
+            agent=agent,
         )
         existing = storage._find_session_file(sessions_parent, session_id)
     else:

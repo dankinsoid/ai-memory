@@ -10,7 +10,9 @@ description: Deep recovery from a previous session — read session content and 
 Parse ARGUMENTS to determine which session to load:
 
 1. **No args** → present the recent sessions from SessionStart context for the user to choose.
-   Show 3-4 sessions using `AskUserQuestion` with options (label = title, description = summary + date).
+   Show 3-4 sessions as options (label = title, description = summary + date).
+   If `AskUserQuestion` tool is available, use it with structured options.
+   Otherwise, present a numbered list and ask the user to pick.
    Include an "Other / search" option so the user can type a query if none match.
    If "Other" is picked, ask for a search query and proceed to step 3.
 
@@ -30,8 +32,9 @@ Parse ARGUMENTS to determine which session to load:
 ## Choosing from results
 
 If `memory_search` was used with `query` or topic-based tags (fuzzy/ambiguous),
-**always let the user pick** using `AskUserQuestion` with up to 4 candidates as options
-(label = title, description = summary). The user can pick "Other" to refine.
+**always let the user pick** from up to 4 candidates (label = title, description = summary).
+Use `AskUserQuestion` with structured options if available, otherwise a numbered list.
+The user can pick "Other" to refine.
 
 If the match was exact (from context or `limit: 1` with no query), load directly.
 

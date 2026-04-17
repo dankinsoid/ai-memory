@@ -704,6 +704,7 @@ def upsert_session(
     commit_end: str | None = None,
     continues: str | None = None,
     facts: list[tuple[str, int]] | None = None,
+    agent: str | None = None,
 ) -> str:
     """Create or update a session summary .md file.
 
@@ -727,6 +728,7 @@ def upsert_session(
         commit_end: short SHA of HEAD at save time
         continues: file stem of the parent session this one continues
         facts: list of (text, importance) tuples for ## Facts section
+        agent: agent identifier ("claude" or "codex") for cross-agent tracking
 
     Returns:
         Path to the session summary file, relative to AI_MEMORY_DIR base.
@@ -754,6 +756,8 @@ def upsert_session(
             commit_start = prev_fm.get("commit_start")
         if not continues:
             continues = prev_fm.get("continues")
+        if not agent:
+            agent = prev_fm.get("agent")
     else:
         safe = _safe_title(title)
         stem = f"{today} {safe}.{session_id[:8]}"
@@ -768,6 +772,8 @@ def upsert_session(
     if project:
         fm_lines.append(f"project: {_yaml_str(project)}")
     fm_lines += [f"title: {_yaml_str(title)}", f"tags: {tags_str}"]
+    if agent:
+        fm_lines.append(f"agent: {agent}")
     if branch:
         fm_lines.append(f"branch: {_yaml_str(branch)}")
     if commit_start:

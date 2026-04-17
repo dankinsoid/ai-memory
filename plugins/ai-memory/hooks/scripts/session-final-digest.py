@@ -122,6 +122,7 @@ def main() -> None:
                 tags=auto_tags,
                 compact=digest.compact,
                 facts=facts_for_storage,
+                agent=agent,
             )
             set_state(f"digest-state-{session_id}", serialize_state(new_state))
     except Exception:
