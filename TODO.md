@@ -386,6 +386,7 @@ Codex hooks передают stdin JSON с теми же полями что Cla
 
 - [x] Codex-адаптация `/load` skill — agent-agnostic: AskUserQuestion if available, numbered list otherwise
 - [x] Добавить `agent` поле во frontmatter сессий (`claude` / `codex`) для cross-agent трекинга
+- [x] Install script `scripts/install-codex.sh` — MCP config, hooks merge, env vars from Claude settings.json
 - [ ] Документировать установку в Codex в README (feature-flag, пути конфигов)
 - [x] session-final-digest убран из `.codex/hooks.json` Stop — session-sync покрывает per-turn digest, force=True на каждый Stop избыточен и создаёт race condition
 
