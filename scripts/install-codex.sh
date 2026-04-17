@@ -95,12 +95,32 @@ result = '\n'.join(output)
 if result:
     result += '\n'
 
+# Read AI_MEMORY_* env vars from Claude settings.json for MCP env section
+mcp_env = {}
+try:
+    import json as _json
+    with open(os.path.expanduser('~/.claude/settings.json')) as f:
+        claude_env = _json.load(f).get('env', {})
+    for k, v in claude_env.items():
+        if k.startswith('AI_MEMORY_') or k == 'OPENAI_API_KEY':
+            if isinstance(v, bool):
+                v = 'true' if v else 'false'
+            mcp_env[k] = str(v)
+except Exception:
+    pass
+
 # Append new MCP section
 result += f'''
 [mcp_servers.ai-memory]
 command = \"python3\"
 args = [\"{server_path}\"]
 '''
+
+if mcp_env:
+    result += '[mcp_servers.ai-memory.env]\n'
+    for k, v in mcp_env.items():
+        result += f'{k} = \"{v}\"\n'
+    result += '\n'
 
 with open(config_path, 'w') as f:
     f.write(result)
