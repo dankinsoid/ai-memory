@@ -212,6 +212,7 @@ characters) than the input."""
 _SYSTEM_TAGS = (
     "ide_opened_file|ide_selection|system-reminder|available-deferred-tools"
     "|system_instruction|local-command-stdout|local-command-caveat|fast_mode_info"
+    "|environment_context"
 )
 _SYSTEM_TAG_RE = re.compile(
     rf"<(?:{_SYSTEM_TAGS})[^>]*>.*?</(?:{_SYSTEM_TAGS})>",

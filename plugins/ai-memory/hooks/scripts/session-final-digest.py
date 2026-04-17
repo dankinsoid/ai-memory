@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from lib import detect_agent  # noqa: E402
+from lib.transcript import find_transcript, load_transcript  # noqa: E402
 
 
 def git_project_name(cwd: str) -> str | None:
@@ -66,33 +67,13 @@ def main() -> None:
         )
         from lib.db import get_state, set_state
 
-        # Find transcript — search agent-specific locations
+        # Find transcript
         transcript_path = data.get("transcript_path")
-        if not transcript_path:
-            search_dirs: list[tuple[Path, str]] = []
-            if agent == "codex":
-                search_dirs.append((Path.home() / ".codex" / "sessions", f"**/*{session_id}*.jsonl"))
-            search_dirs.append((Path.home() / ".claude" / "projects", f"**/{session_id}.jsonl"))
-            for base, pattern in search_dirs:
-                if base.exists():
-                    matches = list(base.glob(pattern))
-                    if matches:
-                        transcript_path = str(matches[0])
-                        break
-
-        if not transcript_path:
+        tp = Path(transcript_path) if transcript_path else find_transcript(session_id, agent)
+        if not tp or not tp.exists():
             sys.exit(0)
 
-        tp = Path(transcript_path)
-        if not tp.exists():
-            sys.exit(0)
-
-        entries = []
-        for line in tp.read_text(encoding="utf-8", errors="replace").splitlines():
-            try:
-                entries.append(json.loads(line))
-            except Exception:
-                pass
+        entries = load_transcript(tp)
 
         if not entries:
             sys.exit(0)

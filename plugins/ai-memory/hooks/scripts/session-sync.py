@@ -23,6 +23,7 @@ sys.path.insert(0, str(_PLUGIN_ROOT))
 from lib import storage, detect_agent  # noqa: E402
 from lib.config import llm_cfg  # noqa: E402
 from lib.tags import parse_front_matter  # noqa: E402
+from lib.transcript import find_transcript, load_transcript  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -147,52 +148,6 @@ def _load_git_context(session_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # JSONL transcript parsing
 # ---------------------------------------------------------------------------
-
-
-def find_transcript(session_id: str, agent: str = "claude") -> Path | None:
-    """Search for the session transcript JSONL file.
-
-    Looks in agent-specific locations:
-      - claude: ``~/.claude/projects/**/{session_id}.jsonl``
-      - codex:  ``~/.codex/sessions/**/*{session_id}*.jsonl``
-
-    Args:
-        session_id: session UUID
-        agent: agent identifier (``"claude"`` or ``"codex"``)
-
-    Returns:
-        Path to the .jsonl file, or None if not found.
-    """
-    search_dirs: list[tuple[Path, str]] = []
-    if agent == "codex":
-        search_dirs.append((Path.home() / ".codex" / "sessions", f"**/*{session_id}*.jsonl"))
-    search_dirs.append((Path.home() / ".claude" / "projects", f"**/{session_id}.jsonl"))
-
-    for base, pattern in search_dirs:
-        if not base.exists():
-            continue
-        matches = list(base.glob(pattern))
-        if matches:
-            return matches[0]
-    return None
-
-
-def parse_jsonl(path: Path) -> list[dict]:
-    """Parse a JSONL file, silently skipping malformed lines.
-
-    Args:
-        path: path to .jsonl file
-
-    Returns:
-        List of parsed JSON objects.
-    """
-    entries = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        try:
-            entries.append(json.loads(line))
-        except Exception:
-            pass
-    return entries
 
 
 from lib.digest import _strip_system_tags  # noqa: E402 — single source of truth for tag regex
@@ -659,7 +614,7 @@ def main() -> None:
     if not transcript or not transcript.exists():
         sys.exit(0)
 
-    entries = parse_jsonl(transcript)
+    entries = load_transcript(transcript)
     stream = extract_message_stream(entries)
     messages = [item for item in stream if item["kind"] == "message"]
     if not messages:

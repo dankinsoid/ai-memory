@@ -370,16 +370,16 @@ Codex hooks передают stdin JSON с теми же полями что Cla
 
 Без этого в Codex не будут работать: session-sync (Stop hook), LLM digest, auto-save транскрипта, fact extraction. То есть MCP-tools будут работать, а автоматическая память — нет.
 
-- [ ] `lib/codex_session_loader.py` — парсер rollout JSONL (~100-150 строк)
+- [x] `lib/codex_session_loader.py` — парсер rollout JSONL (~100-150 строк)
   - Парсить `session_meta` → session_id, cwd, git, cli_version
   - Парсить первый `turn_context` → model
   - Для `response_item`: обрабатывать `message`/`reasoning`/`function_call`/`function_call_output`/`custom_tool_call`/`custom_tool_call_output`
   - Индексировать tool calls по `call_id` для pairing
   - Двойной `json.loads` для `arguments` и `output`
   - Игнорировать `event_msg` и `turn_context` (кроме первого)
-- [ ] Определить формат-агностичный intermediate representation в `lib/transcript.py` — общий для Claude и Codex парсеров (list of turns: user_text, assistant_text, tool_calls[])
-- [ ] Рефакторинг `session-sync.py`: выделить парсинг в pluggable loader (Claude vs Codex), downstream логика (digest, transcript render, fact extraction) принимает intermediate representation
-- [ ] Определить какой парсер использовать: по расширению/пути файла (`~/.claude/projects/` vs `~/.codex/sessions/`) или по первой строке (наличие `session_meta`)
+- [x] Определить формат-агностичный intermediate representation в `lib/transcript.py` — общий для Claude и Codex парсеров (normalization to Claude Code entry format)
+- [x] Рефакторинг `session-sync.py`: выделить парсинг в pluggable loader (Claude vs Codex), downstream логика (digest, transcript render, fact extraction) принимает intermediate representation
+- [x] Определить какой парсер использовать: по пути файла (`~/.codex/sessions/`), filename (`rollout-*`), или первой строке (`session_meta`) → реализовано в `lib/transcript.py:detect_format()`
 - [ ] Smoke-тест full round-trip: работа в Codex → Stop hook → digest → .md файл в `~/.ai-memory/`
 
 ### Фаза 2 — Полный паритет
