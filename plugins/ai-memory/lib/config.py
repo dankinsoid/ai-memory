@@ -28,8 +28,8 @@ Provider selection:
 Reminder configuration:
 
   AI_MEMORY_REMINDERS   comma-separated list of enabled reminder types:
-                         "all" (default), "off"/"none", or any combination
-                         of "summary", "chunk", "compact"
+                         "summary" (default), "all", "off"/"none", or any
+                         combination of "summary", "chunk", "compact"
 
 API keys (read from env, typically set in settings.json):
 
@@ -107,9 +107,9 @@ class ReminderConfig:
 
     Env var ``AI_MEMORY_REMINDERS`` — comma-separated list of enabled types::
 
-        all            → everything on (default)
+        summary        → first-turn session registration only (default)
+        all            → everything on
         off / none     → everything off
-        summary        → first-turn session registration only
         compact        → compact-urgent + compact-stale only
         summary,chunk  → any combination
     """
@@ -138,7 +138,7 @@ _DIM_MAP = {"text-embedding-3-large": 3072}
 
 
 def _load_reminder() -> ReminderConfig:
-    val = os.environ.get("AI_MEMORY_REMINDERS", "all").lower().strip()
+    val = os.environ.get("AI_MEMORY_REMINDERS", "summary").lower().strip()
     if val in ("all", ""):
         types = _ALL_REMINDER_TYPES
     elif val in ("off", "none"):
