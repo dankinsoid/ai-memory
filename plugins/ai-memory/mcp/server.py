@@ -309,6 +309,9 @@ def _handle_tools_call(params: dict) -> dict:
 
     try:
         if name == "memory_session":
+            missing = [f for f in ("session_id", "title", "summary") if not args.get(f)]
+            if missing:
+                return _error(f"Missing required arguments: {', '.join(missing)}")
             from lib.tags import normalize_tags
             auto_tags = ["session"]
             if args.get("project"):

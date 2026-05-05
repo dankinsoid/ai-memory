@@ -127,6 +127,15 @@ def main() -> None:
     if not session_id:
         sys.exit(0)
 
+    try:
+        from lib.config import reminder_cfg
+        _reminder_types = reminder_cfg.types
+    except Exception:
+        _reminder_types = frozenset({"summary", "chunk", "compact"})
+
+    if not _reminder_types:
+        sys.exit(0)
+
     llm_on = _is_llm_enabled()
 
     # If LLM is enabled but auto-digest failed (e.g. credit balance depleted),
@@ -174,7 +183,11 @@ def main() -> None:
         last_compact_tokens = 0
 
     current_bucket = (context_tokens // CHUNK_TOKEN_STEP) * CHUNK_TOKEN_STEP
-    need_chunk = (current_bucket > last_chunk_tokens) and (prompt_count > 1)
+    need_chunk = (
+        "chunk" in _reminder_types
+        and (current_bucket > last_chunk_tokens)
+        and (prompt_count > 1)
+    )
 
     # Check if compact was saved since last turn (flag written by MCP memory_session)
     try:
@@ -186,13 +199,16 @@ def main() -> None:
         pass
 
     tokens_since_compact = context_tokens - last_compact_tokens
+    compact_on = "compact" in _reminder_types
     need_compact_urgent = (
-        context_tokens >= COMPACT_URGENT_TOKENS
+        compact_on
+        and context_tokens >= COMPACT_URGENT_TOKENS
         and tokens_since_compact >= COMPACT_STALE_TOKENS
         and prompt_count > 1
     )
     need_compact_stale = (
-        not need_compact_urgent
+        compact_on
+        and not need_compact_urgent
         and tokens_since_compact >= COMPACT_STALE_TOKENS
         and prompt_count > 3
     )
@@ -207,8 +223,9 @@ def main() -> None:
 
     # When LLM is on, skip summary/chunk memory_session reminders —
     # the Stop hook handles auto-digest. Keep compact/save reminders.
+    summary_on = "summary" in _reminder_types
     need_summary = False
-    if not llm_on:
+    if summary_on and not llm_on:
         if llm_failed:
             # LLM was expected to handle digest but failed — ask agent once
             need_summary = prompt_count <= SUMMARY_REMIND_TURNS
@@ -217,8 +234,8 @@ def main() -> None:
                 prompt_count <= SUMMARY_REMIND_TURNS and first_prompt_len < SHORT_PROMPT_LEN
             )
 
-    # Set PreToolUse fallback flag on first prompt (only when LLM is off)
-    if not llm_on and prompt_count == 1:
+    # Set PreToolUse fallback flag on first prompt (only when LLM is off and summary reminders enabled)
+    if summary_on and not llm_on and prompt_count == 1:
         try:
             from lib.db import set_state
             set_state(
