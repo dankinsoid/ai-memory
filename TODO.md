@@ -269,6 +269,15 @@ Next: implement storage layer
 
 ---
 
+## Блок 15 — Настраиваемые напоминания + batch-валидация ✅
+
+- [x] `AI_MEMORY_REMINDERS` env var — comma-separated список включённых типов (`summary`, `chunk`, `compact`). Значения: `all` (default), `off`/`none`, или любая комбинация
+- [x] `lib/config.py` — `ReminderConfig` + `reminder_cfg` + `reload()`
+- [x] `session-reminder.py` — проверяет `reminder_cfg` перед каждым типом напоминания
+- [x] `mcp/server.py` — batch-валидация в `memory_session`: все отсутствующие поля (`session_id`, `title`, `summary`) сообщаются сразу, а не по одному через `KeyError`
+
+---
+
 ## Порядок реализации
 
 1. ~~**Блок 3**~~ ✅

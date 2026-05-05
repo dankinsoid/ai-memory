@@ -25,6 +25,12 @@ Provider selection:
                                "openai" if OPENAI_API_KEY is set, else
                                falls back to "claude-cli"
 
+Reminder configuration:
+
+  AI_MEMORY_REMINDERS   comma-separated list of enabled reminder types:
+                         "all" (default), "off"/"none", or any combination
+                         of "summary", "chunk", "compact"
+
 API keys (read from env, typically set in settings.json):
 
   OPENAI_API_KEY        required for embedding and openai LLM provider
@@ -91,7 +97,55 @@ class LLMConfig:
     provider: str
 
 
+class ReminderConfig:
+    """Configuration for session-reminder types.
+
+    Attributes:
+        types: Frozenset of enabled reminder types. Possible values:
+               ``"summary"``, ``"chunk"``, ``"compact"``.
+               Empty set means all reminders are disabled.
+
+    Env var ``AI_MEMORY_REMINDERS`` — comma-separated list of enabled types::
+
+        all            → everything on (default)
+        off / none     → everything off
+        summary        → first-turn session registration only
+        compact        → compact-urgent + compact-stale only
+        summary,chunk  → any combination
+    """
+
+    def __init__(self, types: frozenset) -> None:
+        object.__setattr__(self, "types", types)
+
+    def __setattr__(self, *_):  # noqa: D105
+        raise AttributeError("ReminderConfig is immutable")
+
+    def summary_enabled(self) -> bool:
+        """Return True when summary (first-turn) reminders are enabled."""
+        return "summary" in self.types
+
+    def chunk_enabled(self) -> bool:
+        """Return True when chunk (20K-boundary) reminders are enabled."""
+        return "chunk" in self.types
+
+    def compact_enabled(self) -> bool:
+        """Return True when compact (stale + urgent) reminders are enabled."""
+        return "compact" in self.types
+
+
+_ALL_REMINDER_TYPES: frozenset = frozenset({"summary", "chunk", "compact"})
 _DIM_MAP = {"text-embedding-3-large": 3072}
+
+
+def _load_reminder() -> ReminderConfig:
+    val = os.environ.get("AI_MEMORY_REMINDERS", "all").lower().strip()
+    if val in ("all", ""):
+        types = _ALL_REMINDER_TYPES
+    elif val in ("off", "none"):
+        types = frozenset()
+    else:
+        types = frozenset(t.strip() for t in val.split(",") if t.strip())
+    return ReminderConfig(types)
 
 
 def _load_embedding() -> EmbeddingConfig:
@@ -144,10 +198,12 @@ def reload() -> None:
     Useful after env changes in tests.  Not thread-safe (acceptable —
     MCP server is single-threaded).
     """
-    global embedding_cfg, llm_cfg  # noqa: PLW0603
+    global embedding_cfg, llm_cfg, reminder_cfg  # noqa: PLW0603
     embedding_cfg = _load_embedding()
     llm_cfg = _load_llm()
+    reminder_cfg = _load_reminder()
 
 
 embedding_cfg: EmbeddingConfig = _load_embedding()
 llm_cfg: LLMConfig = _load_llm()
+reminder_cfg: ReminderConfig = _load_reminder()
