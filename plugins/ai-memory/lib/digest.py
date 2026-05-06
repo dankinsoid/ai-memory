@@ -209,20 +209,24 @@ characters) than the input."""
 # ---------------------------------------------------------------------------
 
 # System-injected XML tags to strip from user messages.
+# INSTRUCTIONS: Codex injects AGENTS.md content wrapped in <INSTRUCTIONS> tags.
 _SYSTEM_TAGS = (
     "ide_opened_file|ide_selection|system-reminder|available-deferred-tools"
     "|system_instruction|local-command-stdout|local-command-caveat|fast_mode_info"
-    "|environment_context"
+    "|environment_context|INSTRUCTIONS"
 )
 _SYSTEM_TAG_RE = re.compile(
     rf"<(?:{_SYSTEM_TAGS})[^>]*>.*?</(?:{_SYSTEM_TAGS})>",
     re.DOTALL,
 )
+# Codex prepends a header line before the <INSTRUCTIONS> block.
+_AGENTS_MD_HEADER_RE = re.compile(r"^#\s*AGENTS\.md instructions for[^\n]*\n?", re.MULTILINE)
 
 
 def _strip_system_tags(text: str) -> str:
     """Remove system-injected XML tags and collapse excess blank lines."""
     cleaned = _SYSTEM_TAG_RE.sub("", text)
+    cleaned = _AGENTS_MD_HEADER_RE.sub("", cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
