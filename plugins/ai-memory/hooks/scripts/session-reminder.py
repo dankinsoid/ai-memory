@@ -99,6 +99,14 @@ def get_context_tokens(transcript_path: str | None) -> int | None:
                         # includes cached, so just return input_tokens.
                         if input_tokens:
                             return input_tokens
+
+                # Gemini format: message_update entries with cumulative token counts.
+                # Scanning reversed, the first match is the most recent total.
+                if entry.get("type") == "message_update":
+                    tokens = entry.get("tokens") or {}
+                    total = tokens.get("input", 0) + tokens.get("output", 0)
+                    if total:
+                        return total
             except Exception:
                 pass
     except Exception:
