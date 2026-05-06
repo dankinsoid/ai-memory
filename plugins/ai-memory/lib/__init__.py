@@ -34,14 +34,16 @@ def detect_agent(hook_data: dict) -> str:
     Detection order:
       1. Explicit ``agent`` field in payload (future-proof).
       2. ``transcript_path`` containing ``/.codex/`` → codex.
-      3. ``model`` field matching known OpenAI model prefixes → codex.
-      4. Default → claude.
+      3. ``transcript_path`` containing ``/.gemini/`` → gemini.
+      4. ``model`` field matching known OpenAI model prefixes → codex.
+      5. ``model`` field starting with ``gemini`` → gemini.
+      6. Default → claude.
 
     Args:
         hook_data: parsed JSON from hook stdin.
 
     Returns:
-        Agent identifier string: ``"claude"`` or ``"codex"``.
+        Agent identifier string: ``"claude"``, ``"codex"``, or ``"gemini"``.
     """
     # Explicit field — highest priority
     explicit = hook_data.get("agent")
@@ -52,10 +54,14 @@ def detect_agent(hook_data: dict) -> str:
     tp = hook_data.get("transcript_path", "")
     if "/.codex/" in tp:
         return "codex"
+    if "/.gemini/" in tp:
+        return "gemini"
 
-    # Model heuristic — Codex uses OpenAI models (o3, o4-mini, gpt-*, etc.)
+    # Model heuristic — Codex uses OpenAI models, Gemini uses gemini-* models
     model = hook_data.get("model", "")
     if model and any(model.startswith(p) for p in ("o1", "o3", "o4", "gpt-", "codex")):
         return "codex"
+    if model and model.startswith("gemini"):
+        return "gemini"
 
     return "claude"
