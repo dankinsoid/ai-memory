@@ -192,6 +192,11 @@ Next: implement storage layer
 - [x] Убрать legacy Clojure-зависимости из всех скриптов
 - [ ] Обновить `CLAUDE.md` плагина (документировать новые MCP инструменты, query vs tags, /save /load /remember)
 
+## Текущая диагностика
+
+- [ ] Проверить, срабатывает ли Codex `Stop` hook для `session-sync.py`, и пишет ли он summary в Obsidian vault
+- [x] Добавить fallback debug log для `session-sync.py` (`~/.codex/log/` и `/tmp`) чтобы диагностировать Codex `Stop` hook
+
 ---
 
 ## Блок 8 — Shared lib: вынести общий код в `lib/` ✅
@@ -395,8 +400,8 @@ Codex hooks передают stdin JSON с теми же полями что Cla
 
 - [x] Codex-адаптация `/load` skill — agent-agnostic: AskUserQuestion if available, numbered list otherwise
 - [x] Добавить `agent` поле во frontmatter сессий (`claude` / `codex`) для cross-agent трекинга
-- [x] Install script `scripts/install-codex.sh` — MCP config, hooks merge, env vars from Claude settings.json
-- [ ] Документировать установку в Codex в README (feature-flag, пути конфигов)
+- [x] Install script `scripts/install-codex.sh` — MCP config, hooks merge, baked-in hook env from Claude settings.json
+- [x] Документировать установку в Codex в README (feature-flag, пути конфигов)
 - [x] session-final-digest убран из `.codex/hooks.json` Stop — session-sync покрывает per-turn digest, force=True на каждый Stop избыточен и создаёт race condition
 
 ### Фаза 3 — Опционально

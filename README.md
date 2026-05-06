@@ -32,6 +32,26 @@ For development:
 claude --plugin-dir ./plugins/ai-memory
 ```
 
+### Codex CLI
+
+Codex support is installed separately because MCP and hooks are configured via
+`~/.codex/config.toml` and `~/.codex/hooks.json`.
+
+```bash
+bash scripts/install-codex.sh
+```
+
+The installer:
+
+- enables `features.codex_hooks = true` in `~/.codex/config.toml`
+- registers the local MCP server in `~/.codex/config.toml`
+- merges ai-memory hooks into `~/.codex/hooks.json`
+- bakes absolute script paths and `AI_MEMORY_*` / `OPENAI_API_KEY` values from
+  `~/.claude/settings.json` directly into hook commands, so hooks do not depend
+  on shell startup files like `~/.zshrc`
+
+Restart Codex after running the installer.
+
 ### Optional: Semantic search
 
 OpenAI features are opt-in to avoid silently spending tokens when `OPENAI_API_KEY` is set globally. Add to your Claude Code `settings.json`:
@@ -120,7 +140,9 @@ Fully automatic lazy loading (async prefetch based on conversation topics, injec
 
 ## Storage
 
-Default location: `~/.claude/ai-memory/` (override with `AI_MEMORY_DIR`).
+Default location: `~/.ai-memory/` (override with `AI_MEMORY_DIR`). If that path
+does not exist but legacy `~/.claude/ai-memory/` does, ai-memory uses the
+legacy location automatically.
 
 ```
 ai-memory/

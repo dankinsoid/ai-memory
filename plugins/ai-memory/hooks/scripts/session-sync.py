@@ -11,9 +11,11 @@ from __future__ import annotations
 #
 
 import json
+import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _HOOK_DIR = Path(__file__).resolve().parent
@@ -24,6 +26,29 @@ from lib import storage, detect_agent  # noqa: E402
 from lib.config import llm_cfg  # noqa: E402
 from lib.tags import parse_front_matter  # noqa: E402
 from lib.transcript import find_transcript, load_transcript  # noqa: E402
+
+
+_DEBUG_LOG_CANDIDATES = (
+    Path.home() / ".claude" / "hooks" / "state" / "session-sync.log",
+    Path.home() / ".codex" / "log" / "session-sync.log",
+    Path("/tmp/ai-memory-session-sync.log"),
+)
+
+
+def _debug_log(event: str, **fields: object) -> None:
+    """Append a compact debug line for Stop hook diagnostics."""
+    parts = [f"{k}={fields[k]!r}" for k in sorted(fields)]
+    ts = datetime.now(timezone.utc).isoformat()
+    suffix = f" | {' | '.join(parts)}" if parts else ""
+    line = f"{ts} | {event}{suffix}\n"
+
+    for log_path in _DEBUG_LOG_CANDIDATES:
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -605,19 +630,37 @@ def main() -> None:
     session_id = data.get("session_id")
     cwd = data.get("cwd", "")
     agent = detect_agent(data)
+    _debug_log(
+        "start",
+        session_id=session_id,
+        cwd=cwd,
+        agent=agent,
+        transcript_path=data.get("transcript_path"),
+        hook_event_name=data.get("hook_event_name"),
+        openai_api_key=bool(os.environ.get("OPENAI_API_KEY")),
+        ai_memory_dir=os.environ.get("AI_MEMORY_DIR"),
+        ai_memory_llm=os.environ.get("AI_MEMORY_LLM"),
+        ai_memory_llm_provider=os.environ.get("AI_MEMORY_LLM_PROVIDER"),
+        llm_enabled=llm_cfg.enabled,
+        llm_provider=llm_cfg.provider,
+    )
 
     if not session_id:
+        _debug_log("skip-no-session-id")
         sys.exit(0)
 
     transcript_path = data.get("transcript_path")
     transcript = Path(transcript_path) if transcript_path else find_transcript(session_id, agent)
     if not transcript or not transcript.exists():
+        _debug_log("skip-no-transcript", session_id=session_id, transcript_path=transcript_path)
         sys.exit(0)
+    _debug_log("transcript-found", session_id=session_id, transcript=str(transcript))
 
     entries = load_transcript(transcript)
     stream = extract_message_stream(entries)
     messages = [item for item in stream if item["kind"] == "message"]
     if not messages:
+        _debug_log("skip-no-messages", session_id=session_id, transcript=str(transcript))
         sys.exit(0)
 
     project = derive_project(cwd)
@@ -671,6 +714,13 @@ def main() -> None:
             if digest_result:
                 digest, new_state = digest_result
                 set_state(f"digest-state-{session_id}", serialize_state(new_state))
+                _debug_log(
+                    "digest-success",
+                    session_id=session_id,
+                    title=digest.title,
+                    tags=digest.tags,
+                    compact=bool(digest.compact),
+                )
                 # Clear failure flag — LLM recovered
                 try:
                     from lib.db import delete_state
@@ -681,6 +731,7 @@ def main() -> None:
             import traceback
             print(f"[ai-memory] auto-digest failed: {exc}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
+            _debug_log("digest-failed", session_id=session_id, error=str(exc))
             digest_result = None
             # Signal reminder hook to fall back to agent-driven mode
             try:
@@ -717,6 +768,7 @@ def main() -> None:
             agent=agent,
         )
         existing = storage._find_session_file(sessions_parent, session_id)
+        _debug_log("upsert-digest", session_id=session_id, existing=str(existing) if existing else None)
     elif existing is None:
         # Agent never called memory_session — create minimal summary
         title = derive_title(messages) or "untitled session"
@@ -732,18 +784,22 @@ def main() -> None:
             agent=agent,
         )
         existing = storage._find_session_file(sessions_parent, session_id)
+        _debug_log("upsert-fallback", session_id=session_id, title=title, existing=str(existing) if existing else None)
     else:
         # Update git fields in existing session frontmatter
         _update_git_fields(existing, git_ctx, commit_end)
+        _debug_log("update-existing", session_id=session_id, existing=str(existing))
 
     if existing is None:
         # Should not happen — upsert_session always creates the file
+        _debug_log("error-no-summary-file", session_id=session_id)
         sys.exit(1)
 
     # Append transcript section to the session summary file
     _replace_transcript_section(
         existing, format_messages_md(stream, agent=agent, user_name=user_name)
     )
+    _debug_log("transcript-written", session_id=session_id, existing=str(existing))
 
 
 if __name__ == "__main__":

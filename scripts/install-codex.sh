@@ -2,7 +2,7 @@
 # @ai-generated(solo)
 # Install ai-memory plugin for Codex CLI.
 #
-# Configures MCP server, merges hooks, and sets environment variables.
+# Configures MCP server and merges hooks with baked-in paths/env.
 # Idempotent — safe to re-run after updates.
 #
 # Usage:
@@ -92,6 +92,19 @@ while output and output[-1].strip() == '':
     output.pop()
 
 result = '\n'.join(output)
+
+# Ensure Codex experimental hooks are enabled.
+if not re.search(r'^features\.codex_hooks\s*=\s*true\s*$', result, re.MULTILINE):
+    if re.search(r'^features\.codex_hooks\s*=\s*', result, re.MULTILINE):
+        result = re.sub(
+            r'^features\.codex_hooks\s*=\s*.*$',
+            'features.codex_hooks = true',
+            result,
+            flags=re.MULTILINE,
+        )
+    else:
+        result = ('features.codex_hooks = true\n\n' + result) if result else 'features.codex_hooks = true\n'
+
 if result:
     result += '\n'
 
@@ -140,10 +153,16 @@ if [ -f "$HOOKS_FILE" ]; then
 fi
 
 python3 -c "
-import json, sys
+import copy
+import json
+import os
+import re
+import shlex
+import sys
 
 user_path = '$HOOKS_FILE'
 plugin_path = '$PLUGIN_HOOKS'
+plugin_root = '$PLUGIN_ROOT'
 
 with open(plugin_path) as f:
     plugin_data = json.load(f)
@@ -154,23 +173,61 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     user_data = {}
 
+# Read hook env vars from Claude settings.json. These are baked into hook
+# commands so hooks do not depend on shell rc files like ~/.zshrc.
+hook_env = {}
+try:
+    with open(os.path.expanduser('~/.claude/settings.json')) as f:
+        claude_env = json.load(f).get('env', {})
+    for key, value in claude_env.items():
+        if key.startswith('AI_MEMORY_') or key == 'OPENAI_API_KEY':
+            if isinstance(value, bool):
+                value = 'true' if value else 'false'
+            hook_env[key] = str(value)
+except Exception:
+    pass
+
+
+def rewrite_command(command: str) -> str:
+    env_prefix = ' '.join(
+        f'{key}={shlex.quote(value)}' for key, value in sorted(hook_env.items())
+    )
+
+    def repl(match):
+        suffix = match.group(1)
+        return shlex.quote(f'{plugin_root}/{suffix}')
+
+    command = re.sub(r'\$AI_MEMORY_PLUGIN_ROOT/([^\s\"\']+)', repl, command)
+    return f'{env_prefix} {command}' if env_prefix else command
+
 if 'hooks' not in user_data:
     user_data['hooks'] = {}
 
 for event_type, plugin_entries in plugin_data.get('hooks', {}).items():
     existing = user_data['hooks'].get(event_type, [])
 
-    # Remove old ai-memory entries (identified by AI_MEMORY_PLUGIN_ROOT in command)
+    # Remove old ai-memory entries before appending freshly rendered ones.
     existing = [
         entry for entry in existing
         if not any(
-            'AI_MEMORY_PLUGIN_ROOT' in h.get('command', '')
+            (
+                'AI_MEMORY_PLUGIN_ROOT' in h.get('command', '')
+                or plugin_root in h.get('command', '')
+            )
             for h in entry.get('hooks', [])
         )
     ]
 
-    # Append plugin entries
-    existing.extend(plugin_entries)
+    rendered_entries = []
+    for entry in plugin_entries:
+        rendered = copy.deepcopy(entry)
+        for hook in rendered.get('hooks', []):
+            command = hook.get('command')
+            if command:
+                hook['command'] = rewrite_command(command)
+        rendered_entries.append(rendered)
+
+    existing.extend(rendered_entries)
     user_data['hooks'][event_type] = existing
 
 with open(user_path, 'w') as f:
@@ -181,109 +238,18 @@ with open(user_path, 'w') as f:
 echo "  ✓ Hooks merged into hooks.json"
 
 # ---------------------------------------------------------------------------
-# 3. Environment variables in shell profile
+# 3. Summary
 # ---------------------------------------------------------------------------
-
-# Detect shell profile
-case "$(basename "${SHELL:-/bin/zsh}")" in
-    zsh)  PROFILE="$HOME/.zshrc" ;;
-    bash) PROFILE="$HOME/.bashrc" ;;
-    *)    PROFILE="$HOME/.profile" ;;
-esac
-
-# Read defaults from Claude settings.json if available
-CLAUDE_SETTINGS="$HOME/.claude/settings.json"
-AI_MEMORY_DIR=""
-AI_MEMORY_LLM=""
-AI_MEMORY_LLM_PROVIDER=""
-AI_MEMORY_EMBEDDING=""
-OPENAI_API_KEY=""
-
-if [ -f "$CLAUDE_SETTINGS" ]; then
-    eval "$(python3 -c "
-import json, sys, os
-
-try:
-    with open('$CLAUDE_SETTINGS') as f:
-        env = json.load(f).get('env', {})
-
-    mapping = {
-        'AI_MEMORY_DIR': 'AI_MEMORY_DIR',
-        'AI_MEMORY_LLM': 'AI_MEMORY_LLM',
-        'AI_MEMORY_LLM_PROVIDER': 'AI_MEMORY_LLM_PROVIDER',
-        'AI_MEMORY_EMBEDDING': 'AI_MEMORY_EMBEDDING',
-        'OPENAI_API_KEY': 'OPENAI_API_KEY',
-    }
-    for key, var in mapping.items():
-        val = env.get(key, '')
-        if isinstance(val, bool):
-            val = 'true' if val else 'false'
-        if val:
-            # Shell-safe quoting
-            val = str(val).replace(\"'\", \"'\\\\''\" )
-            print(f\"{var}='{val}'\")
-except Exception:
-    pass
-")"
-fi
-
-# Build the env block
-BEGIN_MARKER="# >>> ai-memory >>>"
-END_MARKER="# <<< ai-memory <<<"
-
-ENV_BLOCK="$BEGIN_MARKER
-export AI_MEMORY_PLUGIN_ROOT=\"$PLUGIN_ROOT\""
-
-[ -n "$AI_MEMORY_DIR" ]          && ENV_BLOCK="$ENV_BLOCK
-export AI_MEMORY_DIR=\"$AI_MEMORY_DIR\""
-
-[ -n "$AI_MEMORY_LLM" ]          && ENV_BLOCK="$ENV_BLOCK
-export AI_MEMORY_LLM=\"$AI_MEMORY_LLM\""
-
-[ -n "$AI_MEMORY_LLM_PROVIDER" ] && ENV_BLOCK="$ENV_BLOCK
-export AI_MEMORY_LLM_PROVIDER=\"$AI_MEMORY_LLM_PROVIDER\""
-
-[ -n "$AI_MEMORY_EMBEDDING" ]    && ENV_BLOCK="$ENV_BLOCK
-export AI_MEMORY_EMBEDDING=\"$AI_MEMORY_EMBEDDING\""
-
-[ -n "$OPENAI_API_KEY" ]         && ENV_BLOCK="$ENV_BLOCK
-export OPENAI_API_KEY=\"$OPENAI_API_KEY\""
-
-ENV_BLOCK="$ENV_BLOCK
-$END_MARKER"
-
-# Remove old block and append new one
-if [ -f "$PROFILE" ]; then
-    # Remove existing ai-memory block (between markers)
-    python3 -c "
-import re
-
-with open('$PROFILE') as f:
-    text = f.read()
-
-# Remove old block including markers
-pattern = r'\n?# >>> ai-memory >>>\n.*?# <<< ai-memory <<<\n?'
-text = re.sub(pattern, '', text, flags=re.DOTALL)
-
-with open('$PROFILE', 'w') as f:
-    f.write(text)
-"
-fi
-
-# Append new block
-echo "" >> "$PROFILE"
-echo "$ENV_BLOCK" >> "$PROFILE"
-
-echo "  ✓ Environment variables set in $(basename "$PROFILE")"
+echo "  ✓ Hook commands use absolute paths and baked-in AI_MEMORY_* env"
 
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "Done! Run 'source $PROFILE' or restart your terminal."
+echo "Done! Restart Codex if it was already running."
 echo ""
 echo "Configured:"
 echo "  MCP server:  $PLUGIN_ROOT/mcp/server.py"
 echo "  Hooks:       $HOOKS_FILE"
-echo "  Environment: $PROFILE"
+echo "  Hook paths:  baked into hooks.json"
