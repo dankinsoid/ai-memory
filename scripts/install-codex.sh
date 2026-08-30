@@ -93,17 +93,36 @@ while output and output[-1].strip() == '':
 
 result = '\n'.join(output)
 
-# Ensure Codex experimental hooks are enabled.
-if not re.search(r'^features\.codex_hooks\s*=\s*true\s*$', result, re.MULTILINE):
-    if re.search(r'^features\.codex_hooks\s*=\s*', result, re.MULTILINE):
-        result = re.sub(
-            r'^features\.codex_hooks\s*=\s*.*$',
-            'features.codex_hooks = true',
-            result,
-            flags=re.MULTILINE,
-        )
-    else:
-        result = ('features.codex_hooks = true\n\n' + result) if result else 'features.codex_hooks = true\n'
+# Enable hooks. Canonical key is features.hooks; codex_hooks is a deprecated
+# alias — migrate it so the two never coexist as duplicate keys.
+if re.search(r'^features\.hooks\s*=', result, re.MULTILINE):
+    result = re.sub(r'^features\.hooks\s*=.*$', 'features.hooks = true', result, flags=re.MULTILINE)
+elif re.search(r'^features\.codex_hooks\s*=', result, re.MULTILINE):
+    result = re.sub(r'^features\.codex_hooks\s*=.*$', 'features.hooks = true', result, flags=re.MULTILINE)
+elif re.search(r'^\[features\]\s*$', result, re.MULTILINE):
+    # Table form: set the key inside [features] instead of adding a dotted duplicate.
+    lines = result.split('\n')
+    out, in_features, done = [], False, False
+    for line in lines:
+        if re.match(r'^\[features\]\s*$', line):
+            in_features = True
+            out.append(line)
+            continue
+        if in_features and re.match(r'^\[', line):
+            if not done:
+                out.append('hooks = true')
+                done = True
+            in_features = False
+        if in_features and re.match(r'^(hooks|codex_hooks)\s*=', line):
+            if done:
+                continue
+            line, done = 'hooks = true', True
+        out.append(line)
+    if in_features and not done:
+        out.append('hooks = true')
+    result = '\n'.join(out)
+else:
+    result = ('features.hooks = true\n\n' + result) if result else 'features.hooks = true\n'
 
 if result:
     result += '\n'
@@ -197,7 +216,8 @@ def rewrite_command(command: str) -> str:
         suffix = match.group(1)
         return shlex.quote(f'{plugin_root}/{suffix}')
 
-    command = re.sub(r'\$AI_MEMORY_PLUGIN_ROOT/([^\s\"\']+)', repl, command)
+    # [$] not \$: inside this double-quoted bash string \$ reaches Python as a bare $ anchor.
+    command = re.sub(r'[$]AI_MEMORY_PLUGIN_ROOT/([^\s\"\']+)', repl, command)
     return f'{env_prefix} {command}' if env_prefix else command
 
 if 'hooks' not in user_data:
@@ -206,17 +226,18 @@ if 'hooks' not in user_data:
 for event_type, plugin_entries in plugin_data.get('hooks', {}).items():
     existing = user_data['hooks'].get(event_type, [])
 
-    # Remove old ai-memory entries before appending freshly rendered ones.
-    existing = [
-        entry for entry in existing
-        if not any(
-            (
-                'AI_MEMORY_PLUGIN_ROOT' in h.get('command', '')
-                or plugin_root in h.get('command', '')
-            )
-            for h in entry.get('hooks', [])
-        )
-    ]
+    # Drop old ai-memory hooks before appending freshly rendered ones. Filter
+    # per hook, not per entry: users add their own hooks to the same group.
+    def is_ours(h):
+        cmd = h.get('command', '')
+        return 'AI_MEMORY_PLUGIN_ROOT' in cmd or plugin_root in cmd
+
+    kept = []
+    for entry in existing:
+        hooks = [h for h in entry.get('hooks', []) if not is_ours(h)]
+        if hooks:
+            kept.append({**entry, 'hooks': hooks})
+    existing = kept
 
     rendered_entries = []
     for entry in plugin_entries:
