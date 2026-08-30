@@ -111,9 +111,10 @@ USER_MSG_MIN_CHARS = 20        # skip user messages shorter than this in LLM tra
 # If updating, keep both in sync.
 FACTS_RECENT_COUNT = 15    # max facts to pass to LLM prompt for dedup
 FACTS_LOAD_MAX = 50        # max facts to show in /load
-LOAD_TOTAL_BUDGET = 5000   # shared chars budget for compact + facts + transcript tail in /load
-LOAD_FACTS_MIN   = 500    # chars — minimum reserved for facts in /load (when facts exist)
-LOAD_TAIL_MIN    = 1000   # chars — minimum reserved for transcript tail in /load (when tail exists)
+LOAD_TOTAL_BUDGET = 5000   # chars — compact + facts + transcript tail when a session is auto-loaded on start
+LOAD_DEEP_BUDGET = 20000   # chars — same, for an explicit memory_load_session call (AI_MEMORY_LOAD_BUDGET overrides)
+LOAD_FACTS_SHARE = 0.1     # fraction of budget reserved for facts (when facts exist)
+LOAD_TAIL_SHARE  = 0.2     # fraction of budget reserved for transcript tail (when tail exists)
 FACTS_CONSOLIDATE_CHARS = 2000  # total chars across all facts before triggering consolidation
 FACTS_CONSOLIDATE_COOLDOWN = 5  # minimum digest calls between consolidations
 

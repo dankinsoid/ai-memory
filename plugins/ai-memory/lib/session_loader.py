@@ -137,12 +137,16 @@ def load_session_by_ref(ref: str) -> SessionContent | None:
     )
 
 
-def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
+def format_for_load(
+    sc: SessionContent, stem: str | None = None, budget: int | None = None,
+) -> str:
     """Format SessionContent for /load skill — full recovery with smart truncation.
 
-    Shows compact + transcript tail (1000 chars if compact exists, 4000 otherwise).
-    Falls back to summary if no compact.  Includes [[wikilink]] ref so the loaded
-    session is trackable in the transcript via session-sync ref extraction.
+    Compact (or summary), facts and transcript tail share one char budget:
+    compact takes first, facts second, the tail gets the remainder, with a
+    share of the budget reserved for each later section.  Includes [[wikilink]]
+    ref so the loaded session is trackable in the transcript via session-sync
+    ref extraction.
 
     Appends a note indicating whether the content is the full transcript or a
     compact+tail subset, so the consuming agent knows whether more detail is
@@ -151,6 +155,7 @@ def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
     Args:
         sc: loaded session content
         stem: file stem for [[wikilink]] ref (e.g. '2026-03-16 Title.abc12345')
+        budget: total chars for compact + facts + tail (default LOAD_TOTAL_BUDGET)
 
     Returns:
         Formatted markdown string for deep recovery.
@@ -175,21 +180,24 @@ def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
         header += "\n\n" + " | ".join(git_parts)
     parts = [header]
 
-    from lib.digest import FACTS_LOAD_MAX, LOAD_TOTAL_BUDGET, LOAD_FACTS_MIN, LOAD_TAIL_MIN
+    from lib.digest import FACTS_LOAD_MAX, LOAD_TOTAL_BUDGET, LOAD_FACTS_SHARE, LOAD_TAIL_SHARE
 
-    budget = LOAD_TOTAL_BUDGET
+    if budget is None:
+        budget = LOAD_TOTAL_BUDGET
+    facts_min = int(budget * LOAD_FACTS_SHARE)
+    tail_min  = int(budget * LOAD_TAIL_SHARE)
     has_facts = bool(sc.facts)
     has_tail  = bool(sc.transcript_tail)
 
     # Compact / summary — reserve minimums for subsequent parts before truncating
     if sc.compact:
-        reserved     = (LOAD_FACTS_MIN if has_facts else 0) + (LOAD_TAIL_MIN if has_tail else 0)
+        reserved     = (facts_min if has_facts else 0) + (tail_min if has_tail else 0)
         max_compact  = max(budget - reserved, 0)
         compact_text = sc.compact[:max_compact] if len(sc.compact) > max_compact else sc.compact
         parts.append(f"## Compact\n\n{compact_text}")
         budget -= len(compact_text)
     elif sc.summary:
-        reserved     = (LOAD_FACTS_MIN if has_facts else 0) + (LOAD_TAIL_MIN if has_tail else 0)
+        reserved     = (facts_min if has_facts else 0) + (tail_min if has_tail else 0)
         max_summary  = max(budget - reserved, 0)
         summary_text = sc.summary[:max_summary] if len(sc.summary) > max_summary else sc.summary
         parts.append(f"## Summary\n\n{summary_text}")
@@ -204,7 +212,7 @@ def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
             )[:FACTS_LOAD_MAX]
             by_imp.sort(key=lambda x: x[0])  # restore chronological order
             selected = [f for _, f in by_imp]
-        facts_budget = max(budget - (LOAD_TAIL_MIN if has_tail else 0), 0)
+        facts_budget = max(budget - (tail_min if has_tail else 0), 0)
         fact_lines: list[str] = []
         for text, imp in selected:
             line = f"- [{imp}] {text}"
@@ -216,7 +224,7 @@ def format_for_load(sc: SessionContent, stem: str | None = None) -> str:
         if fact_lines:
             parts.append("## Facts\n\n" + "\n".join(fact_lines))
 
-    # Transcript tail — gets whatever budget remains (at least LOAD_TAIL_MIN was reserved)
+    # Transcript tail — gets whatever budget remains (at least tail_min was reserved)
     truncated = False
     if sc.transcript_tail and budget > 0:
         truncated = len(sc.transcript_tail) > budget

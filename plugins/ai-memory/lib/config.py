@@ -31,6 +31,11 @@ Reminder configuration:
                          "summary" (default), "all", "off"/"none", or any
                          combination of "summary", "chunk", "compact"
 
+Session loading:
+
+  AI_MEMORY_LOAD_BUDGET  chars returned by memory_load_session (compact +
+                         facts + transcript tail); default 20000
+
 API keys (read from env, typically set in settings.json):
 
   OPENAI_API_KEY        required for embedding and openai LLM provider
@@ -192,18 +197,30 @@ def _load_llm() -> LLMConfig:
     )
 
 
+def _load_load_budget() -> int:
+    from lib.digest import LOAD_DEEP_BUDGET
+    raw = os.environ.get("AI_MEMORY_LOAD_BUDGET", "").strip()
+    try:
+        val = int(raw) if raw else LOAD_DEEP_BUDGET
+    except ValueError:
+        return LOAD_DEEP_BUDGET
+    return val if val > 0 else LOAD_DEEP_BUDGET
+
+
 def reload() -> None:
     """Re-read env vars and update module-level configs.
 
     Useful after env changes in tests.  Not thread-safe (acceptable —
     MCP server is single-threaded).
     """
-    global embedding_cfg, llm_cfg, reminder_cfg  # noqa: PLW0603
+    global embedding_cfg, llm_cfg, reminder_cfg, load_budget  # noqa: PLW0603
     embedding_cfg = _load_embedding()
     llm_cfg = _load_llm()
     reminder_cfg = _load_reminder()
+    load_budget = _load_load_budget()
 
 
 embedding_cfg: EmbeddingConfig = _load_embedding()
 llm_cfg: LLMConfig = _load_llm()
 reminder_cfg: ReminderConfig = _load_reminder()
+load_budget: int = _load_load_budget()

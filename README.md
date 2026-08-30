@@ -75,6 +75,7 @@ OpenAI features are opt-in to avoid silently spending tokens when `OPENAI_API_KE
 | `AI_MEMORY_EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model |
 | `AI_MEMORY_LLM` | `false` | Enable LLM calls (future) |
 | `AI_MEMORY_LLM_MODEL` | `gpt-4.1-nano` / `haiku` | Chat model (default depends on provider) |
+| `AI_MEMORY_LOAD_BUDGET` | `20000` | Chars returned by `memory_load_session` (compact + facts + transcript tail) |
 | `AI_MEMORY_LLM_PROVIDER` | auto | `openai` or `claude-cli`. When omitted, uses `openai` if `OPENAI_API_KEY` is set, otherwise falls back to `claude-cli` |
 | `OPENAI_API_KEY` | — | Required for embeddings and `openai` LLM provider. `claude-cli` provider uses CLI auth — no key needed |
 

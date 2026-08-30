@@ -489,7 +489,8 @@ def _handle_tools_call(params: dict) -> dict:
                             set_state(continues_key, sc.file_stem)
                 except Exception:
                     pass
-            return _text(format_for_load(sc))
+            from lib.config import load_budget
+            return _text(format_for_load(sc, budget=load_budget))
 
         if name == "memory_explore_tags":
             tag_data = storage.explore_tags()
