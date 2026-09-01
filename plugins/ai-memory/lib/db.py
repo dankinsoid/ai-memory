@@ -287,10 +287,11 @@ def reindex(
             stats["unchanged"] += 1
             continue
 
-        # (Re-)index this file
+        # (Re-)index this file.  errors="replace" keeps a corrupted file
+        # indexable instead of aborting the whole reindex on UnicodeDecodeError.
         try:
-            content = md_file.read_text(encoding="utf-8")
-        except OSError:
+            content = md_file.read_text(encoding="utf-8", errors="replace")
+        except Exception:
             continue
 
         fm = parse_front_matter(content)

@@ -70,7 +70,7 @@ def git_project_name(cwd: str) -> str | None:
     try:
         result = subprocess.run(
             ["git", "-C", cwd, "remote", "get-url", "origin"],
-            capture_output=True, text=True
+            capture_output=True, text=True, timeout=5,
         )
         if result.returncode == 0:
             url = result.stdout.strip().rstrip("/").removesuffix(".git")
@@ -106,7 +106,7 @@ def _git_user_name(cwd: str) -> str | None:
     try:
         r = subprocess.run(
             ["git", "-C", cwd, "config", "user.name"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=5,
         )
         if r.returncode == 0:
             return r.stdout.strip() or None
@@ -142,7 +142,7 @@ def _git_head_short(cwd: str) -> str | None:
     try:
         r = subprocess.run(
             ["git", "-C", cwd, "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=5,
         )
         if r.returncode == 0:
             return r.stdout.strip()
@@ -623,6 +623,70 @@ def _replace_transcript_section(summary_path: Path, transcript_md: str) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+# Vault autocommit
+# ---------------------------------------------------------------------------
+
+
+def _git(args: list[str], cwd: Path, timeout: int = 15):
+    """Run a git command in cwd, returning the CompletedProcess or None on failure."""
+    try:
+        return subprocess.run(
+            ["git", "-C", str(cwd), *args],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except Exception:
+        return None
+
+
+def _autocommit_vault() -> None:
+    """Commit and push the memory vault when it lives in a git repo.
+
+    No-op when the vault is not a repo, has nothing staged, or has no upstream.
+    Push failures are swallowed — the commit stays local and the next session
+    pushes it.  Memory writes must never break the session.
+    """
+    try:
+        base = storage.get_base_dir()
+    except Exception:
+        return
+
+    top = _git(["rev-parse", "--show-toplevel"], base)
+    if top is None or top.returncode != 0:
+        return  # vault is not under git — nothing to do
+
+    repo = Path(top.stdout.strip())
+
+    # Restrict staging to the vault subtree, so a vault nested in a larger
+    # repo never sweeps up unrelated changes.
+    if _git(["add", "--", str(base)], repo) is None:
+        return
+
+    staged = _git(["diff", "--cached", "--quiet", "--", str(base)], repo)
+    if staged is None or staged.returncode == 0:
+        return  # nothing changed
+
+    msg = f"memory: sync {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    commit = _git(["commit", "-m", msg, "--", str(base)], repo, timeout=30)
+    if commit is None or commit.returncode != 0:
+        _debug_log("vault-commit-failed",
+                   err=(commit.stderr.strip()[:200] if commit else "timeout"))
+        return
+    _debug_log("vault-committed", repo=str(repo))
+
+    upstream = _git(["rev-parse", "--abbrev-ref", "@{upstream}"], repo)
+    if upstream is None or upstream.returncode != 0:
+        _debug_log("vault-push-skipped", reason="no upstream")
+        return
+
+    push = _git(["push"], repo, timeout=60)
+    if push is None or push.returncode != 0:
+        _debug_log("vault-push-failed",
+                   err=(push.stderr.strip()[:200] if push else "timeout"))
+        return
+    _debug_log("vault-pushed", repo=str(repo))
+
+
+# ---------------------------------------------------------------------------
 
 
 def main() -> None:
@@ -800,6 +864,8 @@ def main() -> None:
         existing, format_messages_md(stream, agent=agent, user_name=user_name)
     )
     _debug_log("transcript-written", session_id=session_id, existing=str(existing))
+
+    _autocommit_vault()
 
 
 if __name__ == "__main__":

@@ -45,7 +45,7 @@ def git_project_name(cwd: str) -> str | None:
     try:
         result = subprocess.run(
             ["git", "-C", cwd, "remote", "get-url", "origin"],
-            capture_output=True, text=True
+            capture_output=True, text=True, timeout=5,
         )
         if result.returncode == 0:
             url = result.stdout.strip().rstrip("/").removesuffix(".git")
@@ -75,7 +75,7 @@ def _git_head_and_branch(cwd: str) -> tuple[str | None, str | None]:
     try:
         r = subprocess.run(
             ["git", "-C", cwd, "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=5,
         )
         if r.returncode == 0:
             commit = r.stdout.strip()
@@ -84,7 +84,7 @@ def _git_head_and_branch(cwd: str) -> tuple[str | None, str | None]:
     try:
         r = subprocess.run(
             ["git", "-C", cwd, "branch", "--show-current"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=5,
         )
         if r.returncode == 0:
             branch = r.stdout.strip() or None  # empty on detached HEAD
@@ -195,6 +195,7 @@ def main() -> None:
              "from lib.db import reindex; from lib.storage import get_base_dir; "
              "reindex(get_base_dir())"],
             start_new_session=True,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

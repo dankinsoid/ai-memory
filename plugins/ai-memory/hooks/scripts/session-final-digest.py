@@ -29,7 +29,7 @@ def git_project_name(cwd: str) -> str | None:
     try:
         result = subprocess.run(
             ["git", "-C", cwd, "remote", "get-url", "origin"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=5,
         )
         if result.returncode == 0:
             url = result.stdout.strip().rstrip("/").removesuffix(".git")
