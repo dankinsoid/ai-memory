@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/session-start.py",
-            "timeout": 15000
+            "timeout": 15
           }
         ]
       }
@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/session-reminder.py",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       },
@@ -29,7 +29,7 @@
           {
             "type": "command",
             "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/session-early-digest.py",
-            "timeout": 30000,
+            "timeout": 30,
             "async": true
           }
         ]
@@ -42,7 +42,7 @@
           {
             "type": "command",
             "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/session-sync.py",
-            "timeout": 30000,
+            "timeout": 30,
             "async": true
           }
         ]
@@ -55,7 +55,7 @@
           {
             "type": "command",
             "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/session-end.py",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       },
@@ -65,7 +65,7 @@
           {
             "type": "command",
             "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/session-final-digest.py",
-            "timeout": 30000,
+            "timeout": 30,
             "async": true
           }
         ]
@@ -78,7 +78,7 @@
           {
             "type": "command",
             "command": "echo '{\"decision\":\"approve\"}'",
-            "timeout": 1000
+            "timeout": 1
           }
         ]
       },
@@ -88,7 +88,7 @@
           {
             "type": "command",
             "command": "python3 $CLAUDE_PLUGIN_ROOT/hooks/scripts/session-pretool-reminder.py",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
