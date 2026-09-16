@@ -483,6 +483,10 @@ class TestRemember(StorageTestBase):
 
     def test_project_routing(self):
         path = storage.remember("use integrant", tags=["project/my-app", "architecture"])
+        self.assertTrue(path.startswith("projects/my-app/facts/"))
+
+    def test_project_rule_routing(self):
+        path = storage.remember("use integrant", tags=["project/my-app", "rule"])
         self.assertTrue(path.startswith("projects/my-app/rules/"))
 
     def test_language_routing_explicit_format(self):
@@ -494,18 +498,26 @@ class TestRemember(StorageTestBase):
         path = storage.remember("prefer kaocha", tags=["clojure", "testing"])
         self.assertTrue(path.startswith("languages/clojure/"))
 
-    def test_path_tags_excluded_from_fm(self):
+    def test_all_tags_written_to_fm(self):
         path = storage.remember("some rule", tags=["universal", "testing"])
         content = (self.base / path).read_text()
         fm = tags.parse_front_matter(content)
         fm_tags = tags.parse_tags_field(fm.get("tags", ""))
-        # 'universal' comes from path — must not be duplicated in front-matter
-        self.assertNotIn("universal", fm_tags)
+        # Path-derived tags are kept so the file stays self-describing if moved
+        self.assertIn("universal", fm_tags)
         self.assertIn("testing", fm_tags)
+
+    def test_all_tags_for_file_does_not_duplicate_path_tags(self):
+        path = storage.remember("some rule", tags=["universal", "testing"])
+        abs_path = self.base / path
+        result = tags.all_tags_for_file(abs_path, self.base, abs_path.read_text())
+        self.assertEqual(result.count("universal"), 1)
 
     def test_custom_title(self):
         path = storage.remember("some rule", tags=["universal"], title="my-custom-rule")
-        self.assertTrue(path.endswith("my-custom-rule.md"))
+        stem = path.rsplit("/", 1)[-1]
+        # stem is "<title>.<uid4>.md" — the suffix keeps same-titled notes apart
+        self.assertRegex(stem, r"^my-custom-rule\.[0-9a-f]{4}\.md$")
 
     def test_auto_filename_from_content(self):
         path = storage.remember("use test driven development", tags=["universal"])
