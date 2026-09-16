@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -62,6 +63,10 @@ def derive_project(cwd: str) -> str | None:
 
 # ---- Git context persistence ----
 
+# git refuses these in ref names, so anything else is corrupt input
+_BRANCH_RE = re.compile(r"[^\s\\\"'~^:?*\[\]]+")
+
+
 def _git_head_and_branch(cwd: str) -> tuple[str | None, str | None]:
     """Return (short_commit, branch_name) for the repo at cwd.
 
@@ -88,6 +93,8 @@ def _git_head_and_branch(cwd: str) -> tuple[str | None, str | None]:
         )
         if r.returncode == 0:
             branch = r.stdout.strip() or None  # empty on detached HEAD
+            if branch and not _BRANCH_RE.fullmatch(branch):
+                branch = None  # quotes/backslashes mean a broken read, not a ref
     except Exception:
         pass
     return commit, branch

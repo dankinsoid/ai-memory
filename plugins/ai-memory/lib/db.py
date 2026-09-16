@@ -45,6 +45,10 @@ from .tags import all_tags_for_file, parse_front_matter
 
 _SCHEMA_VERSION = 1
 
+# Hand-written notes never reach this size; anything larger is a corrupt file
+# that would blow up RSS if read into memory.
+MAX_INDEXABLE_BYTES = 32 * 1024 * 1024
+
 
 def _db_path() -> Path:
     """Return platform-appropriate cache path for the index DB.
@@ -191,6 +195,8 @@ def index_file(rel_path: str, abs_path: Path, base_dir: Path) -> None:
         base_dir: the AI_MEMORY_DIR root for tag derivation
     """
     try:
+        if abs_path.stat().st_size > MAX_INDEXABLE_BYTES:
+            return
         content = abs_path.read_text(encoding="utf-8")
     except OSError:
         return
@@ -278,8 +284,14 @@ def reindex(
         stats["total"] += 1
 
         try:
-            st_mtime = md_file.stat().st_mtime
+            st = md_file.stat()
+            st_mtime = st.st_mtime
         except OSError:
+            continue
+
+        # A runaway writer can grow a note to many GB; reading it would OOM.
+        if st.st_size > MAX_INDEXABLE_BYTES:
+            stats["skipped_oversized"] = stats.get("skipped_oversized", 0) + 1
             continue
 
         # Skip if mtime unchanged (unless force)

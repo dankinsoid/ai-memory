@@ -142,7 +142,9 @@ def parse_front_matter(content: str) -> dict:
         content: full markdown file content
 
     Returns:
-        Dict of key → raw string value. Empty dict if no front-matter.
+        Dict of key → string value, with double-quoted scalars unquoted and
+        unescaped. Inline lists stay raw for parse_tags_field. Empty dict if
+        no front-matter.
     """
     m = _FRONT_MATTER_RE.match(content)
     if not m:
@@ -154,8 +156,30 @@ def parse_front_matter(content: str) -> dict:
             continue
         if ":" in line:
             key, _, val = line.partition(":")
-            result[key.strip()] = val.strip()
+            result[key.strip()] = _unquote_yaml_str(val.strip())
     return result
+
+
+def _unquote_yaml_str(val: str) -> str:
+    """Reverse the double-quoted escaping applied when front-matter is written.
+
+    Writers quote scalars and escape \\ and " inside them; without undoing that
+    here, a value read and re-written doubles its backslashes every cycle.
+    Inline lists and bare scalars are returned untouched.
+    """
+    if len(val) < 2 or not (val.startswith('"') and val.endswith('"')):
+        return val
+    out = []
+    i = 1
+    end = len(val) - 1
+    while i < end:
+        c = val[i]
+        if c == "\\" and i + 1 < end:
+            i += 1
+            c = val[i]
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def parse_tags_field(val: str) -> list[str]:

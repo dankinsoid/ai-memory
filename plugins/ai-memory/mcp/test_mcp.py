@@ -93,6 +93,25 @@ class TestParseFrontMatter(unittest.TestCase):
         result = tags.parse_tags_field(fm["tags"])
         self.assertEqual(result, ["testing"])
 
+    def test_quoted_scalar_round_trips(self):
+        from lib.storage import _yaml_str
+        for val in ("feature/x", 'has"quote', "back\\slash", "colon: here", ""):
+            content = f"---\nbranch: {_yaml_str(val)}\n---\n\nbody"
+            self.assertEqual(tags.parse_front_matter(content)["branch"], val)
+
+    def test_repeated_rewrite_does_not_grow_value(self):
+        """Read/write cycles must not double the escaping (grew a note to 32GB)."""
+        from lib.storage import _yaml_str
+        val = ""
+        for _ in range(40):
+            content = f"---\nbranch: {_yaml_str(val)}\n---\n\nbody"
+            val = tags.parse_front_matter(content)["branch"]
+        self.assertEqual(val, "")
+
+    def test_inline_list_stays_raw(self):
+        content = "---\ntags: [a, b]\n---\n\nbody"
+        self.assertEqual(tags.parse_front_matter(content)["tags"], "[a, b]")
+
     def test_ignores_comments(self):
         content = "---\n# this is a comment\ntags: [foo]\n---\n\nbody"
         fm = tags.parse_front_matter(content)

@@ -113,11 +113,19 @@ def _is_session_file(rel_parts: tuple[str, ...]) -> bool:
 
 
 def _read_content(path: Path) -> str | None:
-    """Read file text or return None on I/O error."""
+    """Read file text, or None on I/O error or implausible size."""
+    from .db import MAX_INDEXABLE_BYTES
+
     try:
+        if path.stat().st_size > MAX_INDEXABLE_BYTES:
+            return None
         return path.read_text(encoding="utf-8")
     except OSError:
         return None
+
+
+# A front-matter scalar this long is corrupt, not data; see _yaml_str.
+_FM_SCALAR_MAX = 4096
 
 
 def _yaml_str(value: str) -> str:
@@ -127,6 +135,8 @@ def _yaml_str(value: str) -> str:
     This prevents colons, brackets, and other YAML-special chars from
     producing malformed front-matter (e.g. in Obsidian).
     """
+    if len(value) > _FM_SCALAR_MAX:
+        value = value[:_FM_SCALAR_MAX]
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
 
@@ -749,7 +759,7 @@ def upsert_session(
         summary_path = existing
         stem = existing.stem
         # Preserve git context from previous writes if not overridden
-        prev_fm = parse_front_matter(existing.read_text(encoding="utf-8"))
+        prev_fm = parse_front_matter(_read_content(existing) or "")
         if not branch:
             branch = prev_fm.get("branch")
         if not commit_start:
@@ -792,7 +802,7 @@ def upsert_session(
     effective_facts = facts
     existing_content = ""
     if summary_path.exists():
-        existing_content = summary_path.read_text(encoding="utf-8")
+        existing_content = _read_content(summary_path) or ""
         if effective_facts is None:
             effective_facts = _extract_facts_text(existing_content) or None
     if effective_facts:
