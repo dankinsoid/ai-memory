@@ -138,6 +138,28 @@ class Semantic:
         return scored[:top_k]
 
 
+class Hybrid:
+    """Reciprocal rank fusion of the semantic and BM25 rankings.
+
+    Real queries often carry a rare anchor term ("where we discussed qdrant")
+    that BM25 matches exactly while the embedding only approximates. RRF scores
+    by rank rather than by each retriever's raw score, so cosine similarity and
+    BM25 weights need no calibration against each other.
+    """
+
+    def __init__(self, semantic: Semantic, bm25: BM25, k: int = 60, depth: int = 50):
+        self.semantic, self.bm25 = semantic, bm25
+        self.k, self.depth = k, depth
+
+    def search(self, query: str, top_k: int) -> list[tuple[str, float]]:
+        fused: dict[str, float] = {}
+        for backend in (self.semantic, self.bm25):
+            for rank, (path, _) in enumerate(backend.search(query, self.depth), 1):
+                fused[path] = fused.get(path, 0.0) + 1.0 / (self.k + rank)
+        ranked = sorted(fused.items(), key=lambda kv: -kv[1])
+        return ranked[:top_k]
+
+
 def evaluate(name: str, retriever, rows: list[dict], workers: int) -> dict:
     """Run every query and aggregate recall@k, MRR, and leak-split recall@5."""
     from concurrent.futures import ThreadPoolExecutor
@@ -212,6 +234,9 @@ def main() -> None:
             workers = 1  # pure CPU, no benefit from threads
         elif name == "semantic":
             retriever = Semantic(corpus, Path(args.cache))
+            workers = args.workers
+        elif name == "hybrid":
+            retriever = Hybrid(Semantic(corpus, Path(args.cache)), BM25(corpus))
             workers = args.workers
         else:
             sys.exit(f"unknown retriever: {name}")

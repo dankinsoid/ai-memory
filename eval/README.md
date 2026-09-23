@@ -28,6 +28,16 @@ python3 eval/score.py --retriever semantic,bm25
 Corpus vectors are cached in `eval/data/vectors.json`, so re-scoring only
 embeds the queries.
 
+## Findings
+
+**Hybrid retrieval does not help.** RRF fusion of BM25 into the semantic ranking
+was measured across weights 0.0-1.0; every non-zero weight lowered recall@5 on
+low-leak queries, monotonically (0.75 at w=0, 0.71 at w=0.1, 0.58 at w=1.0). The
+apparent closeness of BM25 to semantic in the headline numbers is a leak
+artifact — on paraphrased queries BM25 scores 0.38 against semantic's 0.75, so
+fusion contributes noise rather than the exact-term matching it was expected to
+add.
+
 ## Caveats
 
 - Ground truth is LLM-generated, so it measures "can search find the note this
