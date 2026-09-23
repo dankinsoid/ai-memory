@@ -302,17 +302,18 @@ def search_facts(
     )
 
 
-# Filters carry most of the intent in a scoped query ("anything from
-# yesterday"), so a fixed cosine floor would reject the whole window.
-# Rank relative to the best in-scope match instead.
+# A fixed cosine floor would empty a scoped window the filter already narrowed.
 _RELATIVE_CUTOFF = 0.5
+
+# Relative ranking alone admits noise when nothing in the window is related.
+_ABSOLUTE_FLOOR = 0.15
 
 
 def _relative_cutoff(hits: list) -> list:
     """Drop hits scoring far below the best one in an already-scoped set."""
     if not hits:
         return hits
-    floor = hits[0].score * _RELATIVE_CUTOFF
+    floor = max(hits[0].score * _RELATIVE_CUTOFF, _ABSOLUTE_FLOOR)
     return [h for h in hits if h.score >= floor]
 
 
