@@ -251,9 +251,11 @@ def search_facts(
 
     Two modes:
       - **query** (semantic): vector cosine search across the "content"
-        collection, which holds both facts and sessions.  Results are
-        scored; tag/date filters are applied as post-filters.  Requires
-        AI_MEMORY_EMBEDDING + OPENAI_API_KEY; returns empty list when vectors are disabled.
+        collection, which holds both facts and sessions.  Tag/date
+        filters scope the candidate set, so ranking happens *within* the
+        filtered window; results are always sorted by score, never by
+        ``sort_by``.  Requires AI_MEMORY_EMBEDDING + OPENAI_API_KEY;
+        returns empty list when vectors are disabled.
       - **no query** (structured): full file-scan under base_dir with
         tag intersection/union, date range, and sort.
 
@@ -271,7 +273,8 @@ def search_facts(
         until: ISO date string; skip files with date after this
         sort_by: 'date' (front-matter date, newest first) or
                  'modified' (mtime, most recently changed first);
-                 ignored for semantic search (always sorted by score)
+                 silently ignored whenever 'query' is given — semantic
+                 results are always sorted by score
         limit: max results after sorting
         offset: skip first N results (for pagination)
 
@@ -299,6 +302,51 @@ def search_facts(
     )
 
 
+# Filters carry most of the intent in a scoped query ("anything from
+# yesterday"), so a fixed cosine floor would reject the whole window.
+# Rank relative to the best in-scope match instead.
+_RELATIVE_CUTOFF = 0.5
+
+
+def _relative_cutoff(hits: list) -> list:
+    """Drop hits scoring far below the best one in an already-scoped set."""
+    if not hits:
+        return hits
+    floor = hits[0].score * _RELATIVE_CUTOFF
+    return [h for h in hits if h.score >= floor]
+
+
+def _filter_candidate_ids(
+    tags: list[str] | None,
+    any_tags: list[str] | None,
+    exclude_tags: list[str] | None,
+    since_d: date | None,
+    until_d: date | None,
+) -> list[str] | None:
+    """Resolve filters to the rel_paths they match via the SQL index.
+
+    Returns:
+        Matching rel_paths, or None when there is nothing to pre-filter on
+        or the index is unavailable — callers then post-filter instead.
+    """
+    if not (tags or any_tags or exclude_tags or since_d or until_d):
+        return None
+
+    from .db import get_connection, is_populated
+
+    if not is_populated():
+        return None
+
+    where, params = _sql_filter_clause(
+        tags, any_tags, exclude_tags, since_d, until_d)
+    try:
+        rows = get_connection().execute(
+            f"SELECT rel_path FROM files WHERE {where}", params).fetchall()
+    except Exception:
+        return None
+    return [r[0] for r in rows]
+
+
 def _query_search(
     query: str,
     store: object,
@@ -310,10 +358,12 @@ def _query_search(
     limit: int,
     offset: int,
 ) -> list[dict]:
-    """Semantic vector search with tag/date post-filtering.
+    """Semantic vector search scoped by tag/date filters.
 
-    Overfetches from the vector store to account for post-filter losses,
-    then enriches each hit by reading the source file.
+    With filters and a populated index, the SQL index resolves the
+    filter-matching files first and only those are scored — a global
+    top-N would otherwise starve a narrow window of off-topic queries.
+    Falls back to overfetch-and-post-filter without the index.
     Sorted by cosine score descending.
     """
     from .vector_store import ContentVectorStore
@@ -321,7 +371,14 @@ def _query_search(
 
     base = get_base_dir()
 
-    hits = store.search(query, top_k=max(limit + offset, 20) * 3, threshold=0.25)
+    candidate_ids = _filter_candidate_ids(
+        tags, any_tags, exclude_tags, since_d, until_d)
+    if candidate_ids is not None:
+        hits = store.search_ids(
+            query, candidate_ids, top_k=(limit + offset) * 2, threshold=0.0)
+        hits = _relative_cutoff(hits)
+    else:
+        hits = store.search(query, top_k=max(limit + offset, 20) * 3, threshold=0.25)
 
     candidates: list[dict] = []
     for h in hits:
@@ -373,20 +430,18 @@ def _filescan_search(
                                 sort_by, limit, offset)
 
 
-def _sql_search(
+def _sql_filter_clause(
     tags: list[str] | None,
     any_tags: list[str] | None,
     exclude_tags: list[str] | None,
     since_d: date | None,
     until_d: date | None,
-    sort_by: str,
-    limit: int,
-    offset: int,
-) -> list[dict]:
-    """Search using SQLite file index — filters in SQL, content from files."""
-    from .db import get_connection
+) -> tuple[str, list]:
+    """Build the WHERE clause over the ``files`` table for tag/date filters.
 
-    conn = get_connection()
+    Returns:
+        (where, params) — ``where`` is "1=1" when no filter is given.
+    """
     conditions: list[str] = []
     params: list = []
 
@@ -421,7 +476,24 @@ def _sql_search(
         conditions.append("date <= ?")
         params.append(until_d.isoformat())
 
-    where = " AND ".join(conditions) if conditions else "1=1"
+    return (" AND ".join(conditions) if conditions else "1=1"), params
+
+
+def _sql_search(
+    tags: list[str] | None,
+    any_tags: list[str] | None,
+    exclude_tags: list[str] | None,
+    since_d: date | None,
+    until_d: date | None,
+    sort_by: str,
+    limit: int,
+    offset: int,
+) -> list[dict]:
+    """Search using SQLite file index — filters in SQL, content from files."""
+    from .db import get_connection
+
+    conn = get_connection()
+    where, params = _sql_filter_clause(tags, any_tags, exclude_tags, since_d, until_d)
     order = "mtime DESC" if sort_by == "modified" else "date DESC, mtime DESC"
 
     sql = (

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .. import embedding
-from .base import SearchResult, VectorStore
+from .base import SearchResult, VectorStore, cosine
 
 
 @dataclass
@@ -168,6 +168,53 @@ class ContentVectorStore:
             )
             for h in hits
         ]
+
+    def search_ids(
+        self,
+        query: str,
+        ids: list[str],
+        top_k: int = 10,
+        threshold: float = 0.3,
+    ) -> list[ContentHit]:
+        """Rank a caller-supplied candidate set by similarity to the query.
+
+        Ids without a stored vector are dropped.  Payloads come from the
+        store, so results carry the same metadata as ``search``.
+
+        Args:
+            query:     natural-language search query
+            ids:       candidate point identifiers to score
+            top_k:     max results to return
+            threshold: minimum cosine score
+
+        Returns:
+            List of ContentHit sorted by score descending.
+        """
+        if not self.enabled or not ids:
+            return []
+        vecs = embedding.embed_batch([query])
+        vec = vecs[0] if vecs else None
+        if vec is None:
+            return []
+        store = self._backend()
+        stored = store.get_vectors(ids)
+        if not stored:
+            return []
+        payloads = store.get_payloads(list(stored))
+        hits = [
+            ContentHit(
+                id=point_id,
+                score=score,
+                payload={k: v for k, v in payloads.get(point_id, {}).items()
+                         if k not in ("_md5", "_model")},
+            )
+            for point_id, score in (
+                (i, cosine(vec, v)) for i, v in stored.items()
+            )
+            if score >= threshold
+        ]
+        hits.sort(key=lambda h: h.score, reverse=True)
+        return hits[:top_k]
 
     def delete(self, id: str) -> None:
         """Remove a stored vector by id. No-op if not found or disabled.

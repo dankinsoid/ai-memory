@@ -61,7 +61,7 @@ def _build_tools() -> list[dict]:
     if embedding.is_enabled():
         # Semantic search available — add query as first property
         search_props = {
-            "query": {"type": "string", "description": "Semantic search (natural language)"},
+            "query": {"type": "string", "description": "Semantic search (natural language); ranks within the tag/date filters, so combining it with since/until is safe"},
             **search_props,
         }
     search_desc = (
