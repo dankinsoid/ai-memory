@@ -44,7 +44,17 @@ def _build_tools() -> list[dict]:
         "exclude_tags": {"type": "array", "items": {"type": "string"}},
         "since": {"type": "string", "description": "YYYY-MM-DD"},
         "until": {"type": "string", "description": "YYYY-MM-DD"},
+        "sort_by": {
+            "type": "string",
+            "enum": ["date", "modified"],
+            "description": (
+                "Default 'date' (front-matter date, newest first). "
+                "'modified' sorts by file mtime — use it to order entries within one day. "
+                "Ignored when 'query' is given (semantic results rank by score)."
+            ),
+        },
         "limit": {"type": "integer", "description": "Default 20"},
+        "offset": {"type": "integer", "description": "Skip first N results, for paging. Default 0"},
         "exclude_session_id": {"type": "string"},
     }
 
@@ -54,7 +64,11 @@ def _build_tools() -> list[dict]:
             "query": {"type": "string", "description": "Semantic search (natural language)"},
             **search_props,
         }
-    search_desc = "Search memory. Use 'rule' tag is for rules, 'session' for sessions; exclude_tags to skip."
+    search_desc = (
+        "Search memory. Use 'rule' tag is for rules, 'session' for sessions; exclude_tags to skip. "
+        "Each result starts with an opaque [[ref]] id — not a title; the current title follows it. "
+        "Pass the [[ref]] to memory_read / memory_load_session."
+    )
 
     return [
         {
@@ -133,7 +147,7 @@ def _build_tools() -> list[dict]:
         },
         {
             "name": "memory_read",
-            "description": "Read full content of a memory file by its [[ref]] wikilink. For sessions prefer memory_load_session — it returns optimized recovery output. Returns file path instead of content if the file is too large.",
+            "description": "Read full content of a memory file by its [[ref]] wikilink — an opaque id, not a title. For sessions prefer memory_load_session — it returns optimized recovery output. Returns file path instead of content if the file is too large.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"ref": {"type": "string"}},
@@ -148,7 +162,7 @@ def _build_tools() -> list[dict]:
                 "properties": {
                     "ref": {
                         "type": "string",
-                        "description": "[[ref]] wikilink stem of the session to load",
+                        "description": "[[ref]] wikilink stem of the session to load — an opaque id, not a title",
                     },
                     "current_session_id": {
                         "type": "string",
@@ -233,7 +247,7 @@ def _format_search_result(r: dict) -> str:
     """Format a search result as a compact single entry.
 
     Output format:
-        [[stem]] date (score: N) (truncated)
+        [[stem]] — title · date (score: N) (truncated)
         tags: tag1, tag2
         first paragraph of body (truncated to _MAX_DISPLAY_CHARS)
 
@@ -242,7 +256,9 @@ def _format_search_result(r: dict) -> str:
     """
     # @ai-generated(solo)
     ref = r.get("ref", "")
+    title = r.get("title", "")
     date = r.get("date", "")
+    modified = r.get("modified", "")
     tags = r.get("tags") or []
     content = r.get("content", "")
     score = r.get("score")
@@ -265,9 +281,17 @@ def _format_search_result(r: dict) -> str:
         kept = kept[:cut] + "…"
         truncated = True
 
+    # The stem is frozen at creation; front-matter title tracks the current summary.
+    stem = ref.strip("[]")
+    when = date
+    if modified:
+        mod_day = modified.split(" ")[0]
+        when = f"{date} (mod {modified})" if date and mod_day != date else modified
+
     header_parts = [p for p in [
         ref,
-        date,
+        f"— {title}" if title and title != stem else "",
+        when,
         f"(score: {score})" if score is not None else "",
         "(truncated)" if truncated else "",
     ] if p]

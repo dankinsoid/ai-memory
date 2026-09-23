@@ -38,7 +38,7 @@ import json
 import os
 import re
 import uuid
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from .tags import (
@@ -171,6 +171,33 @@ def _extract_summary_text(content: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Facts / rules search
 # ---------------------------------------------------------------------------
+
+
+def _search_result(
+    rel_path: str,
+    file_tags: list[str],
+    date_str: str,
+    content: str,
+    mtime: float,
+    title: str,
+) -> dict:
+    """Build one search-result dict shared by all three search backends.
+
+    ``ref`` is an opaque id, not a name: the stem is frozen when the file is
+    created while front-matter ``title`` is rewritten on every update, so the
+    two drift apart. ``modified`` disambiguates the many notes sharing a
+    ``date``, whose resolution is one day.
+    """
+    stem = Path(rel_path).stem
+    return {
+        "ref": f"[[{stem}]]",
+        "path": rel_path,
+        "tags": file_tags,
+        "date": date_str,
+        "modified": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M") if mtime else "",
+        "title": title or stem,
+        "content": content,
+    }
 
 
 def _matches_filters(
@@ -315,11 +342,10 @@ def _query_search(
             continue
 
         candidates.append({
-            "ref": f"[[{Path(h.id).stem}]]",
-            "path": h.id,
-            "tags": file_tags,
-            "date": fm.get("date", ""),
-            "content": content,
+            **_search_result(
+                h.id, file_tags, fm.get("date", ""), content,
+                _file_mtime(file_path), fm.get("title", ""),
+            ),
             "score": round(h.score, 4),
         })
 
@@ -399,7 +425,7 @@ def _sql_search(
     order = "mtime DESC" if sort_by == "modified" else "date DESC, mtime DESC"
 
     sql = (
-        f"SELECT rel_path, tags_json, date FROM files "
+        f"SELECT rel_path, tags_json, date, mtime FROM files "
         f"WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?"
     )
     params.extend([limit, offset])
@@ -408,17 +434,18 @@ def _sql_search(
 
     base = get_base_dir()
     results: list[dict] = []
-    for rel_path, tags_json, date_str in rows:
+    for rel_path, tags_json, date_str, mtime in rows:
         content = _read_content(base / rel_path)
         if content is None:
             continue
-        results.append({
-            "ref": f"[[{Path(rel_path).stem}]]",
-            "path": rel_path,
-            "tags": json.loads(tags_json) if tags_json else [],
-            "date": date_str or "",
-            "content": content,
-        })
+        results.append(_search_result(
+            rel_path,
+            json.loads(tags_json) if tags_json else [],
+            date_str or "",
+            content,
+            mtime or 0.0,
+            parse_front_matter(content).get("title", ""),
+        ))
     return results
 
 
@@ -449,13 +476,13 @@ def _raw_filescan_search(
             continue
 
         rel = str(md_file.relative_to(base))
+        mtime = _file_mtime(md_file)
         candidates.append({
-            "ref": f"[[{Path(rel).stem}]]",
-            "path": rel,
-            "tags": file_tags,
-            "date": fm.get("date", ""),
-            "content": content,
-            "_mtime": _file_mtime(md_file),
+            **_search_result(
+                rel, file_tags, fm.get("date", ""), content,
+                mtime, fm.get("title", ""),
+            ),
+            "_mtime": mtime,
             "_date": file_date,
         })
 
