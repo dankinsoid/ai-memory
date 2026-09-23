@@ -38,6 +38,22 @@ artifact — on paraphrased queries BM25 scores 0.38 against semantic's 0.75, so
 fusion contributes noise rather than the exact-term matching it was expected to
 add.
 
+## Navigational retrieval
+
+`nav.py` covers requests that name a position in time rather than a topic
+("load yesterday's last session"). recall@k does not apply — the answer is one
+file, so the metric is exact match on the resolved ref. An LLM drives the real
+`memory_search` schema and its calls run against the live vault, so the run
+measures schema legibility and result rendering, not just ranking.
+
+Current: **4/5 exact match**, `sort_by` used in 5/5 calls.
+
+The failure exposed a real defect: passing `query` together with `since`/`until`
+applies the date as a *post-filter* over vector hits, so an off-topic query
+empties a narrow date window entirely (0 results at any limit). `sort_by` is
+also ignored whenever `query` is set. Date-scoped semantic search is therefore
+unreliable by construction.
+
 ## Caveats
 
 - Ground truth is LLM-generated, so it measures "can search find the note this
