@@ -177,6 +177,33 @@ Three tiers:
 
 Rules (tagged `rule`) get special treatment — loaded at session start and dynamically injected when relevant.
 
+## Retrieval Quality
+
+How often semantic search puts the right note in the top 5, measured on a real vault of 2848 notes with 398 queries:
+
+| Retriever | recall@1 | recall@5 | recall@10 | MRR |
+|-----------|----------|----------|-----------|-----|
+| Semantic (`text-embedding-3-small`) | 0.65 | **0.86** | 0.89 | 0.73 |
+| BM25 (lexical baseline) | 0.51 | 0.72 | 0.78 | 0.60 |
+
+**Method.** The benchmark indexes exactly what production indexes — corpus building reuses the same functions as `storage.reindex()`. Queries are LLM-generated: for each sampled note the model writes what a developer would type weeks later from faded memory, and that note is the ground truth. Full harness and reproduction steps in [`eval/`](eval/).
+
+**Read the low-leak number, not the headline.** Because queries are derived from the notes, some reuse the original wording. Each query carries a `leak` score — the share of its content words found in the note — and the subset with low leak (n=150) is the honest measure:
+
+| Retriever | recall@5, low-leak queries |
+|-----------|----------------------------|
+| Semantic | **0.75** |
+| BM25 | 0.38 |
+
+The gap is where embeddings earn their cost: on queries phrased by meaning rather than by matching words, lexical search loses half its accuracy while semantic search holds.
+
+**Two more findings from the same run:**
+
+- Failures are retrieval failures, not ranking ones — recall only moves from 0.86 to 0.89 between k=5 and k=10. A note missing from the top 5 is usually missing entirely.
+- The hardcoded `threshold=0.25` discards nothing. The lowest cosine score on a correct note was 0.368, versus a median of 0.562.
+
+**Caveats.** The vault is ~99% session summaries (2832 sessions vs 16 facts), so these numbers describe session retrieval and say little about facts and rules. Ground truth is LLM-generated, so it measures whether search can find the note a query was written from — not user satisfaction.
+
 ## License
 
 MIT
