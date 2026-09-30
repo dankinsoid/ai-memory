@@ -472,7 +472,8 @@ Codex hooks передают stdin JSON с теми же полями что Cla
 - [x] sidecar исключён из индекса и поиска; `memory_read` открывает его по точному stem
 - [x] `/load`: последний compact из sidecar + транскрипт после его маркера (маркер не найден → весь транскрипт)
 - [x] `session-start.py` на `source == compact` перезаписывал `commit_start` — теперь первый коммит сессии сохраняется
-- [ ] Миграция старых .md с инлайновыми саммари (исходные JSONL могут быть удалены)
+- [x] Миграция старых .md с инлайновыми саммари — `scripts/migrate-compacts.py` (из markdown, без trigger/tokens; Facts, уже загрязнённые саммари, не чистятся)
+- [ ] Одна сессия пишется в несколько проектов, если её cwd меняется (`e722500b` лежит в Job, amazing-flutter и scratchpad) — проект надо фиксировать на старте сессии
 - [ ] Codex compaction events
 
 ---
