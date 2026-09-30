@@ -461,6 +461,22 @@ Codex hooks передают stdin JSON с теми же полями что Cla
 
 ---
 
+## Блок 16 — Claude Code compacts в сессиях
+
+**Проблема:** саммари `/compact` и auto-compact попадало в транскрипт как сообщение пользователя (`[!human]`), а в LLM-digest — как `User:`, из-за чего в Facts утекали выводы ассистента.
+
+- [x] `compact_boundary` + `isCompactSummary` → отдельный элемент потока; в транскрипте однострочный маркер с block id `^compact-N`
+- [x] Все саммари по порядку — в sidecar `<stem>.compacts.md`, у каждого ссылка на маркер в транскрипте
+- [x] `/compact` (текст и `<command-name>`-обёртка) не пишется в транскрипт
+- [x] digest пропускает `isCompactSummary`
+- [x] sidecar исключён из индекса и поиска; `memory_read` открывает его по точному stem
+- [ ] `/load`: подавать последний compact + транскрипт после его маркера
+- [ ] `session-start.py` на `source == compact` перезаписывает `commit_start`
+- [ ] Миграция старых .md с инлайновыми саммари (исходные JSONL могут быть удалены)
+- [ ] Codex compaction events
+
+---
+
 ## Открытые вопросы
 
 Закрытые:

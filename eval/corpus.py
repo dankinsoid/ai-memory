@@ -73,7 +73,7 @@ def load_corpus(base: Path) -> list[Record]:
 
     for sessions_dir in storage._all_session_dirs(base):
         for f in sessions_dir.rglob("*.md"):
-            if storage._is_messages_file(f.name):
+            if storage.is_sidecar_file(f.name):
                 continue
             rec = storage._read_session_file(f, base)
             if rec is None:

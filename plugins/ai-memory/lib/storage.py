@@ -537,6 +537,8 @@ def _raw_filescan_search(
     candidates: list[dict] = []
 
     for md_file in base.rglob("*.md"):
+        if is_sidecar_file(md_file.name):
+            continue
         content = _read_content(md_file)
         if content is None:
             continue
@@ -580,16 +582,21 @@ def _raw_filescan_search(
 # ---------------------------------------------------------------------------
 
 
-def _is_messages_file(filename: str) -> bool:
-    """True if this is a session messages file (ends with '.messages.md')."""
-    return filename.endswith(".messages.md")
+COMPACTS_SUFFIX = ".compacts.md"
+_SIDECAR_SUFFIXES = (".messages.md", COMPACTS_SUFFIX)
+
+
+def is_sidecar_file(filename: str) -> bool:
+    """True for files that live next to a session file but are not entries themselves."""
+    return filename.endswith(_SIDECAR_SUFFIXES)
 
 
 def find_file_by_stem(stem: str) -> Path | None:
     """Resolve a wikilink stem to an absolute file path.
 
     Searches base_dir (facts/rules/sessions all live here).
-    Skips .messages.md files. Returns None if no match found.
+    Sidecar files resolve only by their exact stem, never via prefix fallback.
+    Returns None if no match found.
 
     Uses targeted glob patterns (``{stem}.md``) instead of scanning all
     ``.md`` files — far more efficient when thousands of session files exist.
@@ -607,12 +614,11 @@ def find_file_by_stem(stem: str) -> Path | None:
     for root in (get_base_dir(),):
         # Exact match: only files named exactly "{stem}.md"
         for md_file in root.rglob(f"{escaped}.md"):
-            if not _is_messages_file(md_file.name):
-                return md_file
+            return md_file
         # Prefix fallback: "{stem}.{anything}.md" (agent stripped UUID suffix)
         if prefix_match is None:
             for md_file in root.rglob(f"{escaped}.*.md"):
-                if not _is_messages_file(md_file.name):
+                if not is_sidecar_file(md_file.name):
                     prefix_match = md_file
                     break
     return prefix_match
@@ -702,8 +708,7 @@ def search_sessions(
         if not d.exists():
             continue
         for f in d.rglob("*.md"):
-            # Skip messages files — only read summary files
-            if _is_messages_file(f.name):
+            if is_sidecar_file(f.name):
                 continue
             rec = _read_session_file(f, path_root)
             if rec is None:
@@ -762,11 +767,11 @@ def _find_session_file(sessions_parent: Path, session_id: str) -> Path | None:
     sid8 = session_id[:8]
     # Fast path: search recursively for files with the id embedded in the filename
     for f in sessions_parent.rglob(f"*.{sid8}.md"):
-        if not _is_messages_file(f.name):
+        if not is_sidecar_file(f.name):
             return f
     # Slow path: legacy files without id suffix — scan front-matter
     for f in sessions_parent.rglob("*.md"):
-        if _is_messages_file(f.name):
+        if is_sidecar_file(f.name):
             continue
         content = _read_content(f)
         if content and parse_front_matter(content).get("id") == session_id:
@@ -1126,7 +1131,7 @@ def reindex() -> dict:
     # --- Sessions ---
     for sessions_dir in _all_session_dirs(base):
         for f in sessions_dir.rglob("*.md"):
-            if _is_messages_file(f.name):
+            if is_sidecar_file(f.name):
                 continue
             rec = _read_session_file(f, base)
             if rec is None:

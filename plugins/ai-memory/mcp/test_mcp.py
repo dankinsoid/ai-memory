@@ -733,6 +733,97 @@ class TestSearchFactsSemanticQuery(StorageTestBase):
         self.assertEqual(len(results), 1)
 
 
+def _load_session_sync():
+    """Import hooks/scripts/session-sync.py (hyphenated, not a module path)."""
+    import importlib.util
+    path = Path(__file__).parent.parent / "hooks" / "scripts" / "session-sync.py"
+    spec = importlib.util.spec_from_file_location("session_sync", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# @ai-generated(solo)
+class TestCompactSidecar(StorageTestBase):
+    """Compact summaries go to <stem>.compacts.md, not into the transcript."""
+
+    SUMMARY = (
+        "This session is being continued from a previous conversation that ran out "
+        "of context. The summary below covers the earlier portion of the conversation.\n\n"
+        "Summary:\n1. Primary Request: build the thing\n\n"
+        "If you need specific details from before compaction, read the full transcript at: /x.jsonl\n"
+        "Continue the conversation from where it left off without asking the user any further questions."
+    )
+
+    def _entries(self):
+        def msg(role, text, ts, **extra):
+            return {"type": role, "timestamp": ts,
+                    "message": {"role": role, "content": text}, **extra}
+        return [
+            msg("user", "please build the thing", "2026-09-12T10:00:00Z"),
+            msg("assistant", "building", "2026-09-12T10:01:00Z"),
+            msg("user", "/compact", "2026-09-12T10:02:00Z"),
+            {"type": "system", "subtype": "compact_boundary", "timestamp": "2026-09-12T10:03:00Z",
+             "compactMetadata": {"trigger": "manual", "preTokens": 180400}},
+            msg("user", self.SUMMARY, "2026-09-12T10:03:30Z",
+                isCompactSummary=True, isVisibleInTranscriptOnly=True),
+            msg("user", "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n"
+                "<command-args></command-args>", "2026-09-12T10:02:00Z"),
+            msg("user", "now test it against the staging data", "2026-09-12T10:05:00Z"),
+        ]
+
+    def test_stream_replaces_summary_and_command_with_compact_item(self):
+        ss = _load_session_sync()
+        stream = ss.extract_message_stream(self._entries())
+        self.assertEqual(
+            [i["kind"] for i in stream], ["message", "message", "compact", "message"],
+        )
+        compact = stream[2]
+        self.assertEqual(compact["index"], 1)
+        self.assertEqual(compact["trigger"], "manual")
+        self.assertEqual(compact["pre_tokens"], 180400)
+        self.assertEqual(compact["timestamp"], "2026-09-12T10:03:00Z")
+
+    def test_transcript_has_marker_not_summary(self):
+        ss = _load_session_sync()
+        md = ss.format_messages_md(ss.extract_message_stream(self._entries()), stem="S.abc")
+        self.assertNotIn("Primary Request", md)
+        self.assertIn(
+            "*Context compacted · 10:03 · manual · 180K tokens* — "
+            "[[S.abc.compacts#Compact 1|summary]] ^compact-1",
+            md,
+        )
+
+    def test_sidecar_strips_framing_and_points_back(self):
+        ss = _load_session_sync()
+        compacts = [i for i in ss.extract_message_stream(self._entries()) if i["kind"] == "compact"]
+        md = ss.format_compacts_md(compacts, "S.abc")
+        self.assertIn("## Compact 1", md)
+        self.assertIn("2026-09-12 · 10:03 · manual · 180K tokens · resumes at [[S.abc#^compact-1]]", md)
+        self.assertIn("1. Primary Request: build the thing", md)
+        self.assertNotIn("being continued", md)
+        self.assertNotIn("Continue the conversation", md)
+        self.assertNotIn("/x.jsonl", md)
+
+    def test_llm_transcript_skips_summary(self):
+        from lib.digest import extract_llm_transcript
+        text = extract_llm_transcript(self._entries())
+        self.assertNotIn("Primary Request", text)
+        self.assertIn("now test it against the staging data", text)
+
+    def test_sidecar_excluded_from_search_but_resolvable_by_exact_stem(self):
+        stem = "2026-09-12 Build.abc12345"
+        _write_session(self.base, f"sessions/2026-09-12/{stem}.md", "Build", "built it",
+                       session_id="abc12345-0000")
+        sidecar = self.base / "sessions" / "2026-09-12" / f"{stem}.compacts.md"
+        sidecar.write_text("## Compact 1\n\nbuilt it\n", encoding="utf-8")
+
+        hits = storage.search_facts(tags=["session"])
+        self.assertEqual([Path(h["path"]).name for h in hits], [f"{stem}.md"])
+        self.assertEqual(storage.find_file_by_stem(f"{stem}.compacts"), sidecar)
+        self.assertEqual(storage.find_file_by_stem("2026-09-12 Build").name, f"{stem}.md")
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

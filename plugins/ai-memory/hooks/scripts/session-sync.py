@@ -258,12 +258,18 @@ def _extract_refs_from_tool_result(block: dict) -> list[str]:
     return _WIKILINK_RE.findall(text)
 
 
+# Claude Code logs /compact both as the typed text and as a <command-name> envelope.
+_COMPACT_COMMAND_RE = re.compile(r"^(?:/compact(?:\s|$)|<command-name>/compact</command-name>)")
+
+
 def extract_message_stream(entries: list[dict]) -> list[dict]:
     """Extract an ordered stream of text messages and inline memory references.
 
-    Produces items in transcript order. Each item is either:
+    Produces items in transcript order. Each item is one of:
     - {"kind": "message", "role": str, "text": str, "timestamp": str}
     - {"kind": "refs", "refs": list[str]}  (deduplicated wikilinks)
+    - {"kind": "compact", "index": int, "trigger": str | None,
+       "pre_tokens": int | None, "timestamp": str, "summary": str}
 
     Memory refs appear at the position in the stream where the tool_result
     was returned, so they can be rendered inline between messages.
@@ -295,7 +301,13 @@ def extract_message_stream(entries: list[dict]) -> list[dict]:
     # Single pass: emit messages and inline refs in order
     seen_refs: set[str] = set()
     stream: list[dict] = []
+    # Claude Code writes a compact_boundary entry, then the summary as a user message.
+    boundary: dict | None = None
+    compact_count = 0
     for e in entries:
+        if e.get("type") == "system" and e.get("subtype") == "compact_boundary":
+            boundary = e
+            continue
         if e.get("type") not in ("user", "assistant"):
             continue
         if e.get("isMeta"):
@@ -305,6 +317,20 @@ def extract_message_stream(entries: list[dict]) -> list[dict]:
         if not role:
             continue
         content = msg.get("content", "")
+
+        if e.get("isCompactSummary"):
+            compact_count += 1
+            meta = (boundary or {}).get("compactMetadata") or {}
+            stream.append({
+                "kind": "compact",
+                "index": compact_count,
+                "trigger": meta.get("trigger"),
+                "pre_tokens": meta.get("preTokens"),
+                "timestamp": (boundary or e).get("timestamp", ""),
+                "summary": _extract_text(content).strip(),
+            })
+            boundary = None
+            continue
 
         # Check for memory tool_result refs (in user entries carrying tool_result)
         if ai_memory_tool_ids and isinstance(content, list):
@@ -325,6 +351,8 @@ def extract_message_stream(entries: list[dict]) -> list[dict]:
 
         # Emit text message if present
         text = _extract_text(content).strip()
+        if role == "user" and _COMPACT_COMMAND_RE.match(text):
+            continue
         if text:
             stream.append({
                 "kind": "message",
@@ -373,10 +401,32 @@ def _blockquote(text: str) -> str:
     )
 
 
+_TIME_RE = re.compile(r"T(\d{2}:\d{2})")
+
+
+def _compact_meta(item: dict) -> str:
+    """Render ``HH:MM · trigger · NK tokens`` for a compact item, skipping unknown parts."""
+    parts: list[str] = []
+    ts_match = _TIME_RE.search(item.get("timestamp", ""))
+    if ts_match:
+        parts.append(ts_match.group(1))
+    if item.get("trigger"):
+        parts.append(item["trigger"])
+    if isinstance(item.get("pre_tokens"), int):
+        parts.append(f"{round(item['pre_tokens'] / 1000)}K tokens")
+    return " · ".join(parts)
+
+
+def compact_block_id(index: int) -> str:
+    """Obsidian block id of the transcript marker for the given compact."""
+    return f"compact-{index}"
+
+
 def format_messages_md(
     stream: list[dict],
     agent: str | None = None,
     user_name: str | None = None,
+    stem: str | None = None,
 ) -> str:
     """Format a message stream as Obsidian callout-based chat transcript.
 
@@ -390,12 +440,16 @@ def format_messages_md(
     Memory references are appended to the preceding assistant message
     as a ``---`` + *Refs:* line inside the same callout.
 
+    Compacts render as a one-line marker carrying an Obsidian block id; the
+    summary itself lives in the ``<stem>.compacts.md`` sidecar.
+
     In non-Obsidian markdown viewers, callouts degrade to blockquotes —
     readable, just not styled as bubbles.
 
     Args:
         stream: ordered list of items from extract_message_stream
         agent: agent identifier (e.g. 'claude', 'codex'); defaults to 'claude'
+        stem: session file stem, target of compact marker links
 
     Returns:
         Markdown string.
@@ -405,10 +459,33 @@ def format_messages_md(
     lines: list[str] = []
     # Track pending refs to attach to the preceding assistant callout
     pending_refs: list[str] = []
+    last_kind: str | None = None
+
+    def flush_refs() -> None:
+        if not pending_refs or not lines:
+            return
+        refs_str = ", ".join(f"[[{r}]]" for r in pending_refs)
+        if last_kind != "message":
+            # A compact marker is not a callout; refs get their own quote.
+            lines.append("")
+        else:
+            lines.append("> ---")
+        lines.append(f"> *Refs:* {refs_str}")
+        pending_refs.clear()
 
     for item in stream:
         if item["kind"] == "refs":
             pending_refs.extend(item["refs"])
+        elif item["kind"] == "compact":
+            flush_refs()
+            if lines:
+                lines.append("")
+            n = item["index"]
+            meta = _compact_meta(item)
+            label = f"*Context compacted{' · ' + meta if meta else ''}*"
+            link = f" — [[{stem}.compacts#Compact {n}|summary]]" if stem else ""
+            lines.append(f"{label}{link} ^{compact_block_id(n)}")
+            last_kind = "compact"
         elif item["kind"] == "message":
             is_human = item["role"] == "user"
             callout_type = "human" if is_human else agent_callout
@@ -417,34 +494,68 @@ def format_messages_md(
 
             # Attach pending refs to the previous assistant message
             # (refs always follow the assistant turn that triggered them)
-            if pending_refs and lines:
-                refs_str = ", ".join(f"[[{r}]]" for r in pending_refs)
-                lines.append(f"> ---")
-                lines.append(f"> *Refs:* {refs_str}")
-                pending_refs.clear()
+            flush_refs()
 
             if lines:
                 lines.append("")  # blank line between callouts
 
             # Format timestamp as HH:MM for callout title
             ts_label = ""
-            ts = item.get("timestamp", "")
-            if ts:
-                ts_match = re.search(r"T(\d{2}:\d{2})", ts)
-                if ts_match:
-                    ts_label = f" {ts_match.group(1)}"
+            ts_match = _TIME_RE.search(item.get("timestamp", ""))
+            if ts_match:
+                ts_label = f" {ts_match.group(1)}"
 
             lines.append(f"> [!{callout_type}] **{label}**{ts_label}")
             lines.append(">")
             lines.append(_blockquote(text))
+            last_kind = "message"
 
-    # Flush any remaining refs
-    if pending_refs and lines:
-        refs_str = ", ".join(f"[[{r}]]" for r in pending_refs)
-        lines.append(f"> ---")
-        lines.append(f"> *Refs:* {refs_str}")
+    flush_refs()
 
     return "\n".join(lines).strip()
+
+
+# Claude Code framing around the summary: meant for the resumed model, not for a reader.
+_COMPACT_BOILERPLATE_RE = re.compile(
+    r"^(?:This session is being continued from a previous conversation"
+    r"|If you need specific details from before compaction"
+    r"|Continue the conversation from where it left off"
+    r"|Please continue the conversation from where we left)[^\n]*\n?",
+    re.MULTILINE,
+)
+
+
+def format_compacts_md(compacts: list[dict], stem: str) -> str:
+    """Render all compact summaries of a session, oldest first.
+
+    Each entry links to its marker in the session transcript; the transcript
+    after the last marker is everything the model saw verbatim after that compact.
+
+    Args:
+        compacts: stream items with kind == "compact"
+        stem: session file stem
+
+    Returns:
+        Markdown string for the ``<stem>.compacts.md`` sidecar.
+    """
+    lines = [f"Context compactions of [[{stem}]].", ""]
+    for item in compacts:
+        n = item["index"]
+        date_match = re.match(r"\d{4}-\d{2}-\d{2}", item.get("timestamp", ""))
+        meta = " · ".join(p for p in (
+            date_match.group(0) if date_match else "",
+            _compact_meta(item),
+        ) if p)
+        body = _COMPACT_BOILERPLATE_RE.sub("", item["summary"]).strip()
+        lines += [
+            f"## Compact {n}",
+            "",
+            f"{meta + ' · ' if meta else ''}resumes at [[{stem}#^{compact_block_id(n)}]]",
+            "",
+            _neutralize_file_links(body),
+            "",
+        ]
+    return "\n".join(lines).rstrip() + "\n"
 
 
 _TITLE_MIN_CHARS = 20  # skip user messages with less plain text than this
@@ -861,9 +972,17 @@ def main() -> None:
 
     # Append transcript section to the session summary file
     _replace_transcript_section(
-        existing, format_messages_md(stream, agent=agent, user_name=user_name)
+        existing,
+        format_messages_md(stream, agent=agent, user_name=user_name, stem=existing.stem),
     )
     _debug_log("transcript-written", session_id=session_id, existing=str(existing))
+
+    compacts = [item for item in stream if item["kind"] == "compact"]
+    if compacts:
+        existing.with_name(existing.stem + storage.COMPACTS_SUFFIX).write_text(
+            format_compacts_md(compacts, existing.stem), encoding="utf-8",
+        )
+        _debug_log("compacts-written", session_id=session_id, count=len(compacts))
 
     _autocommit_vault()
 

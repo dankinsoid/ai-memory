@@ -258,6 +258,8 @@ def reindex(
     Returns:
         Dict with keys: total, indexed, deleted, unchanged.
     """
+    from .storage import is_sidecar_file
+
     conn = get_connection()
     stats = {"total": 0, "indexed": 0, "deleted": 0, "unchanged": 0}
 
@@ -275,6 +277,8 @@ def reindex(
     _pending = 0
 
     for md_file in base_dir.rglob("*.md"):
+        if is_sidecar_file(md_file.name):
+            continue
         try:
             rel = str(md_file.relative_to(base_dir))
         except ValueError:

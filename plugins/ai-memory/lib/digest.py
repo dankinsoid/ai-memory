@@ -253,6 +253,9 @@ def extract_llm_transcript(entries: list[dict]) -> str:
             continue
         if entry.get("isMeta"):
             continue
+        # Claude-authored recap filed under role=user; facts would treat it as user speech.
+        if entry.get("isCompactSummary"):
+            continue
 
         msg = entry.get("message") or {}
         role = msg.get("role")
