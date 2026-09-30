@@ -115,6 +115,7 @@ LOAD_TOTAL_BUDGET = 5000   # chars — compact + facts + transcript tail when a 
 LOAD_DEEP_BUDGET = 20000   # chars — same, for an explicit memory_load_session call (AI_MEMORY_LOAD_BUDGET overrides)
 LOAD_FACTS_SHARE = 0.1     # fraction of budget reserved for facts (when facts exist)
 LOAD_TAIL_SHARE  = 0.2     # fraction of budget reserved for transcript tail (when tail exists)
+LOAD_LAST_COMPACT_SHARE = 0.4  # max fraction of budget for the last Claude Code compaction summary
 FACTS_CONSOLIDATE_CHARS = 2000  # total chars across all facts before triggering consolidation
 FACTS_CONSOLIDATE_COOLDOWN = 5  # minimum digest calls between consolidations
 

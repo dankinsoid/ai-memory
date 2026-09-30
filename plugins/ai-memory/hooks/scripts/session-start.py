@@ -116,8 +116,12 @@ def _save_git_context(cwd: str, session_id: str) -> None:
     if commit:
         payload["commit_start"] = commit
     try:
-        from lib.db import set_state
-        set_state(f"git-context-{session_id}", json.dumps(payload))
+        from lib.db import get_state, set_state
+        key = f"git-context-{session_id}"
+        # /compact re-fires SessionStart with the same session_id; the first commit wins.
+        if get_state(key):
+            return
+        set_state(key, json.dumps(payload))
     except Exception:
         pass  # non-critical — session works without git context
 

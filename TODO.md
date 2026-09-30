@@ -470,8 +470,8 @@ Codex hooks передают stdin JSON с теми же полями что Cla
 - [x] `/compact` (текст и `<command-name>`-обёртка) не пишется в транскрипт
 - [x] digest пропускает `isCompactSummary`
 - [x] sidecar исключён из индекса и поиска; `memory_read` открывает его по точному stem
-- [ ] `/load`: подавать последний compact + транскрипт после его маркера
-- [ ] `session-start.py` на `source == compact` перезаписывает `commit_start`
+- [x] `/load`: последний compact из sidecar + транскрипт после его маркера (маркер не найден → весь транскрипт)
+- [x] `session-start.py` на `source == compact` перезаписывал `commit_start` — теперь первый коммит сессии сохраняется
 - [ ] Миграция старых .md с инлайновыми саммари (исходные JSONL могут быть удалены)
 - [ ] Codex compaction events
 

@@ -824,6 +824,80 @@ class TestCompactSidecar(StorageTestBase):
         self.assertEqual(storage.find_file_by_stem("2026-09-12 Build").name, f"{stem}.md")
 
 
+# @ai-generated(solo)
+class TestLoadAfterCompact(StorageTestBase):
+    """/load shows the last compaction plus only the messages after its marker."""
+
+    STEM = "2026-09-12 Build.abc12345"
+
+    def _write(self, marker_in_transcript: bool = True):
+        path = _write_session(self.base, f"sessions/2026-09-12/{self.STEM}.md", "Build", "built it",
+                              session_id="abc12345-0000")
+        marker = "*Context compacted · 10:03* ^compact-2" if marker_in_transcript else ""
+        path.write_text(path.read_text() + (
+            "\n---\n\n## Transcript\n\n"
+            "> [!human] **Danil** 09:00\n>\n> before the compaction\n\n"
+            f"{marker}\n\n"
+            "> [!human] **Danil** 10:05\n>\n> after the compaction\n"
+        ), encoding="utf-8")
+        path.with_name(self.STEM + ".compacts.md").write_text(
+            f"Context compactions of [[{self.STEM}]].\n\n"
+            "## Compact 1\n\nold recap\n\n"
+            f"## Compact 2\n\nresumes at [[{self.STEM}#^compact-2]]\n\nSummary:\nnew recap\n",
+            encoding="utf-8",
+        )
+
+    def test_loads_last_compact_and_messages_after_marker(self):
+        from lib.session_loader import load_session_by_ref, format_for_load
+        self._write()
+        sc = load_session_by_ref(self.STEM)
+        self.assertIn("new recap", sc.last_compact)
+        self.assertNotIn("old recap", sc.last_compact)
+        self.assertIn("after the compaction", sc.transcript_tail)
+        self.assertNotIn("before the compaction", sc.transcript_tail)
+
+        out = format_for_load(sc, budget=20000)
+        self.assertLess(out.index("## Last compaction"), out.index("## Messages since last compaction"))
+        self.assertNotIn("full session transcript", out)
+
+    def test_missing_marker_keeps_whole_transcript(self):
+        from lib.session_loader import load_session_by_ref
+        self._write(marker_in_transcript=False)
+        sc = load_session_by_ref(self.STEM)
+        self.assertIn("before the compaction", sc.transcript_tail)
+        self.assertIn("new recap", sc.last_compact)
+
+    def test_last_compact_capped_by_budget_share(self):
+        from lib.session_loader import SessionContent, format_for_load
+        sc = SessionContent(title="t", compact=None, summary=None, session_id="x",
+                            transcript_tail="> tail", last_compact="x" * 10000)
+        out = format_for_load(sc, budget=5000)
+        self.assertIn("…(truncated)", out)
+        self.assertIn("> tail", out)
+        self.assertLessEqual(len(out), 5000 + 300)
+
+
+# @ai-generated(solo)
+class TestGitContextSurvivesCompact(unittest.TestCase):
+    """SessionStart fires again on /compact; commit_start must stay the first one."""
+
+    def test_second_save_keeps_first_commit(self):
+        import importlib.util
+        path = Path(__file__).parent.parent / "hooks" / "scripts" / "session-start.py"
+        spec = importlib.util.spec_from_file_location("session_start", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        state: dict[str, str] = {}
+        heads = iter([("aaa1111", "main"), ("bbb2222", "main")])
+        with unittest.mock.patch("lib.db.get_state", side_effect=state.get), \
+             unittest.mock.patch("lib.db.set_state", side_effect=state.__setitem__), \
+             unittest.mock.patch.object(mod, "_git_head_and_branch", side_effect=lambda _: next(heads)):
+            mod._save_git_context("/repo", "sid")
+            mod._save_git_context("/repo", "sid")
+        self.assertIn("aaa1111", state["git-context-sid"])
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
